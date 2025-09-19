@@ -1,0 +1,128 @@
+// SPDX-License-Identifier: LGPL-3.0-only
+pragma solidity ^0.8.30;
+
+import {ERC7821} from "solady/src/accounts/ERC7821.sol";
+
+/// @notice Opinioned batch executor.
+/// @author LIFI
+///
+/// @dev This contract can be inherited to be insertable into fully-fledged smart accounts.
+abstract contract ERC7821LIFI is ERC7821 {
+    error TooManyCalls();
+    error InvalidSignature();
+
+    event CallReverted(bytes32 extraData, bytes revertData);
+    
+    // keccak256(bytes("CallReverted(bytes32,bytes)"));
+    bytes32 constant _CALL_REVERTED_EVENT_SIGNATURE = 0xa5ef9b4d75ffdec5840bf221dba12f4a744e8b60aeb23da25fbd8c487a97924d;
+
+    // Validation function that validate opData for a specific call.
+    function _validateOpData(Call[] calldata calls, bytes calldata opData) internal virtual returns (bool);
+
+    function _executionModeRevert(bytes32 mode) internal view virtual returns (bytes32 flag) {
+        assembly ("memory-safe") {
+            // shr: Get rid of the 30 right bytes
+            // shl: Get rid of the 1 + 30 left bytes.
+            // revertFlag is in leftmost byte.
+            flag := shr(shl(31, 8), shr(mul(30, 8), mode))
+        }
+    }
+
+    /// @dev
+    /// Unsupported: 0: invalid mode, 1: no `opData` support,
+    /// Supported: 2: with `opData` support, 3: batch of batches
+    function _executionModeId(bytes32 mode) internal view virtual override returns (uint256 id) {
+        // Only supports atomic batched executions.
+        // For the encoding scheme, see: https://eips.ethereum.org/EIPS/eip-7579
+        // Bytes Layout:
+        // - [0]      ( 1 byte )  `0x01` for batch call.
+        // - [1]      ( 1 byte )  `0x00` for revert on any failure.
+        // - [2..5]   ( 4 bytes)  Reserved by ERC7579 for future standardization.
+        // - [6..9]   ( 4 bytes)  `0x00000000` or `0x78210001` or `0x78210002`.
+        // - [10..31] (22 bytes)  Unused. Free for use.
+        assembly ("memory-safe") {
+            let m := and(shr(mul(22, 8), mode), 0xffff00000000ffffffff)
+            id := eq(m, 0x01000000000000000000) // 1.
+            id := or(shl(1, eq(m, 0x01000000000078210001)), id) // 2.
+            id := or(mul(3, eq(m, 0x01000000000078210002)), id) // 3.
+            id := or(shl(1, eq(m, 0x01010000000000000000)), id) // 1.
+            id := or(shl(1, eq(m, 0x01010000000078210001)), id) // 2.
+        }
+    }
+
+    // extraData has the following format:
+    // [0] revert flag
+    // [1 .. 22] Nonce extract
+    // [23 .. 31] Index
+
+    /// @dev Executes the calls.
+    /// Reverts and bubbles up error if any call fails.
+    /// The `mode` and `executionData` are passed along in case there's a need to use them.
+    function _execute(bytes32 mode, bytes calldata executionData, Call[] calldata calls, bytes calldata opData)
+        internal
+        virtual
+        override
+    {
+        // Silence compiler warning on unused variables.
+        executionData = executionData;
+        bytes32 extraData = _executionModeRevert(mode);
+        // Add the last 21 bytes of the first words of opData to extraData
+        // if it exists.
+        if (opData.length != 0) {
+            assembly ("memory-safe") {
+                let word := calldataload(opData.offset)
+                extraData := add(extraData, shr(8, shl(mul(11, 8), word)))
+            }
+        }
+        if (msg.sender == address(this)) {
+            return _execute(calls, extraData);
+        }
+        if (!_validateOpData(calls, opData)) revert InvalidSignature();
+
+        return _execute(calls, extraData);
+    }
+
+    /// @dev Executes the calls.
+    /// Reverts and bubbles up error if any call fails.
+    /// `extraData` can be any supplementary data (e.g. a memory pointer, some hash).
+    function _execute(Call[] calldata calls, bytes32 extraData) internal virtual override {
+        unchecked {
+            uint256 i;
+            if (calls.length == uint256(0)) return;
+            if (calls.length > type(uint64).max) revert TooManyCalls();
+            do {
+                (address to, uint256 value, bytes calldata data) = _get(calls, i);
+                bytes32 executeExtraData;
+                assembly ("memory-safe") {
+                    executeExtraData := add(extraData, i)
+                }
+                _execute(to, value, data, executeExtraData);
+            } while (++i != calls.length);
+        }
+    }
+
+    /// @dev Executes the call.
+    /// Reverts and bubbles up error if any call fails.
+    /// `extraData` can be any supplementary data (e.g. a memory pointer, some hash).
+    function _execute(address to, uint256 value, bytes calldata data, bytes32 extraData) internal virtual override {
+        assembly ("memory-safe") {
+            let m := mload(0x40) // Grab the free memory pointer.
+            calldatacopy(m, data.offset, data.length)
+            let success := call(gas(), to, value, m, data.length, codesize(), 0x00)
+            if iszero(success) {
+
+                // Emit CallReverted(bytes32 extraData, bytes revertData) event.
+                mstore(m, extraData)
+                mstore(add(m, 0x20), 0x40)
+                mstore(add(m, 0x40), add(mul(div(returndatasize(), 32), 32), 32))
+                returndatacopy(add(m, 0x60), 0x00, returndatasize())
+                log1(m, add(mul(div(returndatasize(), 32), 32), 128), _CALL_REVERTED_EVENT_SIGNATURE)
+
+                if iszero(shr(255, extraData)) {
+                    // Bubble up the revert if the call reverts and the skip revert flag has not been set
+                    revert(add(m, 0x60), returndatasize())
+                }
+            }
+        }
+    }
+}
