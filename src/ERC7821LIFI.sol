@@ -113,9 +113,9 @@ abstract contract ERC7821LIFI is ERC7821 {
                 // Emit CallReverted(bytes32 extraData, bytes revertData) event.
                 mstore(m, extraData)
                 mstore(add(m, 0x20), 0x40)
-                mstore(add(m, 0x40), add(mul(div(returndatasize(), 32), 32), 32))
+                mstore(add(m, 0x40), mul(div(add(returndatasize(), 31), 32), 32))
                 returndatacopy(add(m, 0x60), 0x00, returndatasize())
-                log1(m, add(mul(div(returndatasize(), 32), 32), 128), _CALL_REVERTED_EVENT_SIGNATURE)
+                log1(m, mul(div(add(returndatasize(), 31), 32), 128), _CALL_REVERTED_EVENT_SIGNATURE)
 
                 if iszero(shr(255, extraData)) {
                     // Bubble up the revert if the call reverts and the skip revert flag has not been set
