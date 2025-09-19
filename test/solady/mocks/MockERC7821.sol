@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.4;
 
-import {ERC7821LIFI} from "../../src/ERC7821LIFI.sol";
+import {ERC7821LIFI} from "../../../src/ERC7821LIFI.sol";
 import {Brutalizer} from "solady/test/utils/Brutalizer.sol";
 
 /// @dev WARNING! This mock is strictly intended for testing purposes only.

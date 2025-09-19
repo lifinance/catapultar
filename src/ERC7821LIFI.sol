@@ -12,7 +12,7 @@ abstract contract ERC7821LIFI is ERC7821 {
     error InvalidSignature();
 
     event CallReverted(bytes32 extraData, bytes revertData);
-    
+
     // keccak256(bytes("CallReverted(bytes32,bytes)"));
     bytes32 constant _CALL_REVERTED_EVENT_SIGNATURE = 0xa5ef9b4d75ffdec5840bf221dba12f4a744e8b60aeb23da25fbd8c487a97924d;
 
@@ -110,7 +110,6 @@ abstract contract ERC7821LIFI is ERC7821 {
             calldatacopy(m, data.offset, data.length)
             let success := call(gas(), to, value, m, data.length, codesize(), 0x00)
             if iszero(success) {
-
                 // Emit CallReverted(bytes32 extraData, bytes revertData) event.
                 mstore(m, extraData)
                 mstore(add(m, 0x20), 0x40)
