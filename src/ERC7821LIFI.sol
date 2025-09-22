@@ -11,7 +11,7 @@ abstract contract ERC7821LIFI is ERC7821 {
     error TooManyCalls();
     error InvalidSignature();
 
-    event CallReverted(bytes32 extraData, bytes revertData);
+    // event CallReverted(bytes32 extraData, bytes revertData);
 
     // keccak256(bytes("CallReverted(bytes32,bytes)"));
     bytes32 constant _CALL_REVERTED_EVENT_SIGNATURE = 0xa5ef9b4d75ffdec5840bf221dba12f4a744e8b60aeb23da25fbd8c487a97924d;
@@ -24,7 +24,7 @@ abstract contract ERC7821LIFI is ERC7821 {
             // shr: Get rid of the 30 right bytes
             // shl: Get rid of the 1 + 30 left bytes.
             // revertFlag is in leftmost byte.
-            flag := shr(shl(31, 8), shr(mul(30, 8), mode))
+            flag := shl(mul(31, 8), shr(mul(30, 8), mode))
         }
     }
 
@@ -71,7 +71,7 @@ abstract contract ERC7821LIFI is ERC7821 {
         if (opData.length != 0) {
             assembly ("memory-safe") {
                 let word := calldataload(opData.offset)
-                extraData := add(extraData, shr(8, shl(mul(11, 8), word)))
+                extraData := or(extraData, shr(8, shl(mul(11, 8), word)))
             }
         }
         if (msg.sender == address(this)) {
@@ -94,7 +94,7 @@ abstract contract ERC7821LIFI is ERC7821 {
                 (address to, uint256 value, bytes calldata data) = _get(calls, i);
                 bytes32 executeExtraData;
                 assembly ("memory-safe") {
-                    executeExtraData := add(extraData, i)
+                    executeExtraData := or(extraData, i)
                 }
                 _execute(to, value, data, executeExtraData);
             } while (++i != calls.length);
@@ -110,18 +110,26 @@ abstract contract ERC7821LIFI is ERC7821 {
             calldatacopy(m, data.offset, data.length)
             let success := call(gas(), to, value, m, data.length, codesize(), 0x00)
             if iszero(success) {
+                let rdsize := returndatasize()
                 // Emit CallReverted(bytes32 extraData, bytes revertData) event.
                 mstore(m, extraData)
                 mstore(add(m, 0x20), 0x40)
-                mstore(add(m, 0x40), mul(div(add(returndatasize(), 31), 32), 32))
-                returndatacopy(add(m, 0x60), 0x00, returndatasize())
-                log1(m, mul(div(add(returndatasize(), 31), 32), 128), _CALL_REVERTED_EVENT_SIGNATURE)
+                // Compute the padded length for ABI alignment.
+                let sizeAfterPad := and(add(rdsize, 31), not(31))
+                mstore(add(m, 0x40), add(mul(sub(sizeAfterPad, rdsize), gt(32, rdsize)), rdsize))
+                // Clear out potential overflowing returndata.
+                mstore(add(add(m, 0x40), sub(sizeAfterPad, 32)), 0)
+                returndatacopy(add(m, 0x60), 0x00, rdsize)
+ 
+                log1(m, add(0x60, sizeAfterPad), _CALL_REVERTED_EVENT_SIGNATURE)
 
-                if iszero(shr(255, extraData)) {
+                if iszero(shr(mul(31, 8), extraData)) {
                     // Bubble up the revert if the call reverts and the skip revert flag has not been set
-                    revert(add(m, 0x60), returndatasize())
+                    revert(add(m, 0x60), rdsize)
                 }
             }
         }
     }
 }
+
+

@@ -48,11 +48,12 @@ contract ExecutorLIFI is ERC7821LIFI, EIP712, BitmapNonce {
         buffer.free();
     }
 
-    function _validateOpData(Call[] calldata calls, bytes calldata opData) internal view override returns (bool) {
+    function _validateOpData(Call[] calldata calls, bytes calldata opData) internal override returns (bool) {
         uint256 nonce;
         assembly ("memory-safe") {
             nonce := calldataload(opData.offset)
         }
+        _useUnorderedNonce(nonce);
         bytes32 digest = _hashTypedData(typehash(nonce, calls));
 
         return SignatureCheckerLib.isValidSignatureNowCalldata(OWNER, digest, opData[0x20:]);
