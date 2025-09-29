@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.4;
 
-import {Test, Vm} from "forge-std/Test.sol";
+import {Test} from "forge-std/Test.sol";
 
 import {ERC7821} from "solady/src/accounts/ERC7821.sol";
 import {MockERC7821LIFI} from "./MockERC7821LIFI.sol";
@@ -25,9 +25,7 @@ contract ERC7821LIFITest is Test {
         revert CustomError(m);
     }
 
-    function returnsBytes(
-        bytes memory b
-    ) external payable returns (bytes memory) {
+    function returnsBytes(bytes memory b) external payable returns (bytes memory) {
         return b;
     }
 
@@ -37,18 +35,9 @@ contract ERC7821LIFITest is Test {
 
     function testERC7821LIFI_executionModeRevert(bytes32 mode) external view {
         bytes32 result = mbe.executionModeRevert(mode);
-        bytes32 toSelect = mode &
-            bytes32(
-                0x00ff000000000000000000000000000000000000000000000000000000000000
-            );
+        bytes32 toSelect = mode & bytes32(0x00ff000000000000000000000000000000000000000000000000000000000000);
         if (uint256(toSelect) > 0) vm.assertEq(toSelect << 8, result);
-        else
-            vm.assertEq(
-                result,
-                bytes32(
-                    0x0000000000000000000000000000000000000000000000000000000000000000
-                )
-            );
+        else vm.assertEq(result, bytes32(0x0000000000000000000000000000000000000000000000000000000000000000));
     }
 
     struct RandomBytes {
@@ -56,40 +45,32 @@ contract ERC7821LIFITest is Test {
         bool fail;
     }
 
-    function testERC7821LIFI_nonces(
-        uint256 nonce,
-        RandomBytes[] calldata randomBytes
-    ) public {
-
+    function testERC7821LIFI_nonces(uint256 nonce, RandomBytes[] calldata randomBytes) public {
         ERC7821.Call[] memory calls = new ERC7821.Call[](randomBytes.length);
         for (uint256 i; i < randomBytes.length; ++i) {
             calls[i] = ERC7821.Call({
                 to: address(this),
                 data: abi.encodeWithSignature(
-                    randomBytes[i].fail
-                        ? "revertsWithCustomError(bytes)"
-                        : "returnsBytes(bytes)",
-                    randomBytes[i].payload
+                    randomBytes[i].fail ? "revertsWithCustomError(bytes)" : "returnsBytes(bytes)", randomBytes[i].payload
                 ),
                 value: 0
             });
         }
 
         // vm.recordLogs();
-        uint256 extraDataU = uint256(bytes32(bytes1(0x01))) +
-            uint256(uint240(nonce) << 80);
+        uint256 extraDataU = uint256(bytes32(bytes1(0x01))) + uint256(uint240(nonce) << 80);
         for (uint256 i; i < randomBytes.length; ++i) {
             if (randomBytes[i].fail) {
                 // TODO: figure out what the issue is.
                 // vm.expectEmit(true, true, true, true);
                 emit CallReverted(
-                    bytes32(extraDataU + i),
-                    abi.encodeWithSelector(CustomError.selector, (randomBytes[i].payload))
+                    bytes32(extraDataU + i), abi.encodeWithSelector(CustomError.selector, (randomBytes[i].payload))
                 );
             }
         }
 
         bytes memory executionData = abi.encode(calls, abi.encode(nonce));
+        mbe.setValidCalldata(abi.encode(nonce));
 
         vm.prank(address(mbe));
         mbe.execute(bytes10(0x01010000000078210001), executionData);
@@ -102,9 +83,7 @@ contract ERC7821LIFITest is Test {
         // }
     }
 
-    function _totalValue(
-        ERC7821.Call[] memory calls
-    ) internal pure returns (uint256 result) {
+    function _totalValue(ERC7821.Call[] memory calls) internal pure returns (uint256 result) {
         unchecked {
             for (uint256 i; i < calls.length; ++i) {
                 result += calls[i].value;

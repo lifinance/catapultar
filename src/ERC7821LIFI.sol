@@ -10,6 +10,7 @@ import {ERC7821} from "solady/src/accounts/ERC7821.sol";
 abstract contract ERC7821LIFI is ERC7821 {
     error TooManyCalls();
     error InvalidSignature();
+    error OpDataTooSmall();
 
     // event CallReverted(bytes32 extraData, bytes revertData);
 
@@ -17,7 +18,10 @@ abstract contract ERC7821LIFI is ERC7821 {
     bytes32 constant _CALL_REVERTED_EVENT_SIGNATURE = 0xa5ef9b4d75ffdec5840bf221dba12f4a744e8b60aeb23da25fbd8c487a97924d;
 
     // Validation function that validate opData for a specific call.
-    function _validateOpData(Call[] calldata calls, bytes calldata opData) internal virtual returns (bool);
+    function _validateOpData(bytes32 mode, Call[] calldata calls, bytes calldata opData)
+        internal
+        virtual
+        returns (bool);
 
     function _executionModeRevert(bytes32 mode) internal view virtual returns (bytes32 flag) {
         assembly ("memory-safe") {
@@ -28,9 +32,11 @@ abstract contract ERC7821LIFI is ERC7821 {
         }
     }
 
-    /// @dev
-    /// Unsupported: 0: invalid mode, 1: no `opData` support,
-    /// Supported: 2: with `opData` support, 3: batch of batches
+    /**
+     * @dev
+     * Unsupported: 0: invalid mode, 1: no `opData` support,
+     * Supported: 2: with `opData` support, 3: batch of batches
+     */
     function _executionModeId(bytes32 mode) internal view virtual override returns (uint256 id) {
         // Only supports atomic batched executions.
         // For the encoding scheme, see: https://eips.ethereum.org/EIPS/eip-7579
@@ -42,11 +48,9 @@ abstract contract ERC7821LIFI is ERC7821 {
         // - [10..31] (22 bytes)  Unused. Free for use.
         assembly ("memory-safe") {
             let m := and(shr(mul(22, 8), mode), 0xffff00000000ffffffff)
-            id := eq(m, 0x01000000000000000000) // 1.
             id := or(shl(1, eq(m, 0x01000000000078210001)), id) // 2.
-            id := or(mul(3, eq(m, 0x01000000000078210002)), id) // 3.
-            id := or(shl(1, eq(m, 0x01010000000000000000)), id) // 1.
             id := or(shl(1, eq(m, 0x01010000000078210001)), id) // 2.
+            id := or(mul(3, eq(m, 0x01000000000078210002)), id) // 3.
         }
     }
 
@@ -58,26 +62,21 @@ abstract contract ERC7821LIFI is ERC7821 {
     /// @dev Executes the calls.
     /// Reverts and bubbles up error if any call fails.
     /// The `mode` and `executionData` are passed along in case there's a need to use them.
-    function _execute(bytes32 mode, bytes calldata executionData, Call[] calldata calls, bytes calldata opData)
+    function _execute(bytes32 mode, bytes calldata, Call[] calldata calls, bytes calldata opData)
         internal
         virtual
         override
     {
-        // Silence compiler warning on unused variables.
-        executionData = executionData;
+        if (opData.length < 32) revert OpDataTooSmall();
+        // Validate the opData
+        if (!_validateOpData(mode, calls, opData)) revert InvalidSignature();
+
         bytes32 extraData = _executionModeRevert(mode);
         // Add the last 21 bytes of the first words of opData to extraData
-        // if it exists.
-        if (opData.length != 0) {
-            assembly ("memory-safe") {
-                let word := calldataload(opData.offset)
-                extraData := or(extraData, shr(8, shl(mul(11, 8), word)))
-            }
+        assembly ("memory-safe") {
+            let word := calldataload(opData.offset)
+            extraData := or(extraData, shr(8, shl(mul(11, 8), word)))
         }
-        if (msg.sender == address(this)) {
-            return _execute(calls, extraData);
-        }
-        if (!_validateOpData(calls, opData)) revert InvalidSignature();
 
         return _execute(calls, extraData);
     }
@@ -114,13 +113,27 @@ abstract contract ERC7821LIFI is ERC7821 {
                 // Emit CallReverted(bytes32 extraData, bytes revertData) event.
                 mstore(m, extraData)
                 mstore(add(m, 0x20), 0x40)
-                // Compute the padded length for ABI alignment.
+
+                // Compute the padded length for ABI alignment. (rdsize + rdsize % 32)
                 let sizeAfterPad := and(add(rdsize, 31), not(31))
-                mstore(add(m, 0x40), add(mul(sub(sizeAfterPad, rdsize), gt(32, rdsize)), rdsize))
+
                 // Clear out potential overflowing returndata.
                 mstore(add(add(m, 0x40), sub(sizeAfterPad, 32)), 0)
+
+                mstore(
+                    add(m, 0x40),
+                    add( // returns sizeAfterPad if 32 > rdsize otherwise rdsize
+                        mul( // returns rdsize % 32 if 32 > rdsize otherwise 0
+                            sub(sizeAfterPad, rdsize), // rdsize % 32
+                            gt(32, rdsize) // 1 if 32 > rdsize otherwise 0
+                        ),
+                        rdsize
+                    )
+                )
+
+                // Copy the returndata into place
                 returndatacopy(add(m, 0x60), 0x00, rdsize)
- 
+
                 log1(m, add(0x60, sizeAfterPad), _CALL_REVERTED_EVENT_SIGNATURE)
 
                 if iszero(shr(mul(31, 8), extraData)) {
@@ -131,5 +144,3 @@ abstract contract ERC7821LIFI is ERC7821 {
         }
     }
 }
-
-

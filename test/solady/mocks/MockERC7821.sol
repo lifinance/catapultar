@@ -13,7 +13,12 @@ contract MockERC7821 is ERC7821LIFI, Brutalizer {
 
     error Unauthorized();
 
-    function _validateOpData(ERC7821LIFI.Call[] calldata, bytes calldata) internal pure override returns (bool) {
+    function _validateOpData(bytes32, ERC7821LIFI.Call[] calldata, bytes calldata)
+        internal
+        pure
+        override
+        returns (bool)
+    {
         return true;
     }
 

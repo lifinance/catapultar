@@ -19,7 +19,7 @@ contract MockERC7821LIFI is ERC7821LIFI, Brutalizer {
         return _executionModeId(mode);
     }
 
-    function _validateOpData(ERC7821LIFI.Call[] calldata, bytes calldata opData)
+    function _validateOpData(bytes32, ERC7821LIFI.Call[] calldata, bytes calldata opData)
         internal
         view
         override
