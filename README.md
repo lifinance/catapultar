@@ -64,3 +64,15 @@ $ forge --help
 $ anvil --help
 $ cast --help
 ```
+
+## License Notice
+
+This project is licensed under the **[GNU Lesser General Public License v3.0 only (LGPL-3.0-only)](/LICENSE)**.
+
+It also uses the following third-party libraries:
+
+- **[Solady](https://github.com/Vectorized/solady)** – Licensed under the [MIT License](https://opensource.org/licenses/MIT)
+
+Each library is included under the terms of its respective license. Copies of the license texts can be found in their source files or original repositories.
+
+When distributing this project, please ensure that all relevant license notices are preserved in accordance with their terms.

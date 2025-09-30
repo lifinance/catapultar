@@ -15,8 +15,6 @@ import { BitmapNonce } from "./BitmapNonce.sol";
 import { ERC7821LIFI } from "./ERC7821LIFI.sol";
 import { LibCalls } from "./LibCalls.sol";
 
-import { console } from "forge-std/console.sol";
-
 /**
  * @title LI.FI Executor
  * @author LIFI
@@ -46,6 +44,7 @@ import { console } from "forge-std/console.sol";
  */
 contract ExecutorLIFI is ERC7821LIFI, EIP712, BitmapNonce, Ownable, Initializable, UUPSUpgradeable {
     error NotUpgradeable();
+    error CannotBeUpgradeable();
     /**
      * @dev Determines whether pre-configured calls are allowed.
      * The intended use-case is to save gas if the functionality is not needed.
@@ -60,6 +59,18 @@ contract ExecutorLIFI is ERC7821LIFI, EIP712, BitmapNonce, Ownable, Initializabl
         _disableInitializers();
     }
 
+    function DOMAIN_SEPARATOR() external view returns (bytes32) {
+        return _domainSeparator();
+    }
+
+    /**
+     * @dev While the name and version won't change, when used in a proxy pattern, returning true leads to a shorter
+     * path for the domain separator.
+     */
+    function _domainNameAndVersionMayChange() internal pure override returns (bool result) {
+        return true;
+    }
+
     /**
      * @dev If ALLOW_ONE_TIME_CALL is true and the contract is being cloned through a upgradable contract, the function
      * will revert.
@@ -68,7 +79,24 @@ contract ExecutorLIFI is ERC7821LIFI, EIP712, BitmapNonce, Ownable, Initializabl
         address owner
     ) external initializer {
         _initializeOwner(owner);
-        if (ALLOW_ONE_TIME_CALL && _upgradable()) revert NotUpgradeable();
+        if (ALLOW_ONE_TIME_CALL && !_notUpgradable()) revert CannotBeUpgradeable();
+    }
+
+    /**
+     * @notice ERC1271 for signing messages on behalf of this contract.
+     * @dev This contract does NOT implement replay protection for signatures. Any data signed by this contract will be
+     * valid for other contracts with the same owner.
+     * @param hash of data that has been signed and to check attestation for.
+     * @param signature Bytes that represents the signature of the signed message.
+     * @return result 0x1626ba7e if true or 0xffffffff is invalid.
+     */
+    function isValidSignature(bytes32 hash, bytes calldata signature) public view virtual returns (bytes4 result) {
+        bool success = SignatureCheckerLib.isValidSignatureNowCalldata(owner(), hash, signature);
+        assembly {
+            // `success ? bytes4(keccak256("isValidSignature(bytes32,bytes)")) : 0xffffffff`.
+            // We use `0xffffffff` for invalid, in convention with the reference implementation.
+            result := shl(224, or(0x1626ba7e, sub(0, iszero(success))))
+        }
     }
 
     // --- Proxy / Clone Helpers --- //
@@ -88,23 +116,20 @@ contract ExecutorLIFI is ERC7821LIFI, EIP712, BitmapNonce, Ownable, Initializabl
     }
 
     /**
-     * @notice Returns whether the contract has been cloned as a upgradable proxy.
-     * @dev This function only returns true if the code has been deployed using LibClone.deployERC1967. There may be
-     * situations where the contract is technically upgradable but this contract returns false.
+     * @notice Returns whether the contract has any storage set in the ERC1967 implementation slot.
+     * @dev It is possible for a non-upgradable contract to return false if the storage slot is overwritten to be 0.
+     * Likewise, for an upgradable contract that does not use the _ERC1967_IMPLEMENTATION_SLOT it may return true.
      */
-    function _upgradable() internal view returns (bool) {
-        address implementation = LibClone.implementationOf(address(this));
-        return address(this).codehash == LibClone.initCodeHashERC1967(implementation);
+    function _notUpgradable() internal view returns (bool up) {
+        bytes32 implementation;
+        assembly ("memory-safe") {
+            implementation := sload(_ERC1967_IMPLEMENTATION_SLOT)
+            up := eq(implementation, 0)
+        }
     }
 
-    /**
-     * @dev Returns the storage slot used by the implementation,
-     *  as specified in [ERC1822](https://eips.ethereum.org/EIPS/eip-1822).
-     *
-     * If the contract has not been deployed as an upgradable contract, returns 0.
-     */
-    function proxiableUUID() public view override notDelegated returns (bytes32) {
-        return _upgradable() ? _ERC1967_IMPLEMENTATION_SLOT : bytes32(0);
+    function upgradable() external view returns (bool up) {
+        return !_notUpgradable();
     }
 
     /**
@@ -115,7 +140,7 @@ contract ExecutorLIFI is ERC7821LIFI, EIP712, BitmapNonce, Ownable, Initializabl
     function _authorizeUpgrade(
         address
     ) internal view override onlyOwner {
-        if (!_upgradable()) revert NotUpgradeable();
+        if (_notUpgradable()) revert NotUpgradeable();
     }
 
     // --- Call Validation Logic --- //
@@ -135,8 +160,8 @@ contract ExecutorLIFI is ERC7821LIFI, EIP712, BitmapNonce, Ownable, Initializabl
             nonce := calldataload(opData.offset)
         }
         _useUnorderedNonce(nonce);
-        // If there are only 32 bytes of opdata, there is no signature. The simplest case is if we called ourself in a
-        // batch.
+        // If there are only 32 bytes of opdata, there is no signature.
+        // The simplest case is if we called ourself in a batch.
         if (opData.length == 32) if (address(this) == msg.sender) return true;
 
         bytes32 callTypeHash = LibCalls.typehash(nonce, mode, calls);
