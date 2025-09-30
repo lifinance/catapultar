@@ -12,8 +12,6 @@ import { ExecutorLIFI } from "./ExecutorLIFI.sol";
  * @notice Allows deploying proxies (upgradable and not) in front of LI.FI Executors.
  */
 contract ExecutorProxyFactory {
-    error OwnerNotContainedInSalt(address owner, bytes32 salt);
-
     address public immutable EXECUTOR_NO_EMBEDDED_CALLS;
     address public immutable EXECUTOR_EMBEDDED_CALLS;
 

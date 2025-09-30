@@ -37,7 +37,7 @@ library LibCalls {
         }
         // Get typehash of struct Calls
         messageHash = CALLS_TYPE_HASH.hash(bytes32(nonce), mode, buffer.hash());
-        // Destory buffer
+        // Destroy buffer
         buffer.free();
     }
 }

@@ -25,7 +25,7 @@ import { console } from "forge-std/console.sol";
  * If provided, each call in a batch will be tried individually and the contract emits a event with the revert data.
  *
  * Intended use case is:
- * - 0x01000000000078210001: Exeucting a set of conditional trasactions.
+ * - 0x01000000000078210001: Executing a set of conditional trasactions.
  *         If 1 transaction in a set fails, the entire set should fail. This can allow for retrying the transaction at a
  * later time since the nonce is not spent.
  * - 0x01010000000078210001: Executing a set of individual transactions.
@@ -34,7 +34,7 @@ import { console } from "forge-std/console.sol";
  * conditional transactions.
  *         Each 0x01000000000078210001 batch can be retried in the future if it fails with each 0x01010000000078210001
  * only being executable once. A batch executor can schedule a set of transaction to be executed. The entire set should
- * be executed individually (0x01010000000078210001) but each sub-batch or transaction needs to be exeucted
+ * be executed individually (0x01010000000078210001) but each sub-batch or transaction needs to be executed
  * conditionally (0x01000000000078210001).
  *
  * Additionally, as an account it supports initialising a call that anyone can make.
@@ -74,9 +74,9 @@ contract ExecutorLIFI is ERC7821LIFI, EIP712, BitmapNonce, Ownable, Initializabl
     // --- Proxy / Clone Helpers --- //
 
     /**
-     * @notice Returns immutable calldata attatched to a proxy.
+     * @notice Returns immutable calldata attached to a proxy.
      * @dev This function must only be called from a proxy deployed with LibClone.createDeterministicClone.
-     * @return bytes32 Embedded call as the first 32 bytes of the immutable args attatched to the proxy.
+     * @return bytes32 Embedded call as the first 32 bytes of the immutable args attached to the proxy.
      */
     function _embeddedCall() internal view returns (bytes32) {
         return bytes32(LibClone.argsOnClone(address(this), 0, 32));
