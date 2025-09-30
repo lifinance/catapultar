@@ -2,18 +2,12 @@
 pragma solidity ^0.8.30;
 
 /// @author Uniswap (Permit2)
-contract BitmapNonce {
+abstract contract BitmapNonce {
     error InvalidNonce();
 
     event UnorderedNonceInvalidation(uint256 word, uint256 mask);
 
     mapping(uint256 => uint256) public nonceBitmap;
-
-    function invalidateUnorderedNonces(uint256 wordPos, uint256 mask) external {
-        nonceBitmap[wordPos] |= mask;
-
-        emit UnorderedNonceInvalidation(wordPos, mask);
-    }
 
     /// @notice Returns the index of the bitmap and the bit position within the bitmap. Used for unordered nonces
     /// @param nonce The nonce to get the associated word and bit positions

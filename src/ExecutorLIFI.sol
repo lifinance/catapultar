@@ -24,38 +24,40 @@ import { LibCalls } from "./LibCalls.sol";
  *
  * Intended use case is:
  * - 0x01000000000078210001: Executing a set of conditional trasactions.
- *         If 1 transaction in a set fails, the entire set should fail. This can allow for retrying the transaction at a
- * later time since the nonce is not spent.
+ * If 1 transaction in a set fails, the entire set should fail. This can allow for retrying the transaction at a later
+ * time since the nonce is not spent.
+ *
  * - 0x01010000000078210001: Executing a set of individual transactions.
- *         If 1 or more transactions in a set fails, the remaining transactions in the set should be executed.
+ * If 1 or more transactions in a set fails, the remaining transactions in the set should be executed.
+ *
  * - 0x01000000000078210001 inside 0x01010000000078210001: Executing a large set of individual transactions containing
  * conditional transactions.
- *         Each 0x01000000000078210001 batch can be retried in the future if it fails with each 0x01010000000078210001
- * only being executable once. A batch executor can schedule a set of transaction to be executed. The entire set should
- * be executed individually (0x01010000000078210001) but each sub-batch or transaction needs to be executed
- * conditionally (0x01000000000078210001).
+ * Each 0x01000000000078210001 batch can be retried in the future if it fails with each 0x01010000000078210001 only
+ * being executable once. A batch executor can schedule a set of transaction to be executed. The entire set should be
+ * executed individually (0x01010000000078210001) but each sub-batch or transaction needs to be executed conditionally
+ * (0x01000000000078210001).
  *
- * Additionally, as an account it supports initialising a call that anyone can make.
+ * Additionally, as an account it can be initialised with a call that anyone can make.
  *
  * The contract is intended to be used via 3 cloning strategies:
  * - Non-upgradable minimal proxy clone for minimal cost.
- * - Non-upgradable proxy with embedded calldata as immutable args to allow anyone to execute a predetermined call.
+ * - Non-upgradable proxy with embedded calldata as an immutable arg allowing anyone to execute a predetermined call.
  * - Upgradable proxy to allow ownership handover. An upgradable proxy cannot have embedded calldata.
  */
 contract ExecutorLIFI is ERC7821LIFI, EIP712, BitmapNonce, Ownable, Initializable, UUPSUpgradeable {
     error NotUpgradeable();
     error CannotBeUpgradeable();
+
     /**
      * @dev Determines whether pre-configured calls are allowed.
      * The intended use-case is to save gas if the functionality is not needed.
      */
-
-    bool immutable ALLOW_ONE_TIME_CALL;
+    bool immutable ALLOW_EMBEDDED_CALLS;
 
     constructor(
         bool allowOneTimeCall
     ) {
-        ALLOW_ONE_TIME_CALL = allowOneTimeCall;
+        ALLOW_EMBEDDED_CALLS = allowOneTimeCall;
         _disableInitializers();
     }
 
@@ -72,14 +74,14 @@ contract ExecutorLIFI is ERC7821LIFI, EIP712, BitmapNonce, Ownable, Initializabl
     }
 
     /**
-     * @dev If ALLOW_ONE_TIME_CALL is true and the contract is being cloned through a upgradable contract, the function
+     * @dev If ALLOW_EMBEDDED_CALLS is true and the contract is being cloned as an upgradable contract, the function
      * will revert.
      */
     function init(
         address owner
     ) external initializer {
         _initializeOwner(owner);
-        if (ALLOW_ONE_TIME_CALL && !_notUpgradable()) revert CannotBeUpgradeable();
+        if (ALLOW_EMBEDDED_CALLS && !_notUpgradable()) revert CannotBeUpgradeable();
     }
 
     /**
@@ -99,6 +101,12 @@ contract ExecutorLIFI is ERC7821LIFI, EIP712, BitmapNonce, Ownable, Initializabl
         }
     }
 
+    function invalidateUnorderedNonces(uint256 wordPos, uint256 mask) external onlyOwner {
+        nonceBitmap[wordPos] |= mask;
+
+        emit UnorderedNonceInvalidation(wordPos, mask);
+    }
+
     // --- Proxy / Clone Helpers --- //
 
     /**
@@ -111,7 +119,7 @@ contract ExecutorLIFI is ERC7821LIFI, EIP712, BitmapNonce, Ownable, Initializabl
     }
 
     function embeddedCall() external view returns (bytes32) {
-        if (!ALLOW_ONE_TIME_CALL) return bytes32(0);
+        if (!ALLOW_EMBEDDED_CALLS) return bytes32(0);
         return _embeddedCall();
     }
 
@@ -165,9 +173,8 @@ contract ExecutorLIFI is ERC7821LIFI, EIP712, BitmapNonce, Ownable, Initializabl
         if (opData.length == 32) if (address(this) == msg.sender) return true;
 
         bytes32 callTypeHash = LibCalls.typehash(nonce, mode, calls);
-        // If ALLOW_ONE_TIME_CALL is allowed (and no signature), then we check if the one time use hash has been
-        // embedded.
-        if (ALLOW_ONE_TIME_CALL) if (opData.length == 32) return callTypeHash == _embeddedCall();
+        // If ALLOW_EMBEDDED_CALLS is allowed (and no signature), then we check if the hash has been embedded.
+        if (ALLOW_EMBEDDED_CALLS) if (opData.length == 32) return callTypeHash == _embeddedCall();
         bytes32 digest = _hashTypedData(callTypeHash);
         return SignatureCheckerLib.isValidSignatureNowCalldata(owner(), digest, opData[0x20:]);
     }
