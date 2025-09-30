@@ -1,10 +1,13 @@
-// SPDX-License-Identifier: MIT
-pragma solidity ^0.8.4;
+// SPDX-License-Identifier: LGPL-3.0-only
+pragma solidity ^0.8.30;
 
-import {Test} from "forge-std/Test.sol";
+import { Test } from "forge-std/Test.sol";
 
-import {ERC7821} from "solady/src/accounts/ERC7821.sol";
-import {MockERC7821LIFI} from "./MockERC7821LIFI.sol";
+import { ERC7821 } from "solady/src/accounts/ERC7821.sol";
+
+import { ERC7821LIFI } from "../src/ERC7821LIFI.sol";
+
+import { MockERC7821LIFI } from "./mocks/MockERC7821LIFI.sol";
 
 contract ERC7821LIFITest is Test {
     error CustomError(bytes);
@@ -21,19 +24,27 @@ contract ERC7821LIFITest is Test {
         mbe = new MockERC7821LIFI();
     }
 
-    function revertsWithCustomError(bytes calldata m) external payable {
+    function revertsWithCustomError(
+        bytes calldata m
+    ) external payable {
         revert CustomError(m);
     }
 
-    function returnsBytes(bytes memory b) external payable returns (bytes memory) {
+    function returnsBytes(
+        bytes memory b
+    ) external payable returns (bytes memory) {
         return b;
     }
 
-    function returnsHash(bytes memory b) external payable returns (bytes32) {
+    function returnsHash(
+        bytes memory b
+    ) external payable returns (bytes32) {
         return keccak256(b);
     }
 
-    function testERC7821LIFI_executionModeRevert(bytes32 mode) external view {
+    function testERC7821LIFI_executionModeRevert(
+        bytes32 mode
+    ) external view {
         bytes32 result = mbe.executionModeRevert(mode);
         bytes32 toSelect = mode & bytes32(0x00ff000000000000000000000000000000000000000000000000000000000000);
         if (uint256(toSelect) > 0) vm.assertEq(toSelect << 8, result);
@@ -45,7 +56,7 @@ contract ERC7821LIFITest is Test {
         bool fail;
     }
 
-    function testERC7821LIFI_nonces(uint256 nonce, RandomBytes[] calldata randomBytes) public {
+    function testERC7821LIFI_nonces(uint256 nonce, RandomBytes[] calldata randomBytes) external {
         ERC7821.Call[] memory calls = new ERC7821.Call[](randomBytes.length);
         for (uint256 i; i < randomBytes.length; ++i) {
             calls[i] = ERC7821.Call({
@@ -83,7 +94,53 @@ contract ERC7821LIFITest is Test {
         // }
     }
 
-    function _totalValue(ERC7821.Call[] memory calls) internal pure returns (uint256 result) {
+    /// The following test does not work, because for it to work it has to allocate memory for type(uint64).max) + 1
+    /// many items.
+    /// That is not possible.
+    // function testRevert_TooManyCalls() external {
+    //     ERC7821.Call[] memory calls = new ERC7821.Call[](uint256(type(uint64).max) + 1);
+
+    //     bytes memory executionData = abi.encode(calls, abi.encode(0));
+    //     mbe.setValidCalldata(abi.encode(0));
+
+    //     vm.prank(address(mbe));
+    //     vm.expectRevert(abi.encodeWithSelector(ERC7821LIFI.TooManyCalls.selector));
+    //     mbe.execute(bytes10(0x01010000000078210001), executionData);
+    // }
+
+    function testRevert_noOpData() external {
+        ERC7821.Call[] memory calls = new ERC7821.Call[](1);
+
+        bytes memory opData = new bytes(31);
+        bytes memory executionData = abi.encode(calls, opData);
+        mbe.setValidCalldata(opData);
+
+        vm.prank(address(mbe));
+        vm.expectRevert(abi.encodeWithSelector(ERC7821LIFI.OpDataTooSmall.selector));
+        mbe.execute(bytes10(0x01010000000078210001), executionData);
+    }
+
+    function testRevert_invalidOpData() external {
+        ERC7821.Call[] memory calls = new ERC7821.Call[](1);
+
+        bytes memory opData = abi.encode(1);
+        bytes memory executionData = abi.encode(calls, opData);
+
+        vm.prank(address(mbe));
+        vm.expectRevert(abi.encodeWithSelector(ERC7821LIFI.InvalidOpData.selector));
+        mbe.execute(bytes10(0x01010000000078210001), executionData);
+
+        mbe.setValidCalldata(opData);
+
+        vm.prank(address(mbe));
+        mbe.execute(bytes10(0x01010000000078210001), executionData);
+    }
+
+    // --- Test Helpers --- //
+
+    function _totalValue(
+        ERC7821.Call[] memory calls
+    ) internal pure returns (uint256 result) {
         unchecked {
             for (uint256 i; i < calls.length; ++i) {
                 result += calls[i].value;

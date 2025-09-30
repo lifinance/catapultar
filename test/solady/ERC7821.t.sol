@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.4;
+pragma solidity ^0.8.30;
 
-import {SoladyTest} from "solady/test/utils/SoladyTest.sol";
-import {LibClone} from "solady/src/utils/LibClone.sol";
+import { LibClone } from "solady/src/utils/LibClone.sol";
+import { SoladyTest } from "solady/test/utils/SoladyTest.sol";
 
-import {ERC7821LIFI, MockERC7821} from "./mocks/MockERC7821.sol";
+import { ERC7821LIFI, MockERC7821 } from "./mocks/MockERC7821.sol";
 
 contract ERC7821Test is SoladyTest {
     error CustomError();
@@ -29,11 +29,15 @@ contract ERC7821Test is SoladyTest {
         revert CustomError();
     }
 
-    function returnsBytes(bytes memory b) external payable returns (bytes memory) {
+    function returnsBytes(
+        bytes memory b
+    ) external payable returns (bytes memory) {
         return b;
     }
 
-    function returnsHash(bytes memory b) external payable returns (bytes32) {
+    function returnsHash(
+        bytes memory b
+    ) external payable returns (bytes32) {
         return keccak256(b);
     }
 
@@ -54,10 +58,12 @@ contract ERC7821Test is SoladyTest {
         bytes memory data = abi.encode(calls);
         vm.resumeGasMetering();
 
-        mbe.execute{value: _totalValue(calls)}(_SUPPORTED_MODE, data);
+        mbe.execute{ value: _totalValue(calls) }(_SUPPORTED_MODE, data);
     }
 
-    function testERC7821(bytes memory opData) public {
+    function testERC7821(
+        bytes memory opData
+    ) public {
         vm.deal(address(this), 1 ether);
 
         ERC7821LIFI.Call[] memory calls = new ERC7821LIFI.Call[](2);
@@ -70,7 +76,7 @@ contract ERC7821Test is SoladyTest {
         calls[1].value = 789;
         calls[1].data = abi.encodeWithSignature("returnsHash(bytes)", "lol");
 
-        mbe.execute{value: _totalValue(calls)}(_SUPPORTED_MODE, _encode(calls, opData));
+        mbe.execute{ value: _totalValue(calls) }(_SUPPORTED_MODE, _encode(calls, opData));
 
         assertEq(mbe.lastOpData(), opData);
     }
@@ -85,7 +91,7 @@ contract ERC7821Test is SoladyTest {
         emit CallReverted(bytes32(0), abi.encode(CustomError.selector));
 
         vm.expectRevert(CustomError.selector);
-        mbe.execute{value: _totalValue(calls)}(_SUPPORTED_MODE, _encode(calls, ""));
+        mbe.execute{ value: _totalValue(calls) }(_SUPPORTED_MODE, _encode(calls, ""));
     }
 
     function _encode(ERC7821LIFI.Call[] memory calls, bytes memory opData) internal returns (bytes memory) {
@@ -98,7 +104,9 @@ contract ERC7821Test is SoladyTest {
         uint256 mode;
     }
 
-    function testERC7821(bytes32) public {
+    function testERC7821(
+        bytes32
+    ) public {
         vm.deal(address(this), 1 ether);
 
         ERC7821LIFI.Call[] memory calls = new ERC7821LIFI.Call[](_randomUniform() & 3);
@@ -118,16 +126,18 @@ contract ERC7821Test is SoladyTest {
             }
         }
 
-        mbe.executeDirect{value: _totalValue(calls)}(calls);
+        mbe.executeDirect{ value: _totalValue(calls) }(calls);
 
         if (calls.length != 0 && _randomChance(32)) {
             calls[_randomUniform() % calls.length].data = abi.encodeWithSignature("revertsWithCustomError()");
             vm.expectRevert(CustomError.selector);
-            mbe.executeDirect{value: _totalValue(calls)}(calls);
+            mbe.executeDirect{ value: _totalValue(calls) }(calls);
         }
     }
 
-    function _totalValue(ERC7821LIFI.Call[] memory calls) internal pure returns (uint256 result) {
+    function _totalValue(
+        ERC7821LIFI.Call[] memory calls
+    ) internal pure returns (uint256 result) {
         unchecked {
             for (uint256 i; i < calls.length; ++i) {
                 result += calls[i].value;
@@ -173,14 +183,18 @@ contract ERC7821Test is SoladyTest {
         vm.stopPrank();
     }
 
-    function _encodePushBytesBatch(bytes memory x) internal view returns (bytes memory) {
+    function _encodePushBytesBatch(
+        bytes memory x
+    ) internal view returns (bytes memory) {
         ERC7821LIFI.Call[] memory calls = new ERC7821LIFI.Call[](1);
         calls[0].data = abi.encodeWithSignature("pushBytes(bytes)", x);
         calls[0].to = address(this);
         return abi.encode(calls);
     }
 
-    function pushBytes(bytes memory x) public {
+    function pushBytes(
+        bytes memory x
+    ) public {
         _bytes.push(x);
     }
 }

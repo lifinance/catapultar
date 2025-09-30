@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 pragma solidity ^0.8.30;
 
-import {ERC7821} from "solady/src/accounts/ERC7821.sol";
+import { ERC7821 } from "solady/src/accounts/ERC7821.sol";
 
 /// @notice Opinioned batch executor.
 /// @author LIFI
@@ -9,7 +9,7 @@ import {ERC7821} from "solady/src/accounts/ERC7821.sol";
 /// @dev This contract can be inherited to be insertable into fully-fledged smart accounts.
 abstract contract ERC7821LIFI is ERC7821 {
     error TooManyCalls();
-    error InvalidSignature();
+    error InvalidOpData();
     error OpDataTooSmall();
 
     // event CallReverted(bytes32 extraData, bytes revertData);
@@ -18,12 +18,15 @@ abstract contract ERC7821LIFI is ERC7821 {
     bytes32 constant _CALL_REVERTED_EVENT_SIGNATURE = 0xa5ef9b4d75ffdec5840bf221dba12f4a744e8b60aeb23da25fbd8c487a97924d;
 
     // Validation function that validate opData for a specific call.
-    function _validateOpData(bytes32 mode, Call[] calldata calls, bytes calldata opData)
-        internal
-        virtual
-        returns (bool);
+    function _validateOpData(
+        bytes32 mode,
+        Call[] calldata calls,
+        bytes calldata opData
+    ) internal virtual returns (bool);
 
-    function _executionModeRevert(bytes32 mode) internal view virtual returns (bytes32 flag) {
+    function _executionModeRevert(
+        bytes32 mode
+    ) internal view virtual returns (bytes32 flag) {
         assembly ("memory-safe") {
             // shr: Get rid of the 30 right bytes
             // shl: Get rid of the 1 + 30 left bytes.
@@ -37,7 +40,9 @@ abstract contract ERC7821LIFI is ERC7821 {
      * Unsupported: 0: invalid mode, 1: no `opData` support,
      * Supported: 2: with `opData` support, 3: batch of batches
      */
-    function _executionModeId(bytes32 mode) internal view virtual override returns (uint256 id) {
+    function _executionModeId(
+        bytes32 mode
+    ) internal view virtual override returns (uint256 id) {
         // Only supports atomic batched executions.
         // For the encoding scheme, see: https://eips.ethereum.org/EIPS/eip-7579
         // Bytes Layout:
@@ -62,14 +67,15 @@ abstract contract ERC7821LIFI is ERC7821 {
     /// @dev Executes the calls.
     /// Reverts and bubbles up error if any call fails.
     /// The `mode` and `executionData` are passed along in case there's a need to use them.
-    function _execute(bytes32 mode, bytes calldata, Call[] calldata calls, bytes calldata opData)
-        internal
-        virtual
-        override
-    {
+    function _execute(
+        bytes32 mode,
+        bytes calldata,
+        Call[] calldata calls,
+        bytes calldata opData
+    ) internal virtual override {
         if (opData.length < 32) revert OpDataTooSmall();
         // Validate the opData
-        if (!_validateOpData(mode, calls, opData)) revert InvalidSignature();
+        if (!_validateOpData(mode, calls, opData)) revert InvalidOpData();
 
         bytes32 extraData = _executionModeRevert(mode);
         // Add the last 21 bytes of the first words of opData to extraData
@@ -88,6 +94,8 @@ abstract contract ERC7821LIFI is ERC7821 {
         unchecked {
             uint256 i;
             if (calls.length == uint256(0)) return;
+            // It should not be possible to allocate this amount of memory but this check ensures that if it becomes
+            // possible, then it will be caught
             if (calls.length > type(uint64).max) revert TooManyCalls();
             do {
                 (address to, uint256 value, bytes calldata data) = _get(calls, i);
