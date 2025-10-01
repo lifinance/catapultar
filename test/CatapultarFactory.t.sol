@@ -12,11 +12,13 @@ contract CatapultarFactoryTest is Test {
         factory = new CatapultarFactory();
     }
 
+    /// forge-config: default.isolate = true
     function test_deploy() external {
         address owner = makeAddr("owner");
         bytes32 salt = bytes32(bytes20(uint160(owner)));
 
         address deployedTo = factory.deploy(owner, salt);
+        vm.snapshotGasLastCall("deploy");
 
         // Check that the deployed proxy has code.
         assertNotEq(deployedTo.code.length, 0);
@@ -26,11 +28,13 @@ contract CatapultarFactoryTest is Test {
         factory.deploy(owner, salt);
     }
 
+    /// forge-config: default.isolate = true
     function test_deployWithEmbedCall() external {
         address owner = makeAddr("owner");
         bytes32 salt = bytes32(bytes20(uint160(owner)));
 
         address deployedTo = factory.deployWithEmbedCall(owner, salt, bytes32(0));
+        vm.snapshotGasLastCall("deployWithEmbedCall");
 
         // Check that the deployed proxy has code.
         assertNotEq(deployedTo.code.length, 0);
@@ -40,11 +44,14 @@ contract CatapultarFactoryTest is Test {
         factory.deployWithEmbedCall(owner, salt, bytes32(0));
     }
 
+    /// forge-config: default.isolate = true
     function test_deployUpgradeable() external {
         address owner = makeAddr("owner");
         bytes32 salt = bytes32(bytes20(uint160(owner)));
 
         address deployedTo = factory.deployUpgradeable(owner, salt);
+        vm.snapshotGasLastCall("deployUpgradeable");
+
 
         // Check that the deployed proxy has code.
         assertNotEq(deployedTo.code.length, 0);
