@@ -130,11 +130,12 @@ abstract contract ERC7821LIFI is ERC7821 {
                 // Clear out potential overflowing returndata.
                 mstore(add(add(m, 0x40), sizeAfterPad), 0)
 
+                // Place the length of the returndata into memory. But place at least 32.
                 mstore(
                     add(m, 0x40),
                     add( // returns sizeAfterPad if 32 > rdsize otherwise rdsize
                         mul( // returns rdsize % 32 if 32 > rdsize otherwise 0
-                            sub(sizeAfterPad, rdsize), // rdsize % 32
+                            mod(sizeAfterPad, rdsize), // rdsize % 32
                             gt(32, rdsize) // 1 if 32 > rdsize otherwise 0
                         ),
                         rdsize
