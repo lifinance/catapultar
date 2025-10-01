@@ -41,9 +41,9 @@ import { LibCalls } from "./libs/LibCalls.sol";
  * Additionally, as an account it can be initialised with a call that anyone can make.
  *
  * The contract is intended to be used via 3 cloning strategies:
- * - Non-upgradable minimal proxy clone for minimal cost.
- * - Non-upgradable proxy with embedded calldata as an immutable arg allowing anyone to execute a predetermined call.
- * - Upgradable proxy to allow ownership handover. An upgradable proxy cannot have embedded calldata.
+ * - Non-upgradeable minimal proxy clone for minimal cost.
+ * - Non-upgradeable proxy with embedded calldata as an immutable arg allowing anyone to execute a predetermined call.
+ * - Upgradeable proxy to allow ownership handover. An upgradeable proxy cannot have embedded calldata.
  *
  * For ERC-1271 signatures verified from the owner, they should be rehashed in a replay protection envelope:
  * keccak256(
@@ -90,14 +90,14 @@ contract Catapultar is ERC7821LIFI, EIP712, BitmapNonce, Ownable, Initializable,
     }
 
     /**
-     * @dev If ALLOW_EMBEDDED_CALLS is true and the contract is being cloned as an upgradable contract, the function
+     * @dev If ALLOW_EMBEDDED_CALLS is true and the contract is being cloned as an upgradeable contract, the function
      * will revert.
      */
     function init(
         address owner
     ) external initializer {
         _initializeOwner(owner);
-        if (ALLOW_EMBEDDED_CALLS && !_notUpgradable()) revert CannotBeUpgradeable();
+        if (ALLOW_EMBEDDED_CALLS && !_notUpgradeable()) revert CannotBeUpgradeable();
     }
 
     /**
@@ -151,10 +151,10 @@ contract Catapultar is ERC7821LIFI, EIP712, BitmapNonce, Ownable, Initializable,
 
     /**
      * @notice Returns whether the contract has any storage set in the ERC1967 implementation slot.
-     * @dev It is possible for a non-upgradable contract to return false if the storage slot is overwritten to be 0.
-     * Likewise, for an upgradable contract that does not use the _ERC1967_IMPLEMENTATION_SLOT it may return true.
+     * @dev It is possible for a non-upgradeable contract to return false if the storage slot is overwritten to be 0.
+     * Likewise, for an upgradeable contract that does not use the _ERC1967_IMPLEMENTATION_SLOT it may return true.
      */
-    function _notUpgradable() internal view returns (bool up) {
+    function _notUpgradeable() internal view returns (bool up) {
         bytes32 implementation;
         assembly ("memory-safe") {
             implementation := sload(_ERC1967_IMPLEMENTATION_SLOT)
@@ -162,8 +162,8 @@ contract Catapultar is ERC7821LIFI, EIP712, BitmapNonce, Ownable, Initializable,
         }
     }
 
-    function upgradable() external view returns (bool up) {
-        return !_notUpgradable();
+    function upgradeable() external view returns (bool up) {
+        return !_notUpgradeable();
     }
 
     /**
@@ -174,7 +174,7 @@ contract Catapultar is ERC7821LIFI, EIP712, BitmapNonce, Ownable, Initializable,
     function _authorizeUpgrade(
         address
     ) internal view override onlyOwner {
-        if (_notUpgradable()) revert NotUpgradeable();
+        if (_notUpgradeable()) revert NotUpgradeable();
     }
 
     // --- Call Validation Logic --- //

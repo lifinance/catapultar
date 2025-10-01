@@ -22,7 +22,7 @@ interface EIP712 {
 abstract contract CatapultarTest is Test {
     function deploy() internal virtual returns (address template, address proxied);
 
-    function upgradable() internal pure virtual returns (bool);
+    function upgradeable() internal pure virtual returns (bool);
 
     function embeddedCalls() internal pure virtual returns (bool);
 
@@ -63,8 +63,8 @@ abstract contract CatapultarTest is Test {
         executor.init(owner);
     }
 
-    function test_upgradable() external view {
-        assertEq(executor.upgradable(), upgradable());
+    function test_upgradeable() external view {
+        assertEq(executor.upgradeable(), upgradeable());
     }
 
     function test_upgrade() external {
@@ -76,7 +76,7 @@ abstract contract CatapultarTest is Test {
         vm.expectRevert(abi.encodeWithSignature("Unauthorized()"));
         executor.upgradeToAndCall(newImplementation, hex"");
 
-        if (!upgradable()) vm.expectRevert(abi.encodeWithSelector(Catapultar.NotUpgradeable.selector));
+        if (!upgradeable()) vm.expectRevert(abi.encodeWithSelector(Catapultar.NotUpgradeable.selector));
         vm.prank(owner);
         executor.upgradeToAndCall(newImplementation, hex"");
     }
@@ -239,7 +239,7 @@ abstract contract CatapultarTest is Test {
         assertEq(result, false);
     }
 
-    bytes4 constant successIsValidSignature = bytes4(keccak256("isValidSignature(bytes32,bytes)"));
+    bytes4 constant sUCESS_IS_VALID_SIGNATURE = bytes4(keccak256("isValidSignature(bytes32,bytes)"));
 
     function test_isValidSignature() external {
         (, uint256 privateKey) = init();
@@ -255,7 +255,7 @@ abstract contract CatapultarTest is Test {
 
         bytes4 result = executor.isValidSignature(msgHash, signature);
 
-        assertEq(bytes32(result), bytes32(successIsValidSignature));
+        assertEq(bytes32(result), bytes32(sUCESS_IS_VALID_SIGNATURE));
 
         // Deploy another proxy version to check whether we can replay the signature. Do note that this technically also
         // uses a different underlying template.
@@ -263,7 +263,7 @@ abstract contract CatapultarTest is Test {
 
         result = MockCatapultar(payable(newExecutorProxied)).isValidSignature(msgHash, signature);
 
-        assertNotEq(bytes32(result), bytes32(successIsValidSignature));
+        assertNotEq(bytes32(result), bytes32(sUCESS_IS_VALID_SIGNATURE));
     }
 
     function testRevert_isValidSignature_no_rehash() external {
@@ -275,7 +275,7 @@ abstract contract CatapultarTest is Test {
 
         bytes4 result = executor.isValidSignature(msgHash, abi.encodePacked(r, s, v));
 
-        assertNotEq(bytes32(result), bytes32(successIsValidSignature));
+        assertNotEq(bytes32(result), bytes32(sUCESS_IS_VALID_SIGNATURE));
         assertEq(bytes32(result), bytes32(bytes4(0xffffffff)));
     }
 }

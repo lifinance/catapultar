@@ -12,7 +12,7 @@ contract CatapultarMinimalTest is CatapultarTest {
         proxied = LibClone.clone_PUSH0(template);
     }
 
-    function upgradable() internal pure override returns (bool) {
+    function upgradeable() internal pure override returns (bool) {
         return false;
     }
 

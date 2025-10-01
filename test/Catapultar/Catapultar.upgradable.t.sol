@@ -8,13 +8,13 @@ import { Catapultar } from "../../src/Catapultar.sol";
 import { MockCatapultar } from "../mocks/MockCatapultar.sol";
 import { CatapultarTest } from "./Catapultar.base.t.sol";
 
-contract CatapultarUpgradableTest is CatapultarTest {
+contract CatapultarUpgradeableTest is CatapultarTest {
     function deploy() internal override returns (address template, address proxied) {
         template = address(new MockCatapultar(false));
         proxied = LibClone.deployERC1967(template);
     }
 
-    function upgradable() internal pure override returns (bool) {
+    function upgradeable() internal pure override returns (bool) {
         return true;
     }
 

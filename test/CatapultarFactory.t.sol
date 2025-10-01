@@ -11,4 +11,98 @@ contract CatapultarFactoryTest is Test {
     function setUp() external {
         factory = new CatapultarFactory();
     }
+
+    function test_deploy() external {
+        address owner = makeAddr("owner");
+        bytes32 salt = bytes32(bytes20(uint160(owner)));
+
+        address deployedTo = factory.deploy(owner, salt);
+
+        // Check that the deployed proxy has code.
+        assertNotEq(deployedTo.code.length, 0);
+
+        // Try deploying again.
+        vm.expectRevert(abi.encodeWithSignature("DeploymentFailed()"));
+        factory.deploy(owner, salt);
+    }
+
+    function test_deployWithEmbedCall() external {
+        address owner = makeAddr("owner");
+        bytes32 salt = bytes32(bytes20(uint160(owner)));
+
+        address deployedTo = factory.deployWithEmbedCall(owner, salt, bytes32(0));
+
+        // Check that the deployed proxy has code.
+        assertNotEq(deployedTo.code.length, 0);
+
+        // Try deploying again.
+        vm.expectRevert(abi.encodeWithSignature("DeploymentFailed()"));
+        factory.deployWithEmbedCall(owner, salt, bytes32(0));
+    }
+
+    function test_deployUpgradeable() external {
+        address owner = makeAddr("owner");
+        bytes32 salt = bytes32(bytes20(uint160(owner)));
+
+        address deployedTo = factory.deployUpgradeable(owner, salt);
+
+        // Check that the deployed proxy has code.
+        assertNotEq(deployedTo.code.length, 0);
+
+        // Try deploying again.
+        vm.expectRevert(abi.encodeWithSignature("DeploymentFailed()"));
+        factory.deployUpgradeable(owner, salt);
+    }
+
+    function test_predictDeploy() external {
+        address owner = makeAddr("owner");
+        bytes32 salt = bytes32(bytes20(uint160(owner)));
+
+        address predictedDeployedTo = factory.predictDeploy(owner, salt);
+        address deployedTo = factory.deploy(owner, salt);
+        assertEq(predictedDeployedTo, deployedTo);
+    }
+
+    function test_predictDeployWithEmbedCall() external {
+        address owner = makeAddr("owner");
+        bytes32 salt = bytes32(bytes20(uint160(owner)));
+
+        bytes32 embeddedCall = keccak256(bytes("randomCall"));
+
+        address predictedDeployedTo = factory.predictDeployWithEmbedCall(owner, salt, embeddedCall);
+        address deployedTo = factory.deployWithEmbedCall(owner, salt, embeddedCall);
+        assertEq(predictedDeployedTo, deployedTo);
+    }
+
+    function test_predictDeployUpgradeable() external {
+        address owner = makeAddr("owner");
+        bytes32 salt = bytes32(bytes20(uint160(owner)));
+
+        address predictedDeployedTo = factory.predictDeployUpgradeable(owner, salt);
+        address deployedTo = factory.deployUpgradeable(owner, salt);
+        assertEq(predictedDeployedTo, deployedTo);
+    }
+
+    // --- Check salt contains owner --- //
+
+    function testRevert_deploy_salt_does_not_contain_owner(address owner, bytes32 salt) external {
+        if (bytes20(salt) != bytes20(0) && address(uint160(bytes20(salt))) != owner) {
+            vm.expectRevert(abi.encodeWithSignature("SaltDoesNotStartWith()"));
+        }
+        factory.deploy(owner, salt);
+    }
+
+    function testRevert_deployWithEmbedCall_salt_does_not_contain_owner(address owner, bytes32 salt) external {
+        if (bytes20(salt) != bytes20(0) && address(uint160(bytes20(salt))) != owner) {
+            vm.expectRevert(abi.encodeWithSignature("SaltDoesNotStartWith()"));
+        }
+        factory.deployWithEmbedCall(owner, salt, bytes32(0));
+    }
+
+    function testRevert_deployUpgradeable_salt_does_not_contain_owner(address owner, bytes32 salt) external {
+        if (bytes20(salt) != bytes20(0) && address(uint160(bytes20(salt))) != owner) {
+            vm.expectRevert(abi.encodeWithSignature("SaltDoesNotStartWith()"));
+        }
+        factory.deployUpgradeable(owner, salt);
+    }
 }

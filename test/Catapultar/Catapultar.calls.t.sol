@@ -12,7 +12,7 @@ contract CatapultarCallsTest is CatapultarTest {
         proxied = LibClone.clone(template, abi.encodePacked(bytes32(0)));
     }
 
-    function upgradable() internal pure override returns (bool) {
+    function upgradeable() internal pure override returns (bool) {
         return false;
     }
 
