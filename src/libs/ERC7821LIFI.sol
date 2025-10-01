@@ -135,7 +135,7 @@ abstract contract ERC7821LIFI is ERC7821 {
                     add(m, 0x40),
                     add( // returns sizeAfterPad if 32 > rdsize otherwise rdsize
                         mul( // returns rdsize % 32 if 32 > rdsize otherwise 0
-                            mod(sizeAfterPad, rdsize), // rdsize % 32
+                            sub(sizeAfterPad, rdsize), // rdsize % 32
                             gt(32, rdsize) // 1 if 32 > rdsize otherwise 0
                         ),
                         rdsize
