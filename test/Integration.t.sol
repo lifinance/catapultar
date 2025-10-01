@@ -200,7 +200,7 @@ contract IntegrationTest is Test {
         // TODO: verify all cals took place and the revert batches.
     }
 
-    function typehash(uint256 nonce, bytes32 mode, ERC7821.Call[] calldata calls) external returns (bytes32) {
+    function typehash(uint256 nonce, bytes32 mode, ERC7821.Call[] calldata calls) pure external returns (bytes32) {
         return LibCalls.typehash(nonce, mode, calls);
     }
 }

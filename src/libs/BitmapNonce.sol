@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.30;
 
-/// @author Uniswap (Permit2)
+/// @author Uniswap (https://github.com/Uniswap/permit2/blob/main/src/SignatureTransfer.sol) 
 abstract contract BitmapNonce {
     error InvalidNonce();
 

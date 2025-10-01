@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 pragma solidity ^0.8.30;
 
-import { Test } from "forge-std/Test.sol";
+import { Test, Vm } from "forge-std/Test.sol";
+
+import { console } from "forge-std/console.sol";
 
 import { ERC7821 } from "solady/src/accounts/ERC7821.sol";
 
@@ -68,12 +70,12 @@ contract ERC7821LIFITest is Test {
             });
         }
 
-        // vm.recordLogs();
-        uint256 extraDataU = uint256(bytes32(bytes1(0x01))) + uint256(uint240(nonce) << 80);
+        mbe.setValidCalldata(abi.encode(nonce));
+
+        uint256 extraDataU = uint256(bytes32(bytes1(0x01))) + uint256((nonce << 9*8) >> 8);
         for (uint256 i; i < randomBytes.length; ++i) {
             if (randomBytes[i].fail) {
-                // TODO: figure out what the issue is.
-                // vm.expectEmit(true, true, true, true);
+                vm.expectEmit(true, true, true, true);
                 emit CallReverted(
                     bytes32(extraDataU + i), abi.encodeWithSelector(CustomError.selector, (randomBytes[i].payload))
                 );
@@ -81,17 +83,9 @@ contract ERC7821LIFITest is Test {
         }
 
         bytes memory executionData = abi.encode(calls, abi.encode(nonce));
-        mbe.setValidCalldata(abi.encode(nonce));
 
         vm.prank(address(mbe));
         mbe.execute(bytes10(0x01010000000078210001), executionData);
-
-        // Vm.Log[] memory logs = vm.getRecordedLogs();
-
-        // for (uint256 i; i < logs.length; ++i) {
-        //     console.logBytes32(logs[i].topics[0]);
-        //     console.logBytes(logs[i].data);
-        // }
     }
 
     /// The following test does not work, because for it to work it has to allocate memory for type(uint64).max) + 1

@@ -80,10 +80,10 @@ abstract contract ERC7821LIFI is ERC7821 {
         if (!_validateOpData(mode, calls, opData)) revert InvalidOpData();
 
         bytes32 extraData = _executionModeRevert(mode);
-        // Add the last 21 bytes of the first words of opData to extraData
+        // Add the last 23 bytes of the first words of opData to extraData
         assembly ("memory-safe") {
             let word := calldataload(opData.offset)
-            extraData := or(extraData, shr(8, shl(mul(11, 8), word)))
+            extraData := or(extraData, shr(8, shl(mul(9, 8), word)))
         }
 
         return _execute(calls, extraData);
@@ -128,7 +128,7 @@ abstract contract ERC7821LIFI is ERC7821 {
                 let sizeAfterPad := and(add(rdsize, 31), not(31))
 
                 // Clear out potential overflowing returndata.
-                mstore(add(add(m, 0x40), sub(sizeAfterPad, 32)), 0)
+                mstore(add(add(m, 0x40), sizeAfterPad), 0)
 
                 mstore(
                     add(m, 0x40),
