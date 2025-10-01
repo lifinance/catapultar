@@ -72,7 +72,7 @@ contract ERC7821LIFITest is Test {
 
         mbe.setValidCalldata(abi.encode(nonce));
 
-        uint256 extraDataU = uint256(bytes32(bytes1(0x01))) + uint256((nonce << 9*8) >> 8);
+        uint256 extraDataU = uint256(bytes32(bytes1(0x01))) + uint256((nonce << 9 * 8) >> 8);
         for (uint256 i; i < randomBytes.length; ++i) {
             if (randomBytes[i].fail) {
                 vm.expectEmit(true, true, true, true);

@@ -78,7 +78,7 @@ To validate signatures against the account, the message hash needs to be further
 
 ### Nonce Management
 
-Catapultar uses unordered nonces for replay protection. Nonces are stored in 256 bit index using a 24 byte word: `bytes24(word) | bytes8(index)`. For efficient nonce mangement, nonces should be spent for entire masks at a time.
+Catapultar uses unordered nonces for replay protection. Nonces are stored in 256 bit index using a 24 byte word: `bytes24(word) | bytes8(index)`. For efficient nonce management, nonces should be spent for entire masks at a time.
 
 Multiple nonces can be invalidated at a time using index masks: `::invalidateUnorderedNonces(word, mask)`.
 
