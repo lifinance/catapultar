@@ -5,9 +5,9 @@ import { Test } from "forge-std/Test.sol";
 
 import { ERC7821 } from "solady/src/accounts/ERC7821.sol";
 
-import { ERC7821LIFI } from "../src/ERC7821LIFI.sol";
+import { ERC7821LIFI } from "../../src/libs/ERC7821LIFI.sol";
 
-import { MockERC7821LIFI } from "./mocks/MockERC7821LIFI.sol";
+import { MockERC7821LIFI } from "../mocks/MockERC7821LIFI.sol";
 
 contract ERC7821LIFITest is Test {
     error CustomError(bytes);

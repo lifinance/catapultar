@@ -2,22 +2,23 @@
 pragma solidity ^0.8.30;
 
 import { Ownable } from "solady/src/auth/Ownable.sol";
-import { Initializable } from "solady/src/utils/Initializable.sol";
 
+import { EIP712 } from "solady/src/utils/EIP712.sol";
+import { EfficientHashLib } from "solady/src/utils/EfficientHashLib.sol";
+import { Initializable } from "solady/src/utils/Initializable.sol";
 import { LibClone } from "solady/src/utils/LibClone.sol";
 import { LibZip } from "solady/src/utils/LibZip.sol";
 import { SignatureCheckerLib } from "solady/src/utils/SignatureCheckerLib.sol";
 import { UUPSUpgradeable } from "solady/src/utils/UUPSUpgradeable.sol";
 
-import { EIP712 } from "solady/src/utils/EIP712.sol";
-
-import { BitmapNonce } from "./BitmapNonce.sol";
-import { ERC7821LIFI } from "./ERC7821LIFI.sol";
-import { LibCalls } from "./LibCalls.sol";
+import { BitmapNonce } from "./libs/BitmapNonce.sol";
+import { ERC7821LIFI } from "./libs/ERC7821LIFI.sol";
+import { LibCalls } from "./libs/LibCalls.sol";
 
 /**
- * @title LI.FI Executor
- * @author LIFI
+ * @title For throwing transactions into the mempool – Catapultar
+ * @author Alexander @ LIFI (https://li.fi)
+ * @custom:version 0.0.1
  * @notice Simple batch executing smart account with simple signature validation logic.
  * This batch execution account supports ERC-7821 interfaces and supports the failure mode flag 01.
  * If provided, each call in a batch will be tried individually and the contract emits a event with the revert data.
@@ -43,10 +44,20 @@ import { LibCalls } from "./LibCalls.sol";
  * - Non-upgradable minimal proxy clone for minimal cost.
  * - Non-upgradable proxy with embedded calldata as an immutable arg allowing anyone to execute a predetermined call.
  * - Upgradable proxy to allow ownership handover. An upgradable proxy cannot have embedded calldata.
+ *
+ * For ERC-1271 signatures verified from the owner, they should be rehashed in a replay protection envelope:
+ * keccak256(
+ *  keccak256(bytes("Replay(address account,bytes32 payload)")),
+ *  address(account),
+ *  payloadHash
+ * )
+ * This ensures that each signed payload is only valid for a specific account.
  */
-contract ExecutorLIFI is ERC7821LIFI, EIP712, BitmapNonce, Ownable, Initializable, UUPSUpgradeable {
+contract Catapultar is ERC7821LIFI, EIP712, BitmapNonce, Ownable, Initializable, UUPSUpgradeable {
     error NotUpgradeable();
     error CannotBeUpgradeable();
+
+    bytes32 constant REPLAY_PROTECTION = keccak256(bytes("Replay(address account,bytes32 payload)"));
 
     /**
      * @dev Determines whether pre-configured calls are allowed.
@@ -59,6 +70,11 @@ contract ExecutorLIFI is ERC7821LIFI, EIP712, BitmapNonce, Ownable, Initializabl
     ) {
         ALLOW_EMBEDDED_CALLS = allowOneTimeCall;
         _disableInitializers();
+    }
+
+    function _domainNameAndVersion() internal pure override returns (string memory name, string memory version) {
+        name = "Catapultar";
+        version = "0.0.1";
     }
 
     function DOMAIN_SEPARATOR() external view returns (bytes32) {
@@ -86,14 +102,24 @@ contract ExecutorLIFI is ERC7821LIFI, EIP712, BitmapNonce, Ownable, Initializabl
 
     /**
      * @notice ERC1271 for signing messages on behalf of this contract.
-     * @dev This contract does NOT implement replay protection for signatures. Any data signed by this contract will be
-     * valid for other contracts with the same owner.
+     * @dev This contract implements a simple replay protection where the hash is rehashed using the contract address to
+     * ensure it cannot be replayed on other contracts.
+     * When asked to sign a hash (of say a EIP-712 object), compute the hash regularly. Then compute
+     * keccak256(abi.encode(REPLAY_PROTECTION, address(this), hash)) and sign the computed hash.
      * @param hash of data that has been signed and to check attestation for.
      * @param signature Bytes that represents the signature of the signed message.
      * @return result 0x1626ba7e if true or 0xffffffff is invalid.
      */
     function isValidSignature(bytes32 hash, bytes calldata signature) public view virtual returns (bytes4 result) {
-        bool success = SignatureCheckerLib.isValidSignatureNowCalldata(owner(), hash, signature);
+        bool success = SignatureCheckerLib.isValidSignatureNowCalldata(
+            owner(),
+            EfficientHashLib.hash(
+                REPLAY_PROTECTION, // Offset hash to ensure no standard payload replicates this structure.
+                asUnsafeBytes32(address(this)),
+                hash
+            ),
+            signature
+        );
         assembly {
             // `success ? bytes4(keccak256("isValidSignature(bytes32,bytes)")) : 0xffffffff`.
             // We use `0xffffffff` for invalid, in convention with the reference implementation.
@@ -153,11 +179,6 @@ contract ExecutorLIFI is ERC7821LIFI, EIP712, BitmapNonce, Ownable, Initializabl
 
     // --- Call Validation Logic --- //
 
-    function _domainNameAndVersion() internal pure override returns (string memory name, string memory version) {
-        name = "ExecutorLIFI";
-        version = "1";
-    }
-
     function _validateOpData(
         bytes32 mode,
         Call[] calldata calls,
@@ -177,6 +198,17 @@ contract ExecutorLIFI is ERC7821LIFI, EIP712, BitmapNonce, Ownable, Initializabl
         if (ALLOW_EMBEDDED_CALLS) if (opData.length == 32) return callTypeHash == _embeddedCall();
         bytes32 digest = _hashTypedData(callTypeHash);
         return SignatureCheckerLib.isValidSignatureNowCalldata(owner(), digest, opData[0x20:]);
+    }
+
+    /**
+     * @notice Unsafe casing of address to bytes32
+     */
+    function asUnsafeBytes32(
+        address addr
+    ) internal pure returns (bytes32 b) {
+        assembly ("memory-safe") {
+            b := addr
+        }
     }
 
     // Allow us to use LibZip for gas efficiency savings on cheap execution but expensive calldata chains.

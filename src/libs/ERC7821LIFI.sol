@@ -3,10 +3,12 @@ pragma solidity ^0.8.30;
 
 import { ERC7821 } from "solady/src/accounts/ERC7821.sol";
 
-/// @notice Opinioned batch executor.
-/// @author LIFI
-///
-/// @dev This contract can be inherited to be insertable into fully-fledged smart accounts.
+/**
+ * @notice Opinioned batch executor.
+ * @author Alexander @ LIFI (https://li.fi)
+ * @author Solady (https://github.com/vectorized/solady/blob/main/src/accounts/ERC7821.sol)
+ * @dev This contract can be inherited to be insertable into fully-fledged smart accounts.
+ */
 abstract contract ERC7821LIFI is ERC7821 {
     error TooManyCalls();
     error InvalidOpData();

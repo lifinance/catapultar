@@ -1,12 +1,12 @@
-    // SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.30;
 
-import { ExecutorLIFI } from "../../src/ExecutorLIFI.sol";
+import { Catapultar } from "../../src/Catapultar.sol";
 
-contract MockExecutorLIFI is ExecutorLIFI {
+contract MockCatapultar is Catapultar {
     constructor(
         bool allowOneTimeCall
-    ) ExecutorLIFI(allowOneTimeCall) { }
+    ) Catapultar(allowOneTimeCall) { }
 
     function validateOpData(bytes32 mode, Call[] calldata calls, bytes calldata opData) external returns (bool) {
         return _validateOpData(mode, calls, opData);

@@ -6,17 +6,20 @@ import { Test } from "forge-std/Test.sol";
 import { ERC7821 } from "solady/src/accounts/ERC7821.sol";
 import { LibClone } from "solady/src/utils/LibClone.sol";
 
-import { BitmapNonce } from "../../src/BitmapNonce.sol";
+import { Catapultar } from "../../src/Catapultar.sol";
 
-import { ExecutorLIFI } from "../../src/ExecutorLIFI.sol";
-import { LibCalls } from "../../src/LibCalls.sol";
-import { MockExecutorLIFI } from "../mocks/MockExecutorLIFI.sol";
+import { BitmapNonce } from "../../src/libs/BitmapNonce.sol";
+import { LibCalls } from "../../src/libs/LibCalls.sol";
+
+import { MockCatapultar } from "../mocks/MockCatapultar.sol";
 
 interface EIP712 {
     function DOMAIN_SEPARATOR() external view returns (bytes32);
 }
 
-abstract contract ExecutorLIFITest is Test {
+/// @notice This test contract is meant to be implemented by sub-test contracts that proxy the actual implementation to
+/// mimic how the contract is intended to be used in practise.
+abstract contract CatapultarTest is Test {
     function deploy() internal virtual returns (address template, address proxied);
 
     function upgradable() internal pure virtual returns (bool);
@@ -28,12 +31,12 @@ abstract contract ExecutorLIFITest is Test {
     }
 
     address executorTemplate;
-    MockExecutorLIFI executor;
+    MockCatapultar executor;
 
     function setUp() external {
         address executorProxied;
         (executorTemplate, executorProxied) = deploy();
-        executor = MockExecutorLIFI(payable(executorProxied));
+        executor = MockCatapultar(payable(executorProxied));
     }
 
     function init() internal returns (address owner, uint256 key) {
@@ -43,7 +46,7 @@ abstract contract ExecutorLIFITest is Test {
 
     function test_template_init_disabled() external {
         vm.expectRevert(abi.encodeWithSignature("InvalidInitialization()"));
-        MockExecutorLIFI(payable(executorTemplate)).init(makeAddr("owner"));
+        MockCatapultar(payable(executorTemplate)).init(makeAddr("owner"));
     }
 
     function test_init() external {
@@ -60,25 +63,25 @@ abstract contract ExecutorLIFITest is Test {
         executor.init(owner);
     }
 
-    function test_upgradable() external {
+    function test_upgradable() external view {
         assertEq(executor.upgradable(), upgradable());
     }
 
     function test_upgrade() external {
         (address owner,) = init();
 
-        address newImplementation = address(new MockExecutorLIFI(false));
+        address newImplementation = address(new MockCatapultar(false));
 
         vm.prank(makeAddr("notOwner"));
         vm.expectRevert(abi.encodeWithSignature("Unauthorized()"));
         executor.upgradeToAndCall(newImplementation, hex"");
 
-        if (!upgradable()) vm.expectRevert(abi.encodeWithSelector(ExecutorLIFI.NotUpgradeable.selector));
+        if (!upgradable()) vm.expectRevert(abi.encodeWithSelector(Catapultar.NotUpgradeable.selector));
         vm.prank(owner);
         executor.upgradeToAndCall(newImplementation, hex"");
     }
 
-    function test_use_nonce() external {
+    function test_useUnorderedNonce() external {
         executor.useUnorderedNonce(0);
         executor.useUnorderedNonce(1);
 
@@ -86,13 +89,13 @@ abstract contract ExecutorLIFITest is Test {
         executor.useUnorderedNonce(0);
     }
 
-    function test_use_nonce_no_collision(uint256 nonceA, uint256 nonceB) external {
+    function test_useUnorderedNonce_no_collision(uint256 nonceA, uint256 nonceB) external {
         vm.assume(nonceA != nonceB);
         executor.useUnorderedNonce(nonceA);
         executor.useUnorderedNonce(nonceB);
     }
 
-    function test_check_embedded_calls() external {
+    function test_check_embedded_calls() external view {
         bytes32 embed = executor.embeddedCall();
         assertEq(embed, bytes32(0));
     }
@@ -102,7 +105,7 @@ abstract contract ExecutorLIFITest is Test {
     ) external {
         vm.skip(!embeddedCalls());
 
-        executor = MockExecutorLIFI(payable(LibClone.cloneDeterministic(executorTemplate, abi.encodePacked(embed), 0)));
+        executor = MockCatapultar(payable(LibClone.cloneDeterministic(executorTemplate, abi.encodePacked(embed), 0)));
 
         bytes32 read = executor.embeddedCall();
         assertEq(read, embed);
@@ -120,7 +123,7 @@ abstract contract ExecutorLIFITest is Test {
         assertNotEq(cloneA, cloneB);
     }
 
-    function test_validate_op_data() external {
+    function test_validateOpData() external {
         ERC7821.Call[] memory calls = new ERC7821.Call[](0);
         bytes32 mode = bytes32(0);
         bytes memory opData = abi.encode(0);
@@ -141,7 +144,49 @@ abstract contract ExecutorLIFITest is Test {
         assertEq(result, true);
     }
 
-    function test_validate_op_data_embedded_calls() external {
+    function test_invalidateUnorderedNonces() external {
+        (address owner,) = init();
+
+        ERC7821.Call[] memory calls = new ERC7821.Call[](0);
+        bytes32 mode = bytes32(0);
+        bool result;
+
+        uint256 snapshot = vm.snapshot();
+
+        vm.prank(address(executor));
+        result = executor.validateOpData(mode, calls, abi.encode(0));
+        assertEq(result, true);
+
+        vm.revertTo(snapshot);
+
+        vm.prank(owner);
+        executor.invalidateUnorderedNonces(0, 3);
+
+        vm.startPrank(address(executor));
+
+        vm.expectRevert(abi.encodeWithSelector(BitmapNonce.InvalidNonce.selector));
+        executor.validateOpData(mode, calls, abi.encode(0));
+
+        vm.expectRevert(abi.encodeWithSelector(BitmapNonce.InvalidNonce.selector));
+        executor.validateOpData(mode, calls, abi.encode(1));
+
+        result = executor.validateOpData(mode, calls, abi.encode(2));
+        assertEq(result, true);
+
+        vm.stopPrank();
+    }
+
+    function testRevert_invalidateUnorderedNonces_onlyOwner() external {
+        (address owner,) = init();
+
+        vm.expectRevert(abi.encodeWithSignature("Unauthorized()"));
+        executor.invalidateUnorderedNonces(0, 3);
+
+        vm.prank(owner);
+        executor.invalidateUnorderedNonces(0, 3);
+    }
+
+    function test_validateOpData_embedded_calls() external {
         vm.skip(!embeddedCalls());
 
         ERC7821.Call[] memory calls = new ERC7821.Call[](1);
@@ -156,8 +201,7 @@ abstract contract ExecutorLIFITest is Test {
         assertEq(result, false);
 
         // We need to deploy a proxy specifically with the embedded typehash.
-        executor =
-            MockExecutorLIFI(payable(LibClone.cloneDeterministic(executorTemplate, abi.encodePacked(typeHash), 0)));
+        executor = MockCatapultar(payable(LibClone.cloneDeterministic(executorTemplate, abi.encodePacked(typeHash), 0)));
 
         bytes32 embed = executor.embeddedCall();
         assertEq(embed, typeHash);
@@ -167,8 +211,8 @@ abstract contract ExecutorLIFITest is Test {
         assertEq(result, true);
     }
 
-    function test_validate_op_data_signatures() external {
-        (address owner, uint256 privateKey) = init();
+    function test_validateOpData_signatures() external {
+        (, uint256 privateKey) = init();
 
         uint256 nonce = 1;
         ERC7821.Call[] memory calls = new ERC7821.Call[](0);
@@ -193,5 +237,45 @@ abstract contract ExecutorLIFITest is Test {
 
         result = executor.validateOpData(mode, calls, abi.encodePacked(nonce + 1, signature));
         assertEq(result, false);
+    }
+
+    bytes4 constant successIsValidSignature = bytes4(keccak256("isValidSignature(bytes32,bytes)"));
+
+    function test_isValidSignature() external {
+        (, uint256 privateKey) = init();
+
+        bytes32 msgHash = keccak256(bytes("RandomPayload"));
+        bytes32 toSign = keccak256(
+            abi.encode(keccak256(bytes("Replay(address account,bytes32 payload)")), address(executor), msgHash)
+        );
+        // Sign the payload directionly.
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(privateKey, toSign);
+
+        bytes memory signature = abi.encodePacked(r, s, v);
+
+        bytes4 result = executor.isValidSignature(msgHash, signature);
+
+        assertEq(bytes32(result), bytes32(successIsValidSignature));
+
+        // Deploy another proxy version to check whether we can replay the signature. Do note that this technically also
+        // uses a different underlying template.
+        (, address newExecutorProxied) = deploy();
+
+        result = MockCatapultar(payable(newExecutorProxied)).isValidSignature(msgHash, signature);
+
+        assertNotEq(bytes32(result), bytes32(successIsValidSignature));
+    }
+
+    function testRevert_isValidSignature_no_rehash() external {
+        (, uint256 privateKey) = init();
+
+        bytes32 msgHash = keccak256(bytes("RandomPayload"));
+        // Sign the payload directionly.
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(privateKey, msgHash);
+
+        bytes4 result = executor.isValidSignature(msgHash, abi.encodePacked(r, s, v));
+
+        assertNotEq(bytes32(result), bytes32(successIsValidSignature));
+        assertEq(bytes32(result), bytes32(bytes4(0xffffffff)));
     }
 }

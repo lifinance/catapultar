@@ -5,7 +5,7 @@ import { Test } from "forge-std/Test.sol";
 
 import { ERC7821 } from "solady/src/accounts/ERC7821.sol";
 
-import { LibCalls } from "../src/LibCalls.sol";
+import { LibCalls } from "../../src/libs/LibCalls.sol";
 
 contract LibCallsTest is Test {
     function typehashReference(
