@@ -97,7 +97,7 @@ abstract contract CatapultarTest is Test {
 
     /// forge-config: default.isolate = true
     function test_overhead_sca() external {
-        (address owner, uint256 privateKey) = init();
+        (, uint256 privateKey) = init();
         uint256 amount = 10 ** 18;
         bytes32 executionMode = bytes10(0x01000000000078210001);
         uint256 nonce = 0;
@@ -127,6 +127,9 @@ abstract contract CatapultarTest is Test {
         bytes32 executionMode = bytes10(0x01000000000078210001);
         uint256 nonce = 0;
 
+        vm.prank(owner);
+        executor.invalidateUnorderedNonces(0, 1 << 255);
+
         ERC7821.Call[] memory calls = new ERC7821.Call[](1);
         calls[0] = ERC7821.Call({
             to: address(token),
@@ -147,7 +150,7 @@ abstract contract CatapultarTest is Test {
 
     /// forge-config: default.isolate = true
     function test_overhead_sca_twice() external {
-        (address owner, uint256 privateKey) = init();
+        (, uint256 privateKey) = init();
         uint256 amount = 10 ** 18;
         bytes32 executionMode = bytes10(0x01000000000078210001);
         uint256 nonce = 0;

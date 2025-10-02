@@ -197,13 +197,7 @@ $ forge test
 ### Coverage
 
 ```shell
-$ forge coverage
-```
-
-### Format
-
-```shell
-$ forge fmt
+$ forge coverage --no-match-coverage "(script|test)" [--report lcov]
 ```
 
 ### Deploy
