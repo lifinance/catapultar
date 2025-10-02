@@ -111,4 +111,25 @@ contract CatapultarFactoryTest is Test {
         }
         factory.deployUpgradeable(owner, salt);
     }
+
+    function testRevert_predictDeploy_salt_does_not_contain_owner(address owner, bytes32 salt) external {
+        if (bytes20(salt) != bytes20(0) && address(uint160(bytes20(salt))) != owner) {
+            vm.expectRevert(abi.encodeWithSignature("SaltDoesNotStartWith()"));
+        }
+        factory.predictDeploy(owner, salt);
+    }
+
+    function testRevert_predictDeployWithEmbedCall_salt_does_not_contain_owner(address owner, bytes32 salt) external {
+        if (bytes20(salt) != bytes20(0) && address(uint160(bytes20(salt))) != owner) {
+            vm.expectRevert(abi.encodeWithSignature("SaltDoesNotStartWith()"));
+        }
+        factory.predictDeployWithEmbedCall(owner, salt, bytes32(0));
+    }
+
+    function testRevert_predictDeployUpgradeable_salt_does_not_contain_owner(address owner, bytes32 salt) external {
+        if (bytes20(salt) != bytes20(0) && address(uint160(bytes20(salt))) != owner) {
+            vm.expectRevert(abi.encodeWithSignature("SaltDoesNotStartWith()"));
+        }
+        factory.predictDeployUpgradeable(owner, salt);
+    }
 }
