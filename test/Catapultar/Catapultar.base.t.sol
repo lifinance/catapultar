@@ -301,13 +301,29 @@ abstract contract CatapultarTest is Test {
         // 0xbc197c81: `onERC1155BatchReceived(address,address,uint256[],uint256[],bytes)`.
 
         address(executor).call(
-            abi.encodeWithSignature("onERC721Received(address,address,uint256,bytes)", address(0), address(0), uint256(0), new bytes(0))
+            abi.encodeWithSignature(
+                "onERC721Received(address,address,uint256,bytes)", address(0), address(0), uint256(0), new bytes(0)
+            )
         );
         address(executor).call(
-            abi.encodeWithSignature("onERC1155Received(address,address,uint256,uint256,bytes)", address(0), address(0), uint256(0),uint256(0), new bytes(0))
+            abi.encodeWithSignature(
+                "onERC1155Received(address,address,uint256,uint256,bytes)",
+                address(0),
+                address(0),
+                uint256(0),
+                uint256(0),
+                new bytes(0)
+            )
         );
         address(executor).call(
-            abi.encodeWithSignature("onERC1155BatchReceived(address,address,uint256[],uint256[],bytes)", address(0), address(0), new uint256[](0), new uint256[](0), new bytes(0))
+            abi.encodeWithSignature(
+                "onERC1155BatchReceived(address,address,uint256[],uint256[],bytes)",
+                address(0),
+                address(0),
+                new uint256[](0),
+                new uint256[](0),
+                new bytes(0)
+            )
         );
     }
 }

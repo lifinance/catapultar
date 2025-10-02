@@ -208,8 +208,10 @@ $ forge fmt
 
 ### Deploy
 
+To deploy the script, provide RPC urls in `.env` in the format of: `RPC_URL_<name>`. The name does not matter but when used in the below script, the name is accessed through the `string[]` array.
+
 ```shell
-$ forge script script/Counter.s.sol:CounterScript --rpc-url <your_rpc_url> --private-key <your_private_key>
+$ forge script deploy --sig "run(string[])" "[<chains>]" --multi --verify --broadcast
 ```
 
 ## License Notice
