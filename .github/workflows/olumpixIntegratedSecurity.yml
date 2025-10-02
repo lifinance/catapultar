@@ -4,6 +4,7 @@ on: push
 permissions:
   contents: read # required to fetch repository contents
   security-events: write # required to upload SARIF results to GitHub Code Scanning
+  actions: read
 
 jobs:
   security:

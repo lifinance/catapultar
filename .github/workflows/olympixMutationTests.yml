@@ -1,6 +1,5 @@
 name: Mutation Test Generation Workflow
-on:
-  push
+on: workflow_dispatch
 
 jobs:
   mutation-test-generation:
