@@ -12,6 +12,7 @@ import { BitmapNonce } from "../../src/libs/BitmapNonce.sol";
 import { LibCalls } from "../../src/libs/LibCalls.sol";
 
 import { MockCatapultar } from "../mocks/MockCatapultar.sol";
+import { MockERC20 } from "../mocks/MockERC20.sol";
 
 interface EIP712 {
     function DOMAIN_SEPARATOR() external view returns (bytes32);
@@ -33,10 +34,19 @@ abstract contract CatapultarTest is Test {
     address executorTemplate;
     MockCatapultar executor;
 
+    MockERC20 token;
+
     function setUp() external {
         address executorProxied;
         (executorTemplate, executorProxied) = deploy();
         executor = MockCatapultar(payable(executorProxied));
+
+        token = new MockERC20("Mock", "MCK", 18);
+
+        uint256 amount = 10 ** 18;
+        (address own,) = makeAddrAndKey("owner");
+        token.mint(own, amount);
+        token.mint(address(executor), amount);
     }
 
     function init() internal returns (address owner, uint256 key) {
@@ -61,6 +71,141 @@ abstract contract CatapultarTest is Test {
         vm.prank(owner);
         vm.expectRevert(abi.encodeWithSignature("InvalidInitialization()"));
         executor.init(owner);
+    }
+
+    /// forge-config: default.isolate = true
+    function test_overhead_baseline() external {
+        (address owner,) = init();
+        uint256 amount = 10 ** 18;
+
+        vm.prank(owner);
+        token.transfer(makeAddr("to"), amount);
+        vm.snapshotGasLastCall("erc20TransferBaseline");
+    }
+
+    /// forge-config: default.isolate = true
+    function test_overhead_baseline_twice() external {
+        (address owner,) = init();
+        uint256 amount = 10 ** 18;
+
+        vm.prank(owner);
+        token.transfer(makeAddr("to"), amount/2);
+        vm.prank(owner);
+        token.transfer(makeAddr("next"), amount/2);
+        vm.snapshotGasLastCall("erc20TransferBaselineSecond");
+    }
+
+    /// forge-config: default.isolate = true
+    function test_overhead_sca() external {
+        (address owner, uint256 privateKey) = init();
+        uint256 amount = 10 ** 18;
+        bytes32 executionMode = bytes10(0x01000000000078210001);
+        uint256 nonce = 0;
+
+        ERC7821.Call[] memory calls = new ERC7821.Call[](1);
+        calls[0] = ERC7821.Call({
+            to: address(token),
+            data: abi.encodeCall(MockERC20.transfer, (makeAddr("to"), amount)),
+            value: 0
+        });
+
+        bytes32 domainSeparator = EIP712(address(executor)).DOMAIN_SEPARATOR();
+        bytes32 msgHash =
+            keccak256(abi.encodePacked("\x19\x01", domainSeparator, this.typehash(nonce, executionMode, calls)));
+
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(privateKey, msgHash);
+        bytes memory signature = abi.encodePacked(r, s, v);
+
+        executor.execute(executionMode, abi.encode(calls, abi.encodePacked(nonce, signature)));
+        vm.snapshotGasLastCall("erc20TransferSCA");
+    }
+
+    /// forge-config: default.isolate = true
+    function test_hot_overhead_sca() external {
+        (address owner, uint256 privateKey) = init();
+        uint256 amount = 10 ** 18;
+        bytes32 executionMode = bytes10(0x01000000000078210001);
+        uint256 nonce = 0;
+
+        ERC7821.Call[] memory calls = new ERC7821.Call[](1);
+        calls[0] = ERC7821.Call({
+            to: address(token),
+            data: abi.encodeCall(MockERC20.transfer, (makeAddr("to"), amount)),
+            value: 0
+        });
+
+        bytes32 domainSeparator = EIP712(address(executor)).DOMAIN_SEPARATOR();
+        bytes32 msgHash =
+            keccak256(abi.encodePacked("\x19\x01", domainSeparator, this.typehash(nonce, executionMode, calls)));
+
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(privateKey, msgHash);
+        bytes memory signature = abi.encodePacked(r, s, v);
+
+        executor.execute(executionMode, abi.encode(calls, abi.encodePacked(nonce, signature)));
+        vm.snapshotGasLastCall("erc20TransferSCAHotNonce");
+    }
+
+    /// forge-config: default.isolate = true
+    function test_overhead_sca_twice() external {
+        (address owner, uint256 privateKey) = init();
+        uint256 amount = 10 ** 18;
+        bytes32 executionMode = bytes10(0x01000000000078210001);
+        uint256 nonce = 0;
+
+        ERC7821.Call[] memory calls = new ERC7821.Call[](2);
+        calls[0] = ERC7821.Call({
+            to: address(token),
+            data: abi.encodeCall(MockERC20.transfer, (makeAddr("to"), amount/2)),
+            value: 0
+        });
+        calls[1] = ERC7821.Call({
+            to: address(token),
+            data: abi.encodeCall(MockERC20.transfer, (makeAddr("next"), amount/2)),
+            value: 0
+        });
+
+        bytes32 domainSeparator = EIP712(address(executor)).DOMAIN_SEPARATOR();
+        bytes32 msgHash =
+            keccak256(abi.encodePacked("\x19\x01", domainSeparator, this.typehash(nonce, executionMode, calls)));
+
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(privateKey, msgHash);
+        bytes memory signature = abi.encodePacked(r, s, v);
+
+        executor.execute(executionMode, abi.encode(calls, abi.encodePacked(nonce, signature)));
+        vm.snapshotGasLastCall("erc20TransferTwiceSCA");
+    }
+
+    /// forge-config: default.isolate = true
+    function test_overhead_sca_twice_hot() external {
+        (address owner, uint256 privateKey) = init();
+        uint256 amount = 10 ** 18;
+        bytes32 executionMode = bytes10(0x01000000000078210001);
+        uint256 nonce = 0;
+
+        vm.prank(owner);
+        executor.invalidateUnorderedNonces(0, 1 << 255);
+
+        ERC7821.Call[] memory calls = new ERC7821.Call[](2);
+        calls[0] = ERC7821.Call({
+            to: address(token),
+            data: abi.encodeCall(MockERC20.transfer, (makeAddr("to"), amount/2)),
+            value: 0
+        });
+        calls[1] = ERC7821.Call({
+            to: address(token),
+            data: abi.encodeCall(MockERC20.transfer, (makeAddr("next"), amount/2)),
+            value: 0
+        });
+
+        bytes32 domainSeparator = EIP712(address(executor)).DOMAIN_SEPARATOR();
+        bytes32 msgHash =
+            keccak256(abi.encodePacked("\x19\x01", domainSeparator, this.typehash(nonce, executionMode, calls)));
+
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(privateKey, msgHash);
+        bytes memory signature = abi.encodePacked(r, s, v);
+
+        executor.execute(executionMode, abi.encode(calls, abi.encodePacked(nonce, signature)));
+        vm.snapshotGasLastCall("erc20TransferTwiceSCAHotNonce");
     }
 
     function test_upgradeable() external view {
