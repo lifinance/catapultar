@@ -12,6 +12,7 @@ import { ERC7821LIFI } from "../../src/libs/ERC7821LIFI.sol";
 import { MockERC7821LIFI } from "../mocks/MockERC7821LIFI.sol";
 
 contract ERC7821LIFITest is Test {
+    error SmallError();
     error CustomError(bytes);
 
     event CallReverted(bytes32 extraData, bytes revertData);
@@ -24,6 +25,10 @@ contract ERC7821LIFITest is Test {
 
     function setUp() public {
         mbe = new MockERC7821LIFI();
+    }
+
+    function revertsWithSmallError() external payable {
+        revert SmallError();
     }
 
     function revertsWithCustomError(
@@ -72,7 +77,7 @@ contract ERC7821LIFITest is Test {
 
         mbe.setValidCalldata(abi.encode(nonce));
 
-        uint256 extraDataU = uint256(bytes32(bytes1(0x01))) + uint256((nonce << 9 * 8) >> 8);
+        uint256 extraDataU = uint256(bytes32(bytes1(0x01))) + uint256((nonce << (9 * 8)) >> 8);
         for (uint256 i; i < randomBytes.length; ++i) {
             if (randomBytes[i].fail) {
                 vm.expectEmit(true, true, true, true);
@@ -81,6 +86,24 @@ contract ERC7821LIFITest is Test {
                 );
             }
         }
+
+        bytes memory executionData = abi.encode(calls, abi.encode(nonce));
+
+        vm.prank(address(mbe));
+        mbe.execute(bytes10(0x01010000000078210001), executionData);
+    }
+
+    function testERC7821LIFI_small_error(
+        uint256 nonce
+    ) external {
+        ERC7821.Call[] memory calls = new ERC7821.Call[](1);
+        calls[0] =
+            ERC7821.Call({ to: address(this), data: abi.encodeWithSignature("revertsWithSmallError()"), value: 0 });
+
+        mbe.setValidCalldata(abi.encode(nonce));
+        uint256 extraDataU = uint256(bytes32(bytes1(0x01))) + uint256((nonce << (9 * 8)) >> 8);
+        vm.expectEmit(true, true, true, true);
+        emit CallReverted(bytes32(extraDataU + 0), abi.encodeWithSelector(SmallError.selector));
 
         bytes memory executionData = abi.encode(calls, abi.encode(nonce));
 

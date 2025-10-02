@@ -18,6 +18,8 @@ contract DummyContract {
     error CustomError();
     error CustomErrorPayload(bytes);
 
+    mapping(uint256 => uint256) public store;
+
     function revertsWithCustomError() external payable {
         revert CustomError();
     }
@@ -28,10 +30,10 @@ contract DummyContract {
         revert CustomErrorPayload(payload);
     }
 
-    function returnsBytes(
-        bytes memory b
-    ) external payable returns (bytes memory) {
-        return b;
+    function setStore(
+        uint256 i
+    ) external payable {
+        store[i] = store[i] + 1;
     }
 }
 
@@ -41,6 +43,8 @@ contract DummyContract {
 contract IntegrationTest is Test {
     bytes32 constant NO_REVERT_MODE = bytes32(bytes10(0x01000000000078210001));
     bytes32 constant REVERT_MODE = bytes32(bytes10(0x01010000000078210001));
+
+    event CallReverted(bytes32 extraData, bytes revertData);
 
     CatapultarFactory factory;
     address dummy;
@@ -70,16 +74,8 @@ contract IntegrationTest is Test {
 
         // Lets create the normal calls.
         ERC7821.Call[] memory calls = new ERC7821.Call[](2);
-        calls[0] = ERC7821.Call({
-            to: dummy,
-            value: 0,
-            data: abi.encodeCall(DummyContract.returnsBytes, (bytes("Normal Call 1")))
-        });
-        calls[1] = ERC7821.Call({
-            to: dummy,
-            value: 0,
-            data: abi.encodeCall(DummyContract.returnsBytes, (bytes("call of normal two executed after Normal Call 1")))
-        });
+        calls[0] = ERC7821.Call({ to: dummy, value: 0, data: abi.encodeCall(DummyContract.setStore, (0)) });
+        calls[1] = ERC7821.Call({ to: dummy, value: 0, data: abi.encodeCall(DummyContract.setStore, (1)) });
 
         // Encode inside global call.
         globalCall[0] = ERC7821.Call({
@@ -98,7 +94,8 @@ contract IntegrationTest is Test {
             to: dummy,
             value: 0,
             data: abi.encodeCall(
-                DummyContract.revertsWithCustomErrorPayload, (bytes("call of normal two executed after Normal Call 1"))
+                DummyContract.revertsWithCustomErrorPayload,
+                (bytes("Once upon a time, there was a little smart contract called Catapultar"))
             )
         });
 
@@ -146,24 +143,19 @@ contract IntegrationTest is Test {
 
         // Generate a list of the expected call tree.
         // Call 1
-        vm.expectCall(dummy, abi.encodeCall(DummyContract.returnsBytes, (bytes("Normal Call 1"))));
-        vm.expectCall(
-            dummy,
-            abi.encodeCall(DummyContract.returnsBytes, (bytes("call of normal two executed after Normal Call 1")))
-        );
+        vm.expectCall(dummy, abi.encodeCall(DummyContract.setStore, (0)));
+        vm.expectCall(dummy, abi.encodeCall(DummyContract.setStore, (1)));
 
         // Call 2
-        vm.expectCall(dummy, abi.encodeCall(DummyContract.returnsBytes, (bytes("Normal Call 1"))));
-        vm.expectCall(
-            dummy,
-            abi.encodeCall(DummyContract.returnsBytes, (bytes("call of normal two executed after Normal Call 1")))
-        );
+        vm.expectCall(dummy, abi.encodeCall(DummyContract.setStore, (0)));
+        vm.expectCall(dummy, abi.encodeCall(DummyContract.setStore, (1)));
 
         // Call 3
         vm.expectCall(
             dummy,
             abi.encodeCall(
-                DummyContract.revertsWithCustomErrorPayload, (bytes("call of normal two executed after Normal Call 1"))
+                DummyContract.revertsWithCustomErrorPayload,
+                (bytes("Once upon a time, there was a little smart contract called Catapultar"))
             )
         );
 
@@ -171,19 +163,18 @@ contract IntegrationTest is Test {
         vm.expectCall(
             dummy,
             abi.encodeCall(
-                DummyContract.revertsWithCustomErrorPayload, (bytes("call of normal two executed after Normal Call 1"))
+                DummyContract.revertsWithCustomErrorPayload,
+                (bytes("Once upon a time, there was a little smart contract called Catapultar"))
             )
         );
-        vm.expectCall(
-            dummy,
-            abi.encodeCall(DummyContract.returnsBytes, (bytes("call of normal two executed after Normal Call 1")))
-        );
+        vm.expectCall(dummy, abi.encodeCall(DummyContract.setStore, (1)));
 
         // Call 5
         vm.expectCall(
             dummy,
             abi.encodeCall(
-                DummyContract.revertsWithCustomErrorPayload, (bytes("call of normal two executed after Normal Call 1"))
+                DummyContract.revertsWithCustomErrorPayload,
+                (bytes("Once upon a time, there was a little smart contract called Catapultar"))
             )
         );
 
@@ -191,16 +182,81 @@ contract IntegrationTest is Test {
         vm.expectCall(
             dummy,
             abi.encodeCall(
-                DummyContract.revertsWithCustomErrorPayload, (bytes("call of normal two executed after Normal Call 1"))
+                DummyContract.revertsWithCustomErrorPayload,
+                (bytes("Once upon a time, there was a little smart contract called Catapultar"))
             )
         );
         vm.expectCall(dummy, abi.encodeCall(DummyContract.revertsWithCustomError, ()));
 
+        // Call 3
+        vm.expectEmit();
+        emit CallReverted(
+            assembleExtraData(0x00, 2, 0),
+            abi.encodeWithSelector(
+                DummyContract.CustomErrorPayload.selector,
+                (bytes("Once upon a time, there was a little smart contract called Catapultar"))
+            )
+        );
+        vm.expectEmit();
+        emit CallReverted(
+            assembleExtraData(0x01, 100, 2),
+            abi.encodeWithSelector(
+                DummyContract.CustomErrorPayload.selector,
+                (bytes("Once upon a time, there was a little smart contract called Catapultar"))
+            )
+        );
+        // Call 4
+        vm.expectEmit();
+        emit CallReverted(
+            assembleExtraData(0x01, 3, 0),
+            abi.encodeWithSelector(
+                DummyContract.CustomErrorPayload.selector,
+                (bytes("Once upon a time, there was a little smart contract called Catapultar"))
+            )
+        );
+        // Call 5
+        vm.expectEmit();
+        emit CallReverted(
+            assembleExtraData(0x00, 4, 0),
+            abi.encodeWithSelector(
+                DummyContract.CustomErrorPayload.selector,
+                (bytes("Once upon a time, there was a little smart contract called Catapultar"))
+            )
+        );
+        vm.expectEmit();
+        emit CallReverted(
+            assembleExtraData(0x01, 100, 4),
+            abi.encodeWithSelector(
+                DummyContract.CustomErrorPayload.selector,
+                (bytes("Once upon a time, there was a little smart contract called Catapultar"))
+            )
+        );
+        // Call 6
+        vm.expectEmit();
+        emit CallReverted(
+            assembleExtraData(0x01, 5, 0),
+            abi.encodeWithSelector(
+                DummyContract.CustomErrorPayload.selector,
+                (bytes("Once upon a time, there was a little smart contract called Catapultar"))
+            )
+        );
+        vm.expectEmit();
+        emit CallReverted(assembleExtraData(0x01, 5, 1), abi.encodeWithSelector(DummyContract.CustomError.selector));
+
         payable(proxy).call(compressedCallPayload);
-        // TODO: verify all cals took place and the revert batches.
+
+        assertEq(DummyContract(dummy).store(0), 2, "Should have been called two times");
+        assertEq(DummyContract(dummy).store(1), 3, "Should have been called three times");
     }
 
     function typehash(uint256 nonce, bytes32 mode, ERC7821.Call[] calldata calls) external pure returns (bytes32) {
         return LibCalls.typehash(nonce, mode, calls);
+    }
+
+    function assembleExtraData(bytes1 revertMode, uint256 nonce, uint256 index) internal pure returns (bytes32) {
+        uint256 extraData = uint256(bytes32(bytes1(revertMode)));
+        extraData = extraData + ((nonce << (9 * 8)) >> 8);
+        extraData = extraData + uint256(uint64(index));
+        return bytes32(extraData);
     }
 }

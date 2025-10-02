@@ -52,7 +52,6 @@ contract CatapultarFactoryTest is Test {
         address deployedTo = factory.deployUpgradeable(owner, salt);
         vm.snapshotGasLastCall("deployUpgradeable");
 
-
         // Check that the deployed proxy has code.
         assertNotEq(deployedTo.code.length, 0);
 

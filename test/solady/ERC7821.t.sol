@@ -88,7 +88,7 @@ contract ERC7821Test is SoladyTest {
         calls[0].data = abi.encodeWithSignature("revertsWithCustomError()");
 
         vm.expectEmit();
-        emit CallReverted(bytes32(0), abi.encode(CustomError.selector));
+        emit CallReverted(bytes32(0), abi.encodeWithSelector(CustomError.selector));
 
         vm.expectRevert(CustomError.selector);
         mbe.execute{ value: _totalValue(calls) }(_SUPPORTED_MODE, _encode(calls, ""));

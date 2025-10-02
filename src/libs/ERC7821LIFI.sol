@@ -119,37 +119,19 @@ abstract contract ERC7821LIFI is ERC7821 {
             calldatacopy(m, data.offset, data.length)
             let success := call(gas(), to, value, m, data.length, codesize(), 0x00)
             if iszero(success) {
-                let rdsize := returndatasize()
-                // Emit CallReverted(bytes32 extraData, bytes revertData) event.
-                mstore(m, extraData)
-                mstore(add(m, 0x20), 0x40)
-
+                // Emit CallReverted(bytes32 extraData, bytes revertData).
+                mstore(m, extraData) // Place extraData
+                mstore(add(m, 0x20), 0x40) // Set offset for bytes
                 // Compute the padded length for ABI alignment. (rdsize + rdsize % 32)
-                let sizeAfterPad := and(add(rdsize, 31), not(31))
-
-                // Clear out potential overflowing returndata.
-                mstore(add(add(m, 0x40), sizeAfterPad), 0)
-
-                // Place the length of the returndata into memory. But place at least 32.
-                mstore(
-                    add(m, 0x40),
-                    add( // returns sizeAfterPad if 32 > rdsize otherwise rdsize
-                        mul( // returns rdsize % 32 if 32 > rdsize otherwise 0
-                            sub(sizeAfterPad, rdsize), // rdsize % 32
-                            gt(32, rdsize) // 1 if 32 > rdsize otherwise 0
-                        ),
-                        rdsize
-                    )
-                )
-
-                // Copy the returndata into place
-                returndatacopy(add(m, 0x60), 0x00, rdsize)
-
+                let sizeAfterPad := and(add(returndatasize(), 31), not(31))
+                mstore(add(add(m, 0x40), sizeAfterPad), 0) // Clear out potential overflowing returndata.
+                mstore(add(m, 0x40), returndatasize()) // Place length of returndata
+                returndatacopy(add(m, 0x60), 0x00, returndatasize()) // Place returndata
                 log1(m, add(0x60, sizeAfterPad), _CALL_REVERTED_EVENT_SIGNATURE)
 
                 if iszero(shr(mul(31, 8), extraData)) {
                     // Bubble up the revert if the call reverts and the skip revert flag has not been set
-                    revert(add(m, 0x60), rdsize)
+                    revert(add(m, 0x60), returndatasize())
                 }
             }
         }
