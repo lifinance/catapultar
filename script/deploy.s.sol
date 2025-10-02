@@ -1,16 +1,9 @@
 // SPDX-License-Identifier: LGPL-3.0-only
-pragma solidity ^0.8.22;
+pragma solidity ^0.8.30;
 
 import { multichain } from "./multichain.s.sol";
 
 import { CatapultarFactory } from "../src/CatapultarFactory.sol";
-
-interface KeylessCreate2Factory {
-    function safeCreate2(
-        bytes32 salt,
-        bytes calldata initializationCode
-    ) external payable returns (address deploymentAddress);
-}
 
 contract deploy is multichain {
     error NotExpectedAddress(address expected, address deployedTo);
