@@ -57,6 +57,9 @@ contract Catapultar is ERC7821LIFI, EIP712, BitmapNonce, Ownable, Initializable,
     error NotUpgradeable();
     error CannotBeUpgradeable();
 
+    /**
+     * @dev Used to uniquely rehash ERC1271 signatures to identify them as originating from this account.
+     */
     bytes32 constant REPLAY_PROTECTION = keccak256(bytes("Replay(address account,bytes32 payload)"));
 
     /**
@@ -65,6 +68,27 @@ contract Catapultar is ERC7821LIFI, EIP712, BitmapNonce, Ownable, Initializable,
      */
     bool immutable ALLOW_EMBEDDED_CALLS;
 
+    /**
+     * @notice Only allows owner or this contract to call.
+     */
+    modifier onlyOwnerOrSelf() {
+        assembly ("memory-safe") {
+            // Check if sender is this contract.
+            if iszero(eq(caller(), address())) {
+                // If the caller is not the stored owner, revert.
+                if iszero(eq(caller(), sload(_OWNER_SLOT))) {
+                    mstore(0x00, 0x82b42900) // `Unauthorized()`.
+                    revert(0x1c, 0x04)
+                }
+            }
+        }
+        _;
+    }
+
+    /**
+     * @param allowOneTimeCall Whether or not embedded calls are allowed. If set to false, logic associated with
+     * embedded calls is skipped.
+     */
     constructor(
         bool allowOneTimeCall
     ) {
@@ -77,16 +101,16 @@ contract Catapultar is ERC7821LIFI, EIP712, BitmapNonce, Ownable, Initializable,
         version = "0.0.1";
     }
 
-    function DOMAIN_SEPARATOR() external view returns (bytes32) {
-        return _domainSeparator();
-    }
-
     /**
      * @dev While the name and version won't change, when used in a proxy pattern, returning true leads to a shorter
      * path for the domain separator.
      */
     function _domainNameAndVersionMayChange() internal pure override returns (bool result) {
         return true;
+    }
+
+    function DOMAIN_SEPARATOR() external view returns (bytes32) {
+        return _domainSeparator();
     }
 
     /**
@@ -120,14 +144,21 @@ contract Catapultar is ERC7821LIFI, EIP712, BitmapNonce, Ownable, Initializable,
             ),
             signature
         );
-        assembly {
+        assembly ("memory-safe") {
             // `success ? bytes4(keccak256("isValidSignature(bytes32,bytes)")) : 0xffffffff`.
             // We use `0xffffffff` for invalid, in convention with the reference implementation.
             result := shl(224, or(0x1626ba7e, sub(0, iszero(success))))
         }
     }
 
-    function invalidateUnorderedNonces(uint256 wordPos, uint256 mask) external onlyOwner {
+    /**
+     * @notice Invalidate nonces using a bitmask allowing for batch invalidation.
+     * @dev Can only be called by contract owner or the contract itself. Using batch calls, the contract can call itself
+     * to invalidate nonces. This allows owner-signed batch invalidation.
+     * @param wordPos Lefmost 248 bits of the nonce.
+     * @param mask Bitmask used to invalidate nonces associated with the rightmost 8 bits
+     */
+    function invalidateUnorderedNonces(uint256 wordPos, uint256 mask) external onlyOwnerOrSelf {
         nonceBitmap[wordPos] |= mask;
 
         emit UnorderedNonceInvalidation(wordPos, mask);
@@ -144,6 +175,11 @@ contract Catapultar is ERC7821LIFI, EIP712, BitmapNonce, Ownable, Initializable,
         return bytes32(LibClone.argsOnClone(address(this), 0, 32));
     }
 
+    /**
+     * @notice Returns immutable calldata attached to a proxy.
+     * @dev This function must only be called from a proxy deployed with LibClone.createDeterministicClone.
+     * @return bytes32 Embedded call as the first 32 bytes of the immutable args attached to the proxy.
+     */
     function embeddedCall() external view returns (bytes32) {
         if (!ALLOW_EMBEDDED_CALLS) return bytes32(0);
         return _embeddedCall();
@@ -153,15 +189,22 @@ contract Catapultar is ERC7821LIFI, EIP712, BitmapNonce, Ownable, Initializable,
      * @notice Returns whether the contract has any storage set in the ERC1967 implementation slot.
      * @dev It is possible for a non-upgradeable contract to return false if the storage slot is overwritten to be 0.
      * Likewise, for an upgradeable contract that does not use the _ERC1967_IMPLEMENTATION_SLOT it may return true.
+     * @return nUp Whether the ERC1967 implementation slot is not 0.
      */
-    function _notUpgradeable() internal view returns (bool up) {
+    function _notUpgradeable() internal view returns (bool nUp) {
         bytes32 implementation;
         assembly ("memory-safe") {
             implementation := sload(_ERC1967_IMPLEMENTATION_SLOT)
-            up := eq(implementation, 0)
+            nUp := eq(implementation, 0)
         }
     }
 
+    /**
+     * @notice Returns whether the contract does not have any storage set in the ERC1967 implementation slot.
+     * @dev It is possible for a non-upgradeable contract to return true if the storage slot is overwritten to be 0.
+     * Likewise, for an upgradeable contract that does not use the _ERC1967_IMPLEMENTATION_SLOT it may return false.
+     * @return up Whether the ERC1967 implementation slot is 0.
+     */
     function upgradeable() external view returns (bool up) {
         return !_notUpgradeable();
     }
@@ -179,6 +222,13 @@ contract Catapultar is ERC7821LIFI, EIP712, BitmapNonce, Ownable, Initializable,
 
     // --- Call Validation Logic --- //
 
+    /**
+     * @notice Validates opData
+     * @param mode Execution mode for the transactions.
+     * @param calls Batch of calls to be executed.
+     * @param opData Data to validate that calls and mode have been correctly issued as well as containing the nonce.
+     * Is expected to be encoded as abi.encodePacked(bytes32(nonce), signature);
+     */
     function _validateOpData(
         bytes32 mode,
         Call[] calldata calls,
@@ -202,6 +252,9 @@ contract Catapultar is ERC7821LIFI, EIP712, BitmapNonce, Ownable, Initializable,
 
     /**
      * @notice Unsafe casing of address to bytes32
+     * @dev Equivalent to bytes32(uint256(uint160(addr))) except the upper 12 bytes bytes are not cleaned.
+     * @param addr Address to be cased into the rightmost 20 bytes of a bytes32.
+     * @return b Bytes32 variable with the address in the rightmost 20 bytes.
      */
     function asUnsafeBytes32(
         address addr
@@ -211,7 +264,8 @@ contract Catapultar is ERC7821LIFI, EIP712, BitmapNonce, Ownable, Initializable,
         }
     }
 
-    // Allow us to use LibZip for gas efficiency savings on cheap execution but expensive calldata chains.
+    /// @notice LibZip will handle fallbacks for gas efficiency savings on cheap execution but expensive calldata
+    /// chains.
     fallback() external payable override receiverFallback {
         LibZip.cdFallback();
     }

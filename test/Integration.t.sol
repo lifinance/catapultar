@@ -6,7 +6,6 @@ import { Test } from "forge-std/Test.sol";
 import { ERC7821 } from "solady/src/accounts/ERC7821.sol";
 import { LibZip } from "solady/src/utils/LibZip.sol";
 
-import { Catapultar } from "../src/Catapultar.sol";
 import { CatapultarFactory } from "../src/CatapultarFactory.sol";
 import { LibCalls } from "../src/libs/LibCalls.sol";
 

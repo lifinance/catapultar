@@ -176,7 +176,7 @@ abstract contract CatapultarTest is Test {
         vm.stopPrank();
     }
 
-    function testRevert_invalidateUnorderedNonces_onlyOwner() external {
+    function testRevert_invalidateUnorderedNonces_onlyOwnerOrSelf() external {
         (address owner,) = init();
 
         vm.expectRevert(abi.encodeWithSignature("Unauthorized()"));
@@ -184,6 +184,18 @@ abstract contract CatapultarTest is Test {
 
         vm.prank(owner);
         executor.invalidateUnorderedNonces(0, 3);
+
+        vm.prank(address(executor));
+        executor.invalidateUnorderedNonces(0, 3);
+    }
+
+    function testRevert_invalidateUnorderedNonces_asBatch() external {
+        ERC7821.Call[] memory calls = new ERC7821.Call[](1);
+        calls[0] =
+            ERC7821.Call({ to: address(0), data: abi.encodeCall(executor.invalidateUnorderedNonces, (0, 2)), value: 0 });
+
+        vm.prank(address(executor));
+        executor.execute(bytes10(0x01000000000078210001), abi.encode(calls, abi.encode(0)));
     }
 
     function test_validateOpData_embedded_calls() external {
@@ -239,7 +251,7 @@ abstract contract CatapultarTest is Test {
         assertEq(result, false);
     }
 
-    bytes4 constant sUCESS_IS_VALID_SIGNATURE = bytes4(keccak256("isValidSignature(bytes32,bytes)"));
+    bytes4 constant SUCCESS_IS_VALID_SIGNATURE = bytes4(keccak256("isValidSignature(bytes32,bytes)"));
 
     function test_isValidSignature() external {
         (, uint256 privateKey) = init();
@@ -255,7 +267,7 @@ abstract contract CatapultarTest is Test {
 
         bytes4 result = executor.isValidSignature(msgHash, signature);
 
-        assertEq(bytes32(result), bytes32(sUCESS_IS_VALID_SIGNATURE));
+        assertEq(bytes32(result), bytes32(SUCCESS_IS_VALID_SIGNATURE));
 
         // Deploy another proxy version to check whether we can replay the signature. Do note that this technically also
         // uses a different underlying template.
@@ -263,7 +275,7 @@ abstract contract CatapultarTest is Test {
 
         result = MockCatapultar(payable(newExecutorProxied)).isValidSignature(msgHash, signature);
 
-        assertNotEq(bytes32(result), bytes32(sUCESS_IS_VALID_SIGNATURE));
+        assertNotEq(bytes32(result), bytes32(SUCCESS_IS_VALID_SIGNATURE));
     }
 
     function testRevert_isValidSignature_no_rehash() external {
@@ -275,7 +287,7 @@ abstract contract CatapultarTest is Test {
 
         bytes4 result = executor.isValidSignature(msgHash, abi.encodePacked(r, s, v));
 
-        assertNotEq(bytes32(result), bytes32(sUCESS_IS_VALID_SIGNATURE));
+        assertNotEq(bytes32(result), bytes32(SUCCESS_IS_VALID_SIGNATURE));
         assertEq(bytes32(result), bytes32(bytes4(0xffffffff)));
     }
 }

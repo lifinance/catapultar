@@ -7,7 +7,9 @@ import { ERC7821 } from "solady/src/accounts/ERC7821.sol";
  * @notice Opinioned batch executor.
  * @author Alexander @ LIFI (https://li.fi)
  * @author Solady (https://github.com/vectorized/solady/blob/main/src/accounts/ERC7821.sol)
- * @dev This contract can be inherited to be insertable into fully-fledged smart accounts.
+ * @dev This contract is intended to be insert into smart accounts to provide them batch execution ability using an
+ * ERC7821 compatible interface. An implementing contract is intended to override _validateOpData to signal whether
+ * calls are approved.
  */
 abstract contract ERC7821LIFI is ERC7821 {
     error TooManyCalls();
@@ -16,16 +18,22 @@ abstract contract ERC7821LIFI is ERC7821 {
 
     event CallReverted(bytes32 extraData, bytes revertData);
 
-    // keccak256(bytes("CallReverted(bytes32,bytes)"));
+    /// @dev keccak256(bytes("CallReverted(bytes32,bytes)"));
     bytes32 constant _CALL_REVERTED_EVENT_SIGNATURE = 0xa5ef9b4d75ffdec5840bf221dba12f4a744e8b60aeb23da25fbd8c487a97924d;
 
-    // Validation function that validate opData for a specific call.
+    /// @notice Validation function that validate opData for a specific call.
     function _validateOpData(
         bytes32 mode,
         Call[] calldata calls,
         bytes calldata opData
     ) internal virtual returns (bool);
 
+    /**
+     * @notice Returns whether or not the revert flag has been set in the leftmost byte
+     * @dev Carries the revert flag forward, does not check whether or not the revert flag has a specific value.
+     * @param mode Execution mode
+     * @return flag A revert flag indication set in the leftmost byte.
+     */
     function _executionModeRevert(
         bytes32 mode
     ) internal view virtual returns (bytes32 flag) {
@@ -66,9 +74,10 @@ abstract contract ERC7821LIFI is ERC7821 {
     // [1 .. 22] Nonce extract
     // [23 .. 31] Index
 
-    /// @dev Executes the calls.
-    /// Reverts and bubbles up error if any call fails.
-    /// The `mode` and `executionData` are passed along in case there's a need to use them.
+    /**
+     * @notice Executes the provides calls after validating opData
+     * @dev Embeds the mode and the part of opData into the extraData provided to be used to execute the calls.
+     */
     function _execute(
         bytes32 mode,
         bytes calldata,
@@ -89,9 +98,12 @@ abstract contract ERC7821LIFI is ERC7821 {
         return _execute(calls, extraData);
     }
 
-    /// @dev Executes the calls.
-    /// Reverts and bubbles up error if any call fails.
-    /// `extraData` can be any supplementary data (e.g. a memory pointer, some hash).
+    /**
+     * @notice Iterates over the provides calls to execute them.
+     * @dev Embed the index of the call into extraData as the rightmost bytes.
+     * Because _only_ 8 bytes is reserved for the index, the function cannot take more than type(uint64).max calls. This
+     * limit exceeds the memory limit of the EVM so it is not a problem in practise.
+     */
     function _execute(Call[] calldata calls, bytes32 extraData) internal virtual override {
         unchecked {
             uint256 i;
@@ -110,16 +122,21 @@ abstract contract ERC7821LIFI is ERC7821 {
         }
     }
 
-    /// @dev Executes the call.
-    /// Reverts and bubbles up error if any call fails.
-    /// `extraData` can be any supplementary data (e.g. a memory pointer, some hash).
+    /**
+     * @notice Executes provided call.
+     * @dev Uses the revert flag set in the leftmost byte to decide whether to bubble up a revert.
+     * The function will always emit a CallReverted event if the transaction reverted.
+     * @param to Contract to call.
+     * @param value Amount of native to send with the call.
+     * @param data Calldata to execute.
+     * @param extraData Data to emit on transaction failure. If the leftmost byte is 0, will bubble up a reverted call.
+     */
     function _execute(address to, uint256 value, bytes calldata data, bytes32 extraData) internal virtual override {
         assembly ("memory-safe") {
             let m := mload(0x40) // Grab the free memory pointer.
             calldatacopy(m, data.offset, data.length)
             let success := call(gas(), to, value, m, data.length, codesize(), 0x00)
             if iszero(success) {
-                // Emit CallReverted(bytes32 extraData, bytes revertData).
                 mstore(m, extraData) // Place extraData
                 mstore(add(m, 0x20), 0x40) // Set offset for bytes
                 // Compute the padded length for ABI alignment. (rdsize + rdsize % 32)
@@ -127,6 +144,7 @@ abstract contract ERC7821LIFI is ERC7821 {
                 mstore(add(add(m, 0x40), sizeAfterPad), 0) // Clear out potential overflowing returndata.
                 mstore(add(m, 0x40), returndatasize()) // Place length of returndata
                 returndatacopy(add(m, 0x60), 0x00, returndatasize()) // Place returndata
+                // Emit CallReverted(bytes32 extraData, bytes revertData).
                 log1(m, add(0x60, sizeAfterPad), _CALL_REVERTED_EVENT_SIGNATURE)
 
                 if iszero(shr(mul(31, 8), extraData)) {
