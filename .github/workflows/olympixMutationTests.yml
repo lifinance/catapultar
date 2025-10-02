@@ -1,0 +1,29 @@
+name: Mutation Test Generation Workflow
+on:
+  push
+
+jobs:
+  mutation-test-generation:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+
+      - name: Run forge install
+        run: forge install
+
+      - name: Mutation Test Generator
+        uses: olympix/mutation-test-generator@main
+        env:
+          OLYMPIX_API_TOKEN: ${{ secrets.OLYMPIX_API_TOKEN }}
+        with:
+          args: "-p src/CatapultarFactory.sol -p src/Catapultar.sol -p src/libs/LibCalls.sol -p src/libs/ERC7821LIFI.sol -p src/libs/BitmapNonce.sol"
