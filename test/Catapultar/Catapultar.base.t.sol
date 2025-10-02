@@ -159,6 +159,9 @@ abstract contract CatapultarTest is Test {
 
         vm.revertTo(snapshot);
 
+        vm.expectEmit();
+        emit BitmapNonce.UnorderedNonceInvalidation(0, 3);
+
         vm.prank(owner);
         executor.invalidateUnorderedNonces(0, 3);
 
@@ -289,5 +292,22 @@ abstract contract CatapultarTest is Test {
 
         assertNotEq(bytes32(result), bytes32(SUCCESS_IS_VALID_SIGNATURE));
         assertEq(bytes32(result), bytes32(bytes4(0xffffffff)));
+    }
+
+    // Considering this account is a SCA, we need to be able to handle the callbacks for token transfers.
+    function test_token_transfer_fallback() external {
+        // 0x150b7a02: `onERC721Received(address,address,uint256,bytes)`.
+        // 0xf23a6e61: `onERC1155Received(address,address,uint256,uint256,bytes)`.
+        // 0xbc197c81: `onERC1155BatchReceived(address,address,uint256[],uint256[],bytes)`.
+
+        address(executor).call(
+            abi.encodeWithSignature("onERC721Received(address,address,uint256,bytes)", address(0), address(0), uint256(0), new bytes(0))
+        );
+        address(executor).call(
+            abi.encodeWithSignature("onERC1155Received(address,address,uint256,uint256,bytes)", address(0), address(0), uint256(0),uint256(0), new bytes(0))
+        );
+        address(executor).call(
+            abi.encodeWithSignature("onERC1155BatchReceived(address,address,uint256[],uint256[],bytes)", address(0), address(0), new uint256[](0), new uint256[](0), new bytes(0))
+        );
     }
 }
