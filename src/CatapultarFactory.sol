@@ -49,18 +49,18 @@ contract CatapultarFactory {
         KeyedOwnable.KeyType ktp,
         bytes32[] calldata owner,
         bytes32 salt
-    ) external ownerInSalt(salt, ktp, owner) returns (address proxy) {
+    ) external payable ownerInSalt(salt, ktp, owner) returns (address proxy) {
         proxy = LibClone.cloneDeterministic_PUSH0(address(EXECUTOR_NO_EMBEDDED_CALLS), salt);
 
-        Catapultar(payable(proxy)).init(ktp, owner);
+        Catapultar(payable(proxy)).init{value:msg.value}(ktp, owner);
     }
 
-    function deploy(address owner, bytes32 salt) external returns (address proxy) {
+    function deploy(address owner, bytes32 salt) external payable returns (address proxy) {
         proxy = LibClone.cloneDeterministic_PUSH0(address(EXECUTOR_NO_EMBEDDED_CALLS), salt);
 
         bytes32[] memory keys = new bytes32[](1);
         keys[0] = bytes32(uint256(uint160(owner)));
-        Catapultar(payable(proxy)).init(KeyedOwnable.KeyType.ECDSAOrSmartContract, keys);
+        Catapultar(payable(proxy)).init{value:msg.value}(KeyedOwnable.KeyType.ECDSAOrSmartContract, keys);
     }
 
     /// @dev Do not trust that the owner of the returned proxy is equal to the provided owner. Ownership may have been
@@ -80,10 +80,10 @@ contract CatapultarFactory {
         bytes32[] calldata owner,
         bytes32 salt,
         bytes32 callsTypeHash
-    ) external ownerInSalt(salt, ktp, owner) returns (address proxy) {
+    ) external payable ownerInSalt(salt, ktp, owner) returns (address proxy) {
         proxy = LibClone.cloneDeterministic(address(EXECUTOR_EMBEDDED_CALLS), abi.encodePacked(callsTypeHash), salt);
 
-        Catapultar(payable(proxy)).init(ktp, owner);
+        Catapultar(payable(proxy)).init{value:msg.value}(ktp, owner);
     }
 
     /// @dev Do not trust that the owner of the returned proxy is equal to the provided owner. Ownership may have been
@@ -105,10 +105,10 @@ contract CatapultarFactory {
         KeyedOwnable.KeyType ktp,
         bytes32[] calldata owner,
         bytes32 salt
-    ) external ownerInSalt(salt, ktp, owner) returns (address proxy) {
+    ) external payable ownerInSalt(salt, ktp, owner) returns (address proxy) {
         proxy = LibClone.deployDeterministicERC1967(address(EXECUTOR_NO_EMBEDDED_CALLS), salt);
 
-        Catapultar(payable(proxy)).init(ktp, owner);
+        Catapultar(payable(proxy)).init{value:msg.value}(ktp, owner);
     }
 
     /// @dev Do not trust that the owner of the returned proxy is equal to the provided owner. Ownership may have been
