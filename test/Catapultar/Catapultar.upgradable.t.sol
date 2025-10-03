@@ -30,6 +30,6 @@ contract CatapultarUpgradeableTest is CatapultarTest {
         vm.expectRevert(abi.encodeWithSelector(Catapultar.CannotBeUpgradeable.selector));
         bytes32[] memory keys = new bytes32[](1);
         keys[0] = bytes32(uint256(uint160(makeAddr("owner"))));
-        MockCatapultar(payable(proxied)).init(KeyedOwnable.KeyType.ECDSAThenSmartContract, keys);
+        MockCatapultar(payable(proxied)).init(KeyedOwnable.KeyType.ECDSAOrSmartContract, keys);
     }
 }

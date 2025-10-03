@@ -56,14 +56,14 @@ abstract contract CatapultarTest is Test {
         bytes32[] memory keys = new bytes32[](1);
         keys[0] = bytes32(uint256(uint160(owner)));
 
-        executor.init(KeyedOwnable.KeyType.ECDSAThenSmartContract, keys);
+        executor.init(KeyedOwnable.KeyType.ECDSAOrSmartContract, keys);
     }
 
     function test_template_init_disabled() external {
         bytes32[] memory keys = new bytes32[](1);
         keys[0] = bytes32(uint256(uint160(makeAddr("owner"))));
         vm.expectRevert(abi.encodeWithSignature("InvalidInitialization()"));
-        MockCatapultar(payable(executorTemplate)).init(KeyedOwnable.KeyType.ECDSAThenSmartContract, keys);
+        MockCatapultar(payable(executorTemplate)).init(KeyedOwnable.KeyType.ECDSAOrSmartContract, keys);
     }
 
     function test_init() external {
@@ -74,14 +74,14 @@ abstract contract CatapultarTest is Test {
         bytes32[] memory keys = new bytes32[](1);
         keys[0] = bytes32(uint256(uint160(owner)));
 
-        executor.init(KeyedOwnable.KeyType.ECDSAThenSmartContract, keys);
+        executor.init(KeyedOwnable.KeyType.ECDSAOrSmartContract, keys);
 
         assertEq(executor.owner(), owner);
 
         // Ensure we can't init again.
         vm.prank(owner);
         vm.expectRevert(abi.encodeWithSignature("InvalidInitialization()"));
-        executor.init(KeyedOwnable.KeyType.ECDSAThenSmartContract, keys);
+        executor.init(KeyedOwnable.KeyType.ECDSAOrSmartContract, keys);
     }
 
     /// forge-config: default.isolate = true

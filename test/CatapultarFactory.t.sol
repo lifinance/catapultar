@@ -30,7 +30,7 @@ contract CatapultarFactoryTest is Test {
         // Try deploying again.
         vm.expectRevert(abi.encodeWithSignature("DeploymentFailed()"));
 
-        factory.deploy(KeyedOwnable.KeyType.ECDSAThenSmartContract, keys, salt);
+        factory.deploy(KeyedOwnable.KeyType.ECDSAOrSmartContract, keys, salt);
     }
 
     /// forge-config: default.isolate = true
@@ -42,7 +42,7 @@ contract CatapultarFactoryTest is Test {
         keys[0] = bytes32(uint256(uint160(owner)));
 
         address deployedTo =
-            factory.deployWithEmbedCall(KeyedOwnable.KeyType.ECDSAThenSmartContract, keys, salt, bytes32(0));
+            factory.deployWithEmbedCall(KeyedOwnable.KeyType.ECDSAOrSmartContract, keys, salt, bytes32(0));
         vm.snapshotGasLastCall("deployWithEmbedCall");
 
         // Check that the deployed proxy has code.
@@ -50,7 +50,7 @@ contract CatapultarFactoryTest is Test {
 
         // Try deploying again.
         vm.expectRevert(abi.encodeWithSignature("DeploymentFailed()"));
-        factory.deployWithEmbedCall(KeyedOwnable.KeyType.ECDSAThenSmartContract, keys, salt, bytes32(0));
+        factory.deployWithEmbedCall(KeyedOwnable.KeyType.ECDSAOrSmartContract, keys, salt, bytes32(0));
     }
 
     /// forge-config: default.isolate = true
@@ -61,7 +61,7 @@ contract CatapultarFactoryTest is Test {
         bytes32[] memory keys = new bytes32[](1);
         keys[0] = bytes32(uint256(uint160(owner)));
 
-        address deployedTo = factory.deployUpgradeable(KeyedOwnable.KeyType.ECDSAThenSmartContract, keys, salt);
+        address deployedTo = factory.deployUpgradeable(KeyedOwnable.KeyType.ECDSAOrSmartContract, keys, salt);
         vm.snapshotGasLastCall("deployUpgradeable");
 
         // Check that the deployed proxy has code.
@@ -69,7 +69,7 @@ contract CatapultarFactoryTest is Test {
 
         // Try deploying again.
         vm.expectRevert(abi.encodeWithSignature("DeploymentFailed()"));
-        factory.deployUpgradeable(KeyedOwnable.KeyType.ECDSAThenSmartContract, keys, salt);
+        factory.deployUpgradeable(KeyedOwnable.KeyType.ECDSAOrSmartContract, keys, salt);
     }
 
     function test_predictDeploy() external {
@@ -79,9 +79,9 @@ contract CatapultarFactoryTest is Test {
         bytes32[] memory keys = new bytes32[](1);
         keys[0] = bytes32(uint256(uint160(owner)));
 
-        address predictedDeployedTo = factory.predictDeploy(KeyedOwnable.KeyType.ECDSAThenSmartContract, keys, salt);
+        address predictedDeployedTo = factory.predictDeploy(KeyedOwnable.KeyType.ECDSAOrSmartContract, keys, salt);
 
-        address deployedTo = factory.deploy(KeyedOwnable.KeyType.ECDSAThenSmartContract, keys, salt);
+        address deployedTo = factory.deploy(KeyedOwnable.KeyType.ECDSAOrSmartContract, keys, salt);
         assertEq(predictedDeployedTo, deployedTo);
     }
 
@@ -95,10 +95,10 @@ contract CatapultarFactoryTest is Test {
         keys[0] = bytes32(uint256(uint160(owner)));
 
         address predictedDeployedTo =
-            factory.predictDeployWithEmbedCall(KeyedOwnable.KeyType.ECDSAThenSmartContract, keys, salt, embeddedCall);
+            factory.predictDeployWithEmbedCall(KeyedOwnable.KeyType.ECDSAOrSmartContract, keys, salt, embeddedCall);
 
         address deployedTo =
-            factory.deployWithEmbedCall(KeyedOwnable.KeyType.ECDSAThenSmartContract, keys, salt, embeddedCall);
+            factory.deployWithEmbedCall(KeyedOwnable.KeyType.ECDSAOrSmartContract, keys, salt, embeddedCall);
         assertEq(predictedDeployedTo, deployedTo);
     }
 
@@ -110,9 +110,9 @@ contract CatapultarFactoryTest is Test {
         keys[0] = bytes32(uint256(uint160(owner)));
 
         address predictedDeployedTo =
-            factory.predictDeployUpgradeable(KeyedOwnable.KeyType.ECDSAThenSmartContract, keys, salt);
+            factory.predictDeployUpgradeable(KeyedOwnable.KeyType.ECDSAOrSmartContract, keys, salt);
 
-        address deployedTo = factory.deployUpgradeable(KeyedOwnable.KeyType.ECDSAThenSmartContract, keys, salt);
+        address deployedTo = factory.deployUpgradeable(KeyedOwnable.KeyType.ECDSAOrSmartContract, keys, salt);
         assertEq(predictedDeployedTo, deployedTo);
     }
 
@@ -126,7 +126,7 @@ contract CatapultarFactoryTest is Test {
         bytes32[] memory keys = new bytes32[](1);
         keys[0] = bytes32(uint256(uint160(owner)));
 
-        factory.deploy(KeyedOwnable.KeyType.ECDSAThenSmartContract, keys, salt);
+        factory.deploy(KeyedOwnable.KeyType.ECDSAOrSmartContract, keys, salt);
     }
 
     function testRevert_deployWithEmbedCall_salt_does_not_contain_owner(address owner, bytes32 salt) external {
@@ -137,7 +137,7 @@ contract CatapultarFactoryTest is Test {
         bytes32[] memory keys = new bytes32[](1);
         keys[0] = bytes32(uint256(uint160(owner)));
 
-        factory.deployWithEmbedCall(KeyedOwnable.KeyType.ECDSAThenSmartContract, keys, salt, bytes32(0));
+        factory.deployWithEmbedCall(KeyedOwnable.KeyType.ECDSAOrSmartContract, keys, salt, bytes32(0));
     }
 
     function testRevert_deployUpgradeable_salt_does_not_contain_owner(address owner, bytes32 salt) external {
@@ -148,7 +148,7 @@ contract CatapultarFactoryTest is Test {
         bytes32[] memory keys = new bytes32[](1);
         keys[0] = bytes32(uint256(uint160(owner)));
 
-        factory.deployUpgradeable(KeyedOwnable.KeyType.ECDSAThenSmartContract, keys, salt);
+        factory.deployUpgradeable(KeyedOwnable.KeyType.ECDSAOrSmartContract, keys, salt);
     }
 
     function testRevert_predictDeploy_salt_does_not_contain_owner(address owner, bytes32 salt) external {
@@ -159,7 +159,7 @@ contract CatapultarFactoryTest is Test {
         bytes32[] memory keys = new bytes32[](1);
         keys[0] = bytes32(uint256(uint160(owner)));
 
-        factory.predictDeploy(KeyedOwnable.KeyType.ECDSAThenSmartContract, keys, salt);
+        factory.predictDeploy(KeyedOwnable.KeyType.ECDSAOrSmartContract, keys, salt);
     }
 
     function testRevert_predictDeployWithEmbedCall_salt_does_not_contain_owner(address owner, bytes32 salt) external {
@@ -170,7 +170,7 @@ contract CatapultarFactoryTest is Test {
         bytes32[] memory keys = new bytes32[](1);
         keys[0] = bytes32(uint256(uint160(owner)));
 
-        factory.predictDeployWithEmbedCall(KeyedOwnable.KeyType.ECDSAThenSmartContract, keys, salt, bytes32(0));
+        factory.predictDeployWithEmbedCall(KeyedOwnable.KeyType.ECDSAOrSmartContract, keys, salt, bytes32(0));
     }
 
     function testRevert_predictDeployUpgradeable_salt_does_not_contain_owner(address owner, bytes32 salt) external {
@@ -181,6 +181,6 @@ contract CatapultarFactoryTest is Test {
         bytes32[] memory keys = new bytes32[](1);
         keys[0] = bytes32(uint256(uint160(owner)));
 
-        factory.predictDeployUpgradeable(KeyedOwnable.KeyType.ECDSAThenSmartContract, keys, salt);
+        factory.predictDeployUpgradeable(KeyedOwnable.KeyType.ECDSAOrSmartContract, keys, salt);
     }
 }

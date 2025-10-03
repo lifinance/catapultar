@@ -55,15 +55,12 @@ contract CatapultarFactory {
         Catapultar(payable(proxy)).init(ktp, owner);
     }
 
-    function deploy(
-        address owner,
-        bytes32 salt
-    ) external returns (address proxy) {
+    function deploy(address owner, bytes32 salt) external returns (address proxy) {
         proxy = LibClone.cloneDeterministic_PUSH0(address(EXECUTOR_NO_EMBEDDED_CALLS), salt);
 
         bytes32[] memory keys = new bytes32[](1);
         keys[0] = bytes32(uint256(uint160(owner)));
-        Catapultar(payable(proxy)).init(KeyedOwnable.KeyType.ECDSAThenSmartContract, keys);
+        Catapultar(payable(proxy)).init(KeyedOwnable.KeyType.ECDSAOrSmartContract, keys);
     }
 
     /// @dev Do not trust that the owner of the returned proxy is equal to the provided owner. Ownership may have been
@@ -137,7 +134,7 @@ contract CatapultarFactory {
      * @param owner A desired callable parameter for a proxy address
      */
     modifier ownerInSalt(bytes32 salt, KeyedOwnable.KeyType ktp, bytes32[] calldata owner) {
-        if (KeyedOwnable.KeyType.ECDSAThenSmartContract == ktp && owner.length == 1) {
+        if (KeyedOwnable.KeyType.ECDSAOrSmartContract == ktp && owner.length == 1) {
             LibClone.checkStartsWith(salt, address(uint160(uint256(owner[0]))));
         } else {
             // TODO: this is cheating but it _technically is valid

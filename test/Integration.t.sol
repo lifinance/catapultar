@@ -62,7 +62,7 @@ contract IntegrationTest is Test {
         bytes32[] memory keys = new bytes32[](1);
         keys[0] = bytes32(uint256(uint160(owner)));
         // Lets get a proxy.
-        address proxy = factory.deploy(KeyedOwnable.KeyType.ECDSAThenSmartContract, keys, salt);
+        address proxy = factory.deploy(KeyedOwnable.KeyType.ECDSAOrSmartContract, keys, salt);
 
         // Create the calls. We wanna make a batch of 6 calls:
         // 1. 2 normal calls. (revert flag 0x00)
