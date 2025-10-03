@@ -100,7 +100,7 @@ contract Catapultar is ERC7821LIFI, EIP712, BitmapNonce, KeyedOwnable, Initializ
      * will revert.
      */
     function init(KeyType ktp, bytes32[] calldata owner) external initializer {
-        _transferOwnership(ktp, owner);
+        _setOwnership(ktp, owner);
         if (ALLOW_EMBEDDED_CALLS && !_notUpgradeable()) revert CannotBeUpgradeable();
     }
 

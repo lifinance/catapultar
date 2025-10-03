@@ -24,9 +24,9 @@ contract KeyedOwnable {
     event OwnershipTransferred(KeyType newKey, bytes32[] newOwner);
 
     enum KeyType {
+        ECDSAThenSmartContract,
         P256,
-        WebAuthnP256,
-        ECDSAThenSmartContract
+        WebAuthnP256
     }
 
     /**
@@ -71,6 +71,15 @@ contract KeyedOwnable {
 
     function owner() external view returns (address) {
         return _asAddressNotDirty(ownerKey(0));
+    }
+
+    function _setOwnership(KeyType ktp, bytes32[] calldata nextKey) internal {
+        for (uint256 i; i < nextKey.length; ++i) {
+            _ownerKey[i] = nextKey[i];
+        }
+        keyType = ktp;
+        _keyLength = uint48(nextKey.length == 1 ? 0 : nextKey.length);
+        emit OwnershipTransferred(ktp, nextKey);
     }
 
     function _transferOwnership(KeyType ktp, bytes32[] calldata nextKey) internal {
