@@ -21,7 +21,7 @@ contract CatapultarFactoryTest is Test {
         bytes32[] memory keys = new bytes32[](1);
         keys[0] = bytes32(uint256(uint160(owner)));
 
-        address deployedTo = factory.deploy(owner, salt);
+        address deployedTo = factory.deploy(KeyedOwnable.KeyType.ECDSAOrSmartContract, keys, salt);
         vm.snapshotGasLastCall("deploy");
 
         // Check that the deployed proxy has code.

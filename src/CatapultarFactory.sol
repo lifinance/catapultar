@@ -55,14 +55,6 @@ contract CatapultarFactory {
         Catapultar(payable(proxy)).init{value:msg.value}(ktp, owner);
     }
 
-    function deploy(address owner, bytes32 salt) external payable returns (address proxy) {
-        proxy = LibClone.cloneDeterministic_PUSH0(address(EXECUTOR_NO_EMBEDDED_CALLS), salt);
-
-        bytes32[] memory keys = new bytes32[](1);
-        keys[0] = bytes32(uint256(uint160(owner)));
-        Catapultar(payable(proxy)).init{value:msg.value}(KeyedOwnable.KeyType.ECDSAOrSmartContract, keys);
-    }
-
     /// @dev Do not trust that the owner of the returned proxy is equal to the provided owner. Ownership may have been
     /// handed over.
     /// @param salt The first 20 bytes of salt has to be the owner or 0.
