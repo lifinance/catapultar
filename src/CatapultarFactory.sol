@@ -52,7 +52,7 @@ contract CatapultarFactory {
     ) external payable ownerInSalt(salt, ktp, owner) returns (address proxy) {
         proxy = LibClone.cloneDeterministic_PUSH0(address(EXECUTOR_NO_EMBEDDED_CALLS), salt);
 
-        Catapultar(payable(proxy)).init{value:msg.value}(ktp, owner);
+        Catapultar(payable(proxy)).init{ value: msg.value }(ktp, owner);
     }
 
     /// @dev Do not trust that the owner of the returned proxy is equal to the provided owner. Ownership may have been
@@ -75,7 +75,7 @@ contract CatapultarFactory {
     ) external payable ownerInSalt(salt, ktp, owner) returns (address proxy) {
         proxy = LibClone.cloneDeterministic(address(EXECUTOR_EMBEDDED_CALLS), abi.encodePacked(callsTypeHash), salt);
 
-        Catapultar(payable(proxy)).init{value:msg.value}(ktp, owner);
+        Catapultar(payable(proxy)).init{ value: msg.value }(ktp, owner);
     }
 
     /// @dev Do not trust that the owner of the returned proxy is equal to the provided owner. Ownership may have been
@@ -100,7 +100,7 @@ contract CatapultarFactory {
     ) external payable ownerInSalt(salt, ktp, owner) returns (address proxy) {
         proxy = LibClone.deployDeterministicERC1967(address(EXECUTOR_NO_EMBEDDED_CALLS), salt);
 
-        Catapultar(payable(proxy)).init{value:msg.value}(ktp, owner);
+        Catapultar(payable(proxy)).init{ value: msg.value }(ktp, owner);
     }
 
     /// @dev Do not trust that the owner of the returned proxy is equal to the provided owner. Ownership may have been
