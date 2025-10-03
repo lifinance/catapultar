@@ -82,10 +82,7 @@ contract KeyedOwnable {
             len :=
                 add( // 0: 1, 1: 2, 2: 2
                     keyType,
-                    add( // 0: 1, 1: 1, 2: 0
-                        eq(keyType, 1), // 1: 1 otherwise 0
-                        eq(keyType, 0) // 0: 1 otherwise 0
-                    )
+                    lt(keyType, 2) // 0: 1, 1: 1 otherwise 0
                 )
         }
     }
@@ -172,7 +169,7 @@ contract KeyedOwnable {
     }
 
     /**
-     * @notice Transfer ownership to a ECDSAOrSmartContract through standardized interfaces.
+     * @notice Transfer ownership to a ECDSAOrSmartContract through normal the transferOwnership interface
      */
     function transferOwnership(
         address newOwner
@@ -225,8 +222,7 @@ contract KeyedOwnable {
             );
         } else if (ownerKeyType == KeyType.ECDSAOrSmartContract) {
             address account = _asAddressNotDirty(_getOwnerKeySlice(0));
-
-            // TODO: Call isValidSignature
+            return SignatureCheckerLib.isValidSignatureNowCalldata(account, digest, signature);
         }
         return false;
     }
