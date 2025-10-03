@@ -9,6 +9,8 @@ import { LibClone } from "solady/src/utils/LibClone.sol";
 import { Catapultar } from "../../src/Catapultar.sol";
 
 import { BitmapNonce } from "../../src/libs/BitmapNonce.sol";
+
+import { KeyedOwnable } from "../../src/libs/KeyedOwnable.sol";
 import { LibCalls } from "../../src/libs/LibCalls.sol";
 
 import { MockCatapultar } from "../mocks/MockCatapultar.sol";
@@ -51,26 +53,35 @@ abstract contract CatapultarTest is Test {
 
     function init() internal returns (address owner, uint256 key) {
         (owner, key) = makeAddrAndKey("owner");
-        executor.init(owner);
+        bytes32[] memory keys = new bytes32[](1);
+        keys[0] = bytes32(uint256(uint160(owner)));
+
+        executor.init(KeyedOwnable.KeyType.ECDSAThenSmartContract, keys);
     }
 
     function test_template_init_disabled() external {
+        bytes32[] memory keys = new bytes32[](1);
+        keys[0] = bytes32(uint256(uint160(makeAddr("owner"))));
         vm.expectRevert(abi.encodeWithSignature("InvalidInitialization()"));
-        MockCatapultar(payable(executorTemplate)).init(makeAddr("owner"));
+        MockCatapultar(payable(executorTemplate)).init(KeyedOwnable.KeyType.ECDSAThenSmartContract, keys);
     }
 
     function test_init() external {
         assertEq(executor.owner(), address(0));
 
         address owner = makeAddr("owner");
-        executor.init(owner);
+
+        bytes32[] memory keys = new bytes32[](1);
+        keys[0] = bytes32(uint256(uint160(owner)));
+
+        executor.init(KeyedOwnable.KeyType.ECDSAThenSmartContract, keys);
 
         assertEq(executor.owner(), owner);
 
         // Ensure we can't init again.
         vm.prank(owner);
         vm.expectRevert(abi.encodeWithSignature("InvalidInitialization()"));
-        executor.init(owner);
+        executor.init(KeyedOwnable.KeyType.ECDSAThenSmartContract, keys);
     }
 
     /// forge-config: default.isolate = true

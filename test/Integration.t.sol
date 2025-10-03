@@ -7,6 +7,8 @@ import { ERC7821 } from "solady/src/accounts/ERC7821.sol";
 import { LibZip } from "solady/src/utils/LibZip.sol";
 
 import { CatapultarFactory } from "../src/CatapultarFactory.sol";
+
+import { KeyedOwnable } from "../src/libs/KeyedOwnable.sol";
 import { LibCalls } from "../src/libs/LibCalls.sol";
 
 interface EIP712 {
@@ -57,8 +59,10 @@ contract IntegrationTest is Test {
         (address owner, uint256 key) = makeAddrAndKey("owner");
         bytes32 salt = bytes32(bytes20(uint160(owner)));
 
+        bytes32[] memory keys = new bytes32[](1);
+        keys[0] = bytes32(uint256(uint160(owner)));
         // Lets get a proxy.
-        address proxy = factory.deploy(owner, salt);
+        address proxy = factory.deploy(KeyedOwnable.KeyType.ECDSAThenSmartContract, keys, salt);
 
         // Create the calls. We wanna make a batch of 6 calls:
         // 1. 2 normal calls. (revert flag 0x00)

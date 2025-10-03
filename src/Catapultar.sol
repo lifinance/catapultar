@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 pragma solidity ^0.8.30;
 
-import { Ownable } from "solady/src/auth/Ownable.sol";
-
 import { EIP712 } from "solady/src/utils/EIP712.sol";
 import { EfficientHashLib } from "solady/src/utils/EfficientHashLib.sol";
 import { Initializable } from "solady/src/utils/Initializable.sol";
@@ -13,6 +11,7 @@ import { UUPSUpgradeable } from "solady/src/utils/UUPSUpgradeable.sol";
 
 import { BitmapNonce } from "./libs/BitmapNonce.sol";
 import { ERC7821LIFI } from "./libs/ERC7821LIFI.sol";
+import { KeyedOwnable } from "./libs/KeyedOwnable.sol";
 import { LibCalls } from "./libs/LibCalls.sol";
 
 /**
@@ -53,7 +52,7 @@ import { LibCalls } from "./libs/LibCalls.sol";
  * )
  * This ensures that each signed payload is only valid for a specific account.
  */
-contract Catapultar is ERC7821LIFI, EIP712, BitmapNonce, Ownable, Initializable, UUPSUpgradeable {
+contract Catapultar is ERC7821LIFI, EIP712, BitmapNonce, KeyedOwnable, Initializable, UUPSUpgradeable {
     error NotUpgradeable();
     error CannotBeUpgradeable();
 
@@ -67,23 +66,6 @@ contract Catapultar is ERC7821LIFI, EIP712, BitmapNonce, Ownable, Initializable,
      * The intended use-case is to save gas if the functionality is not needed.
      */
     bool immutable ALLOW_EMBEDDED_CALLS;
-
-    /**
-     * @notice Only allows owner or this contract to call.
-     */
-    modifier onlyOwnerOrSelf() {
-        assembly ("memory-safe") {
-            // Check if sender is this contract.
-            if iszero(eq(caller(), address())) {
-                // If the caller is not the stored owner, revert.
-                if iszero(eq(caller(), sload(_OWNER_SLOT))) {
-                    mstore(0x00, 0x82b42900) // `Unauthorized()`.
-                    revert(0x1c, 0x04)
-                }
-            }
-        }
-        _;
-    }
 
     /**
      * @param allowOneTimeCall Whether or not embedded calls are allowed. If set to false, logic associated with
@@ -117,10 +99,8 @@ contract Catapultar is ERC7821LIFI, EIP712, BitmapNonce, Ownable, Initializable,
      * @dev If ALLOW_EMBEDDED_CALLS is true and the contract is being cloned as an upgradeable contract, the function
      * will revert.
      */
-    function init(
-        address owner
-    ) external initializer {
-        _initializeOwner(owner);
+    function init(KeyType ktp, bytes32[] calldata owner) external initializer {
+        _transferOwnership(ktp, owner);
         if (ALLOW_EMBEDDED_CALLS && !_notUpgradeable()) revert CannotBeUpgradeable();
     }
 
@@ -135,19 +115,16 @@ contract Catapultar is ERC7821LIFI, EIP712, BitmapNonce, Ownable, Initializable,
      * @return result 0x1626ba7e if true or 0xffffffff is invalid.
      */
     function isValidSignature(bytes32 hash, bytes calldata signature) public view virtual returns (bytes4 result) {
-        bool success = SignatureCheckerLib.isValidSignatureNowCalldata(
-            owner(),
-            EfficientHashLib.hash(
-                REPLAY_PROTECTION, // Offset hash to ensure no standard payload replicates this structure.
-                asUnsafeBytes32(address(this)),
-                hash
-            ),
-            signature
+        bytes32 digest = EfficientHashLib.hash(
+            REPLAY_PROTECTION, // Offset hash to ensure no standard payload replicates this structure.
+            asUnsafeBytes32(address(this)),
+            hash
         );
+        bool isValid = _validateSignature(digest, signature);
         assembly ("memory-safe") {
             // `success ? bytes4(keccak256("isValidSignature(bytes32,bytes)")) : 0xffffffff`.
             // We use `0xffffffff` for invalid, in convention with the reference implementation.
-            result := shl(224, or(0x1626ba7e, sub(0, iszero(success))))
+            result := shl(224, or(0x1626ba7e, sub(0, iszero(isValid))))
         }
     }
 
@@ -216,7 +193,7 @@ contract Catapultar is ERC7821LIFI, EIP712, BitmapNonce, Ownable, Initializable,
      */
     function _authorizeUpgrade(
         address
-    ) internal view override onlyOwner {
+    ) internal view override onlyOwnerOrSelf {
         if (_notUpgradeable()) revert NotUpgradeable();
     }
 
@@ -247,7 +224,8 @@ contract Catapultar is ERC7821LIFI, EIP712, BitmapNonce, Ownable, Initializable,
         // If ALLOW_EMBEDDED_CALLS is allowed (and no signature), then we check if the hash has been embedded.
         if (ALLOW_EMBEDDED_CALLS) if (opData.length == 32) return callTypeHash == _embeddedCall();
         bytes32 digest = _hashTypedData(callTypeHash);
-        return SignatureCheckerLib.isValidSignatureNowCalldata(owner(), digest, opData[0x20:]);
+
+        return _validateSignature(digest, opData[0x20:]);
     }
 
     /**

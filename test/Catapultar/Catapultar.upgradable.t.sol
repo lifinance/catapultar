@@ -4,6 +4,7 @@ pragma solidity ^0.8.30;
 import { LibClone } from "solady/src/utils/LibClone.sol";
 
 import { Catapultar } from "../../src/Catapultar.sol";
+import { KeyedOwnable } from "../../src/libs/KeyedOwnable.sol";
 
 import { MockCatapultar } from "../mocks/MockCatapultar.sol";
 import { CatapultarTest } from "./Catapultar.base.t.sol";
@@ -27,6 +28,8 @@ contract CatapultarUpgradeableTest is CatapultarTest {
         address proxied = LibClone.deployERC1967(template);
 
         vm.expectRevert(abi.encodeWithSelector(Catapultar.CannotBeUpgradeable.selector));
-        MockCatapultar(payable(proxied)).init(makeAddr("owner"));
+        bytes32[] memory keys = new bytes32[](1);
+        keys[0] = bytes32(uint256(uint160(makeAddr("owner"))));
+        MockCatapultar(payable(proxied)).init(KeyedOwnable.KeyType.ECDSAThenSmartContract, keys);
     }
 }
