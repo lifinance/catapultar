@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 pragma solidity ^0.8.30;
 
+import { Stowaway } from "stowaway/src/Stowaway.sol";
+
+import { ERC7821 } from "solady/src/accounts/ERC7821.sol";
 import { EIP712 } from "solady/src/utils/EIP712.sol";
 import { EfficientHashLib } from "solady/src/utils/EfficientHashLib.sol";
 import { Initializable } from "solady/src/utils/Initializable.sol";
@@ -245,6 +248,7 @@ contract Catapultar is ERC7821LIFI, EIP712, BitmapNonce, KeyedOwnable, Initializ
     /// @notice LibZip will handle fallbacks for gas efficiency savings on cheap execution but expensive calldata
     /// chains.
     fallback() external payable override receiverFallback {
+        Stowaway.searchAndCall(ERC7821.execute.selector);
         LibZip.cdFallback();
     }
 }
