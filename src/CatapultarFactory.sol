@@ -1,11 +1,17 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 pragma solidity ^0.8.30;
 
+import { Stowaway } from "stowaway/src/Stowaway.sol";
+
 import { EfficientHashLib } from "solady/src/utils/EfficientHashLib.sol";
+
 import { LibClone } from "solady/src/utils/LibClone.sol";
+import { Multicallable } from "solady/src/utils/Multicallable.sol";
+import { SafeTransferLib } from "solady/src/utils/SafeTransferLib.sol";
 
 import { Catapultar } from "./Catapultar.sol";
 import { KeyedOwnable } from "./libs/KeyedOwnable.sol";
+import { ReentrancyLib } from "./libs/ReentrancyLib.sol";
 
 /**
  * @title Catapultar Factory
@@ -33,7 +39,10 @@ import { KeyedOwnable } from "./libs/KeyedOwnable.sol";
  * which allows ownership transfers.
  *
  */
-contract CatapultarFactory {
+contract CatapultarFactory is Multicallable, ReentrancyLib {
+    error NoReceive();
+    error Fallback();
+
     address public immutable EXECUTOR_NO_EMBEDDED_CALLS;
     address public immutable EXECUTOR_EMBEDDED_CALLS;
 
@@ -134,5 +143,29 @@ contract CatapultarFactory {
             LibClone.checkStartsWith(salt, address(ownerHash));
         }
         _;
+    }
+
+    /**
+     * @notice Transfer funds out of the contract. To be used with multicall to execute token transfers.
+     * @dev TODO: Better reentrancy guard. The current one is reliant on transient storage
+     */
+    function transfer(address token, address to, uint256 amount) external {
+        checkNonReentrant();
+        if (amount == 0) amount = SafeTransferLib.balanceOf(token, address(this));
+        SafeTransferLib.safeTransfer(token, to, amount);
+    }
+
+    /// @notice This functionality requires transient storage to be available.
+    fallback() external payable {
+        setNonReentrant();
+        Stowaway.searchAndCall(Multicallable.multicall.selector);
+
+        // If multicall wasn't found.
+        revert Fallback();
+    }
+
+    // Silence Solidity.
+    receive() external payable {
+        revert Fallback();
     }
 }
