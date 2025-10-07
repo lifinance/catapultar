@@ -180,6 +180,10 @@ proxy.execute(mode, abi.encode(calls, opData));
 
 On chains where calldata is expensive, Catapultar supports Solady's `LibZip::cdFallback()` to compress calldata.
 
+### Stowaway
+
+This proxy implements **[Reednaa's Stowaway](https://github.com/reednaa/stowaway)** to catch stray fallback functions. To make use of Stowaway encode a `ERC7821::execute` call into a bytes field which will be delievered to the account. You can optionally LibZip the call.
+
 ## Development
 
 ### Build
@@ -216,6 +220,7 @@ It also uses the following third-party libraries:
 
 - **[Solady](https://github.com/Vectorized/solady)** – Licensed under the [MIT License](https://opensource.org/licenses/MIT)
 - **[Permit2](https://github.com/Uniswap/permit2)** – Licensed under the [MIT License](https://opensource.org/licenses/MIT)
+- **[Stowaway](https://github.com/reednaa/stowaway)**
 
 Each library is included under the terms of its respective license. Copies of the license texts can be found in their source files or original repositories.
 
