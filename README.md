@@ -14,6 +14,29 @@ To provide durable double spend protections, execution mode `0x01000000000078210
 
 Both execution modes can be combined with an outer signed `0x01010000000078210001` calling itself allowing for a one time callable batch with inner unsigned `0x01000000000078210001` allowing for safe re-tryable transactions. A transaction dispatch service can maintain a list of `0x01000000000078210001`s. Once the transaction executor is available, all outstanding `0x01000000000078210001`s can be executed through a single `0x01010000000078210001`.
 
+#### Smart Account Tradeoffs
+
+Smart accounts are built for efficiency; To be used on Ethereum gas costs have to be kept minimal. As a result, feature space of the account is limited. Below a table comparing popular smart accounts can be found:
+
+| Feature                         |  Catapultar  | Ithaca account (Porto) |  Biconomy Nexus  | Zerodev Kernel |
+| ------------------------------- | :----------: | :--------------------: | :--------------: | :------------: |
+| Multiple Keys                   |      1       |         Yes            |Yes (K1Validator) |   With Module  |
+| Multiple Signatures             |     No       |         No             |    With Module   |   With Module  |
+| Call Batching                   |  ERC-7821*   |        ERC-7821     	  |    ERC-7821      |    ERC-7821    |
+| Call Batching (Ignore failures) |     Yes      |         No             |    No            |   With Module  |
+| Nonces                          |Permit2 style |       4337 style       |    ERC-4337      |   ERC-4337     |
+| Embed action on deploy          |     Yes      |       Yes-ish          |    With Module   |   With Module  |
+| Supports EIP-7702               |     No       |         Yes            |    Yes           |      Yes       |
+| Requires EIP-7702               |     No       |         Yes            |    No            |      No        |
+| Full Passkey Support            |     Yes      |   As second signer     |    With Module   |  With Module   |
+| Solady LibZip                   |     Yes      |         No             |    No            |  With Module   |
+| Account Deploy                  |   Factory    |   EIP-7702 Delegate    |    Factory       |  Factory       |
+| Permissionless chain deploy     |     Yes      |         Yes            |    Yes					 |   Yes          |
+| Account Init                    |    ~110k     |   EIP-7702 Delegate    |  More expensive  | More expensive |
+| Modular (ERC-7579)              |     No       |        No              |    Yes           |   Yes          |
+
+
+
 #### Catapultar Usage Note
 
 - To simulate dual mode transaction, mode `0x01000000000078210001` transactions can be submitted to the relevant proxy using the context of `msg.sender === proxy`.
