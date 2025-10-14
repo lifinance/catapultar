@@ -14,6 +14,40 @@ To provide durable double spend protections, execution mode `0x01000000000078210
 
 Both execution modes can be combined with an outer signed `0x01010000000078210001` calling itself allowing for a one time callable batch with inner unsigned `0x01000000000078210001` allowing for safe re-tryable transactions. A transaction dispatch service can maintain a list of `0x01000000000078210001`s. Once the transaction executor is available, all outstanding `0x01000000000078210001`s can be executed through a single `0x01010000000078210001`.
 
+#### Smart Account Tradeoffs
+
+Smart accounts are built for efficiency; To be used on Ethereum gas costs have to be kept minimal. As a result, feature space of the account is limited. Below a table comparing popular smart accounts can be found:
+
+| Feature                         |  Catapultar  | Ithaca account (Porto) |  Biconomy Nexus  | Zerodev Kernel |
+| ------------------------------- | :----------: | :--------------------: | :--------------: | :------------: |
+| Multiple Keys                   |      1       |         Yes            |Yes (K1Validator) |   With Module  |
+| Multiple Signatures             |     No       |         No             |    With Module   |   With Module  |
+| Call Batching                   |  ERC-7821*   |        ERC-7821     	  |    ERC-7821      |    ERC-7821    |
+| Call Batching (Ignore failures) |     Yes      |         No             |    No            |   With Module  |
+| Nonces                          |Permit2 style |       4337 style       |    ERC-4337      |   ERC-4337     |
+| Embed action on deploy          |     Yes      |       Yes-ish          |    With Module   |   With Module  |
+| Supports EIP-7702               |     No       |         Yes            |    Yes           |      Yes       |
+| Requires EIP-7702               |     No       |         Yes            |    No            |      No        |
+| Full Passkey Support            |     Yes      |   Yes     |    With Module   |  With Module   |
+| Solady LibZip                   |     Yes      |         No             |    No            |  With Module   |
+| Account Deploy                  |   Factory    |   EIP-7702 Delegate    |    Factory       |  Factory       |
+| Permissionless chain deploy     |     Yes      |         Yes            |    Yes					 |   Yes          |
+| Account Init                    |    ~110k     |   EIP-7702 Delegate    |  More expensive  | More expensive |
+| Modular (ERC-7579)              |     No       |        No              |    Yes           |   Yes          |
+
+
+#### EIP-7702
+
+Catapular currently does not support EIP-7702, even though it would provide significant advantages. Using something like PREP or briefly generating a private key to initialize an account would substantially reduce account creation costs. However, this would require core changes to the codebase.
+
+In general, there are two main approaches to implementing EIP-7702 support for smart account creation:
+
+* **Disposed Private Key:**
+  Generate a private key that is immediately disposed of after signing an EIP-7702 authorization. This approach allows signing more than just the authorization—for example, an initial (embedded) transaction—without requiring user input. Additionally, the address can be determined before generating a passkey, allowing the passkey to be named according to the address.
+
+* **[Provably Rootless EIP-7702 Proxy](https://blog.biconomy.io/prep-deep-dive/):**
+  Create an EIP-7702 authorization and set the signature as the account initialization data. Most well-formed random signatures are valid for a corresponding account. This EIP-7702 authorization signature for a random account acts as a proxy for a specific implementation. Furthermore, the initialization call can be enforced by validating the signature on-chain. This results in significantly lower account deployment costs and a provably secure technique. Unfortunately, EIP-7702 is not yet supported on most networks.
+
 #### Catapultar Usage Note
 
 - To simulate dual mode transaction, mode `0x01000000000078210001` transactions can be submitted to the relevant proxy using the context of `msg.sender === proxy`.
