@@ -28,7 +28,7 @@ Smart accounts are built for efficiency; To be used on Ethereum gas costs have t
 | Embed action on deploy          |     Yes      |       Yes-ish          |    With Module   |   With Module  |
 | Supports EIP-7702               |     No       |         Yes            |    Yes           |      Yes       |
 | Requires EIP-7702               |     No       |         Yes            |    No            |      No        |
-| Full Passkey Support            |     Yes      |   As second signer     |    With Module   |  With Module   |
+| Full Passkey Support            |     Yes      |   Yes     |    With Module   |  With Module   |
 | Solady LibZip                   |     Yes      |         No             |    No            |  With Module   |
 | Account Deploy                  |   Factory    |   EIP-7702 Delegate    |    Factory       |  Factory       |
 | Permissionless chain deploy     |     Yes      |         Yes            |    Yes					 |   Yes          |
