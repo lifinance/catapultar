@@ -36,6 +36,17 @@ Smart accounts are built for efficiency; To be used on Ethereum gas costs have t
 | Modular (ERC-7579)              |     No       |        No              |    Yes           |   Yes          |
 
 
+#### EIP-7702
+
+Catapular currently does not support EIP-7702, even though it would provide significant advantages. Using something like PREP or briefly generating a private key to initialize an account would substantially reduce account creation costs. However, this would require core changes to the codebase.
+
+In general, there are two main approaches to implementing EIP-7702 support for smart account creation:
+
+* **Disposed Private Key:**
+  Generate a private key that is immediately disposed of after signing an EIP-7702 authorization. This approach allows signing more than just the authorization—for example, an initial (embedded) transaction—without requiring user input. Additionally, the address can be determined before generating a passkey, allowing the passkey to be named according to the address.
+
+* **[Provably Rootless EIP-7702 Proxy](https://blog.biconomy.io/prep-deep-dive/):**
+  Create an EIP-7702 authorization and set the signature as the account initialization data. Most well-formed random signatures are valid for a corresponding account. This EIP-7702 authorization signature for a random account acts as a proxy for a specific implementation. Furthermore, the initialization call can be enforced by validating the signature on-chain. This results in significantly lower account deployment costs and a provably secure technique. Unfortunately, EIP-7702 is not yet supported on most networks.
 
 #### Catapultar Usage Note
 
