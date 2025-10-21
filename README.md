@@ -66,7 +66,6 @@ In general, there are two main approaches to implementing EIP-7702 support for s
 	- Implements replay protection: signatures are valid only for a specific account instance.
 - **Proxy Deployment Strategies:**
 	- Minimal proxy (low cost, non-upgradeable).
-	- Proxy with embedded calldata (pre-configured calls, non-upgradeable).
 	- Upgradeable ERC-1967 proxy (ownership handover, upgradable logic).
 
 ### Account Deployment
@@ -79,12 +78,6 @@ Use the `CatapultarFactory` contract to deploy Catapultar proxies:
 	```
 	Deploys a minimal proxy for batch execution.
 
-- **Proxy with Embedded Call:**
-	```solidity
-	factory.deployWithEmbedCall(owner, salt, callsTypeHash);
-	```
-	Deploys a proxy with a pre-configured allowed call.
-
 - **Upgradeable Proxy:**
 	```solidity
 	factory.deployUpgradeable(owner, salt);
@@ -93,12 +86,11 @@ Use the `CatapultarFactory` contract to deploy Catapultar proxies:
 
 For all deployments, the first 20 bytes of `salt` should be the owner address or zero. Use the `predictDeploy*` functions to precompute addresses before deployment.
 
-| Feature               | Minimal Proxy | Embedded Call Proxy | Upgradeable Proxy |
-| --------------------- | :-----------: | :-----------------: | :---------------: |
-| Upgradable            |      No       |         No          |        Yes        |
-| Embedded Call Support |      No       |         Yes         |        No         |
-| Ownership Transfer    |      Yes      |         Yes         |        Yes        |
-| Gas Cost              |    Lowest     |         Low         |      Higher       |
+| Feature               | Minimal Proxy | Upgradeable Proxy |
+| --------------------- | :-----------: | :---------------: |
+| Upgradable            |      No       |        Yes        |
+| Ownership Transfer    |      Yes      |        Yes        |
+| Gas Cost              |    Lowest     |      Higher       |
 
 ### Execution Modes (ERC-7821)
 
@@ -155,21 +147,6 @@ To validate ERC-1271 signatures against the account, the message hash needs to b
 Catapultar uses unordered nonces for replay protection. Nonces are stored in a 256 bit index using a 24 byte word: `bytes24(word) | bytes8(index)`. For efficient nonce management, nonces should be spent in each word in its entirety.
 
 Multiple nonces can be invalidated at one time using index masks: `::invalidateUnorderedNonces(word, mask)`.
-
-### Embedded Calls
-
-It is possible to deploy accounts with a pre-approved call — an embedded call — that can be called by anyone at any time.
-
-Noteworthy about accounts with embedded calls:
-- Accounts with embedded calls cannot be upgradeable.
-- The embedded call can be executed by anyone.
-- The embedded call is a *regular call* and has a mode and nonce. That means it can be allowed to revert (and still consume the nonce) or only consume the nonce on success.
-- Embedded calls can have their nonce invalidated.
-- The embedded call is the typehash of a batch, the call itself is not stored on-chain. As a result, if the payload is lost, it may not be possible to recovered the embedded call.
-
-If the mode of a embedded call uses a revertable mode it may make the call suceptible to a DoS attack.
-
-A embedded call can be read through `::embeddedCall()`.
 
 ### Events Reference
 

@@ -35,8 +35,6 @@ contract CatapultarFactory {
     address public immutable EXECUTOR;
 
     constructor() {
-        // Whether or not a contract supports immutable calls is set in the constructor. Since this contracts supports
-        // both types, we need to deploy 2 versions of the contract: one with embedded calls enabled and one without.
         EXECUTOR = address(new Catapultar());
     }
 

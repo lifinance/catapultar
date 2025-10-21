@@ -42,8 +42,7 @@ import { LibCalls } from "./libs/LibCalls.sol";
  *
  * The contract is intended to be used via 3 cloning strategies:
  * - Non-upgradeable minimal proxy clone for minimal cost.
- * - Non-upgradeable proxy with embedded calldata as an immutable arg allowing anyone to execute a predetermined call.
- * - Upgradeable proxy to allow ownership handover. An upgradeable proxy cannot have embedded calldata.
+ * - Upgradeable proxy to allow ownership handover.
  *
  * For ERC-1271 signatures verified from the owner, they should be rehashed in a replay protection envelope:
  * keccak256(
