@@ -4,6 +4,7 @@ pragma solidity ^0.8.30;
 import { Test } from "forge-std/Test.sol";
 
 import { CatapultarFactory } from "../src/CatapultarFactory.sol";
+import { KeyedOwnable } from "../src/libs/KeyedOwnable.sol";
 
 contract CatapultarFactoryTest is Test {
     CatapultarFactory factory;
@@ -17,7 +18,10 @@ contract CatapultarFactoryTest is Test {
         address owner = makeAddr("owner");
         bytes32 salt = bytes32(bytes20(uint160(owner)));
 
-        address deployedTo = factory.deploy(owner, salt);
+        bytes32[] memory keys = new bytes32[](1);
+        keys[0] = bytes32(uint256(uint160(owner)));
+
+        address deployedTo = factory.deploy(KeyedOwnable.KeyType.ECDSAOrSmartContract, keys, salt);
         vm.snapshotGasLastCall("deploy");
 
         // Check that the deployed proxy has code.
@@ -25,7 +29,8 @@ contract CatapultarFactoryTest is Test {
 
         // Try deploying again.
         vm.expectRevert(abi.encodeWithSignature("DeploymentFailed()"));
-        factory.deploy(owner, salt);
+
+        factory.deploy(KeyedOwnable.KeyType.ECDSAOrSmartContract, keys, salt);
     }
 
     /// forge-config: default.isolate = true
@@ -33,7 +38,11 @@ contract CatapultarFactoryTest is Test {
         address owner = makeAddr("owner");
         bytes32 salt = bytes32(bytes20(uint160(owner)));
 
-        address deployedTo = factory.deployWithEmbedCall(owner, salt, bytes32(0));
+        bytes32[] memory keys = new bytes32[](1);
+        keys[0] = bytes32(uint256(uint160(owner)));
+
+        address deployedTo =
+            factory.deployWithEmbedCall(KeyedOwnable.KeyType.ECDSAOrSmartContract, keys, salt, bytes32(0));
         vm.snapshotGasLastCall("deployWithEmbedCall");
 
         // Check that the deployed proxy has code.
@@ -41,7 +50,7 @@ contract CatapultarFactoryTest is Test {
 
         // Try deploying again.
         vm.expectRevert(abi.encodeWithSignature("DeploymentFailed()"));
-        factory.deployWithEmbedCall(owner, salt, bytes32(0));
+        factory.deployWithEmbedCall(KeyedOwnable.KeyType.ECDSAOrSmartContract, keys, salt, bytes32(0));
     }
 
     /// forge-config: default.isolate = true
@@ -49,7 +58,10 @@ contract CatapultarFactoryTest is Test {
         address owner = makeAddr("owner");
         bytes32 salt = bytes32(bytes20(uint160(owner)));
 
-        address deployedTo = factory.deployUpgradeable(owner, salt);
+        bytes32[] memory keys = new bytes32[](1);
+        keys[0] = bytes32(uint256(uint160(owner)));
+
+        address deployedTo = factory.deployUpgradeable(KeyedOwnable.KeyType.ECDSAOrSmartContract, keys, salt);
         vm.snapshotGasLastCall("deployUpgradeable");
 
         // Check that the deployed proxy has code.
@@ -57,15 +69,19 @@ contract CatapultarFactoryTest is Test {
 
         // Try deploying again.
         vm.expectRevert(abi.encodeWithSignature("DeploymentFailed()"));
-        factory.deployUpgradeable(owner, salt);
+        factory.deployUpgradeable(KeyedOwnable.KeyType.ECDSAOrSmartContract, keys, salt);
     }
 
     function test_predictDeploy() external {
         address owner = makeAddr("owner");
         bytes32 salt = bytes32(bytes20(uint160(owner)));
 
-        address predictedDeployedTo = factory.predictDeploy(owner, salt);
-        address deployedTo = factory.deploy(owner, salt);
+        bytes32[] memory keys = new bytes32[](1);
+        keys[0] = bytes32(uint256(uint160(owner)));
+
+        address predictedDeployedTo = factory.predictDeploy(KeyedOwnable.KeyType.ECDSAOrSmartContract, keys, salt);
+
+        address deployedTo = factory.deploy(KeyedOwnable.KeyType.ECDSAOrSmartContract, keys, salt);
         assertEq(predictedDeployedTo, deployedTo);
     }
 
@@ -75,8 +91,14 @@ contract CatapultarFactoryTest is Test {
 
         bytes32 embeddedCall = keccak256(bytes("randomCall"));
 
-        address predictedDeployedTo = factory.predictDeployWithEmbedCall(owner, salt, embeddedCall);
-        address deployedTo = factory.deployWithEmbedCall(owner, salt, embeddedCall);
+        bytes32[] memory keys = new bytes32[](1);
+        keys[0] = bytes32(uint256(uint160(owner)));
+
+        address predictedDeployedTo =
+            factory.predictDeployWithEmbedCall(KeyedOwnable.KeyType.ECDSAOrSmartContract, keys, salt, embeddedCall);
+
+        address deployedTo =
+            factory.deployWithEmbedCall(KeyedOwnable.KeyType.ECDSAOrSmartContract, keys, salt, embeddedCall);
         assertEq(predictedDeployedTo, deployedTo);
     }
 
@@ -84,52 +106,99 @@ contract CatapultarFactoryTest is Test {
         address owner = makeAddr("owner");
         bytes32 salt = bytes32(bytes20(uint160(owner)));
 
-        address predictedDeployedTo = factory.predictDeployUpgradeable(owner, salt);
-        address deployedTo = factory.deployUpgradeable(owner, salt);
+        bytes32[] memory keys = new bytes32[](1);
+        keys[0] = bytes32(uint256(uint160(owner)));
+
+        address predictedDeployedTo =
+            factory.predictDeployUpgradeable(KeyedOwnable.KeyType.ECDSAOrSmartContract, keys, salt);
+
+        address deployedTo = factory.deployUpgradeable(KeyedOwnable.KeyType.ECDSAOrSmartContract, keys, salt);
         assertEq(predictedDeployedTo, deployedTo);
     }
 
     // --- Check salt contains owner --- //
 
-    function testRevert_deploy_salt_does_not_contain_owner(address owner, bytes32 salt) external {
+    function testRevert_deploy_salt_does_not_contain_owner(
+        address owner,
+        bytes32 salt
+    ) external {
+        vm.assume(owner != address(0));
         if (bytes20(salt) != bytes20(0) && address(uint160(bytes20(salt))) != owner) {
             vm.expectRevert(abi.encodeWithSignature("SaltDoesNotStartWith()"));
         }
-        factory.deploy(owner, salt);
+        bytes32[] memory keys = new bytes32[](1);
+        keys[0] = bytes32(uint256(uint160(owner)));
+
+        factory.deploy(KeyedOwnable.KeyType.ECDSAOrSmartContract, keys, salt);
     }
 
-    function testRevert_deployWithEmbedCall_salt_does_not_contain_owner(address owner, bytes32 salt) external {
+    function testRevert_deployWithEmbedCall_salt_does_not_contain_owner(
+        address owner,
+        bytes32 salt
+    ) external {
+        vm.assume(owner != address(0));
         if (bytes20(salt) != bytes20(0) && address(uint160(bytes20(salt))) != owner) {
             vm.expectRevert(abi.encodeWithSignature("SaltDoesNotStartWith()"));
         }
-        factory.deployWithEmbedCall(owner, salt, bytes32(0));
+        bytes32[] memory keys = new bytes32[](1);
+        keys[0] = bytes32(uint256(uint160(owner)));
+
+        factory.deployWithEmbedCall(KeyedOwnable.KeyType.ECDSAOrSmartContract, keys, salt, bytes32(0));
     }
 
-    function testRevert_deployUpgradeable_salt_does_not_contain_owner(address owner, bytes32 salt) external {
+    function testRevert_deployUpgradeable_salt_does_not_contain_owner(
+        address owner,
+        bytes32 salt
+    ) external {
+        vm.assume(owner != address(0));
         if (bytes20(salt) != bytes20(0) && address(uint160(bytes20(salt))) != owner) {
             vm.expectRevert(abi.encodeWithSignature("SaltDoesNotStartWith()"));
         }
-        factory.deployUpgradeable(owner, salt);
+        bytes32[] memory keys = new bytes32[](1);
+        keys[0] = bytes32(uint256(uint160(owner)));
+
+        factory.deployUpgradeable(KeyedOwnable.KeyType.ECDSAOrSmartContract, keys, salt);
     }
 
-    function testRevert_predictDeploy_salt_does_not_contain_owner(address owner, bytes32 salt) external {
+    function testRevert_predictDeploy_salt_does_not_contain_owner(
+        address owner,
+        bytes32 salt
+    ) external {
+        vm.assume(owner != address(0));
         if (bytes20(salt) != bytes20(0) && address(uint160(bytes20(salt))) != owner) {
             vm.expectRevert(abi.encodeWithSignature("SaltDoesNotStartWith()"));
         }
-        factory.predictDeploy(owner, salt);
+        bytes32[] memory keys = new bytes32[](1);
+        keys[0] = bytes32(uint256(uint160(owner)));
+
+        factory.predictDeploy(KeyedOwnable.KeyType.ECDSAOrSmartContract, keys, salt);
     }
 
-    function testRevert_predictDeployWithEmbedCall_salt_does_not_contain_owner(address owner, bytes32 salt) external {
+    function testRevert_predictDeployWithEmbedCall_salt_does_not_contain_owner(
+        address owner,
+        bytes32 salt
+    ) external {
+        vm.assume(owner != address(0));
         if (bytes20(salt) != bytes20(0) && address(uint160(bytes20(salt))) != owner) {
             vm.expectRevert(abi.encodeWithSignature("SaltDoesNotStartWith()"));
         }
-        factory.predictDeployWithEmbedCall(owner, salt, bytes32(0));
+        bytes32[] memory keys = new bytes32[](1);
+        keys[0] = bytes32(uint256(uint160(owner)));
+
+        factory.predictDeployWithEmbedCall(KeyedOwnable.KeyType.ECDSAOrSmartContract, keys, salt, bytes32(0));
     }
 
-    function testRevert_predictDeployUpgradeable_salt_does_not_contain_owner(address owner, bytes32 salt) external {
+    function testRevert_predictDeployUpgradeable_salt_does_not_contain_owner(
+        address owner,
+        bytes32 salt
+    ) external {
+        vm.assume(owner != address(0));
         if (bytes20(salt) != bytes20(0) && address(uint160(bytes20(salt))) != owner) {
             vm.expectRevert(abi.encodeWithSignature("SaltDoesNotStartWith()"));
         }
-        factory.predictDeployUpgradeable(owner, salt);
+        bytes32[] memory keys = new bytes32[](1);
+        keys[0] = bytes32(uint256(uint160(owner)));
+
+        factory.predictDeployUpgradeable(KeyedOwnable.KeyType.ECDSAOrSmartContract, keys, salt);
     }
 }

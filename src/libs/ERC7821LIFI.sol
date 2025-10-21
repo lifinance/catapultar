@@ -19,7 +19,8 @@ abstract contract ERC7821LIFI is ERC7821 {
     event CallReverted(bytes32 extraData, bytes revertData);
 
     /// @dev keccak256(bytes("CallReverted(bytes32,bytes)"));
-    bytes32 constant _CALL_REVERTED_EVENT_SIGNATURE = 0xa5ef9b4d75ffdec5840bf221dba12f4a744e8b60aeb23da25fbd8c487a97924d;
+    bytes32 constant _CALL_REVERTED_EVENT_SIGNATURE =
+        0xa5ef9b4d75ffdec5840bf221dba12f4a744e8b60aeb23da25fbd8c487a97924d;
 
     /// @notice Validation function that validate opData for a specific call.
     function _validateOpData(
@@ -56,16 +57,16 @@ abstract contract ERC7821LIFI is ERC7821 {
         // Only supports atomic batched executions.
         // For the encoding scheme, see: https://eips.ethereum.org/EIPS/eip-7579
         // Bytes Layout:
-        // - [0]      ( 1 byte )  `0x01` for batch call.
-        // - [1]      ( 1 byte )  `0x00` for revert on any failure.
-        // - [2..5]   ( 4 bytes)  Reserved by ERC7579 for future standardization.
-        // - [6..9]   ( 4 bytes)  `0x00000000` or `0x78210001` or `0x78210002`.
-        // - [10..31] (22 bytes)  Unused. Free for use.
+        // - [0] ( 1 byte ) `0x01` for batch call.
+        // - [1] ( 1 byte ) `0x00` for revert on any failure.
+        // - [2..5] ( 4 bytes) Reserved by ERC7579 for future standardization.
+        // - [6..9] ( 4 bytes) `0x00000000` or `0x78210001` or `0x78210002`.
+        // - [10..31] (22 bytes) Unused. Free for use.
         assembly ("memory-safe") {
             let m := and(shr(mul(22, 8), mode), 0xffff00000000ffffffff)
-            id := or(shl(1, eq(m, 0x01000000000078210001)), id) // 2.
-            id := or(shl(1, eq(m, 0x01010000000078210001)), id) // 2.
-            id := or(mul(3, eq(m, 0x01000000000078210002)), id) // 3.
+            id := or(shl(1, eq(m, 0x01000000000078210001)), id) //2.
+            id := or(shl(1, eq(m, 0x01010000000078210001)), id) //2.
+            id := or(mul(3, eq(m, 0x01000000000078210002)), id) //3.
         }
     }
 
@@ -104,7 +105,10 @@ abstract contract ERC7821LIFI is ERC7821 {
      * Because _only_ 8 bytes is reserved for the index, the function cannot take more than type(uint64).max calls. This
      * limit exceeds the memory limit of the EVM so it is not a problem in practise.
      */
-    function _execute(Call[] calldata calls, bytes32 extraData) internal virtual override {
+    function _execute(
+        Call[] calldata calls,
+        bytes32 extraData
+    ) internal virtual override {
         unchecked {
             uint256 i;
             if (calls.length == uint256(0)) return;
@@ -131,7 +135,12 @@ abstract contract ERC7821LIFI is ERC7821 {
      * @param data Calldata to execute.
      * @param extraData Data to emit on transaction failure. If the leftmost byte is 0, will bubble up a reverted call.
      */
-    function _execute(address to, uint256 value, bytes calldata data, bytes32 extraData) internal virtual override {
+    function _execute(
+        address to,
+        uint256 value,
+        bytes calldata data,
+        bytes32 extraData
+    ) internal virtual override {
         assembly ("memory-safe") {
             let m := mload(0x40) // Grab the free memory pointer.
             calldatacopy(m, data.offset, data.length)
@@ -139,12 +148,12 @@ abstract contract ERC7821LIFI is ERC7821 {
             if iszero(success) {
                 mstore(m, extraData) // Place extraData
                 mstore(add(m, 0x20), 0x40) // Set offset for bytes
-                // Compute the padded length for ABI alignment. (rdsize + rdsize % 32)
+                    // Compute the padded length for ABI alignment. (rdsize + rdsize % 32)
                 let sizeAfterPad := and(add(returndatasize(), 31), not(31))
                 mstore(add(add(m, 0x40), sizeAfterPad), 0) // Clear out potential overflowing returndata.
                 mstore(add(m, 0x40), returndatasize()) // Place length of returndata
                 returndatacopy(add(m, 0x60), 0x00, returndatasize()) // Place returndata
-                // Emit CallReverted(bytes32 extraData, bytes revertData).
+                    // Emit CallReverted(bytes32 extraData, bytes revertData).
                 log1(m, add(0x60, sizeAfterPad), _CALL_REVERTED_EVENT_SIGNATURE)
 
                 if iszero(shr(mul(31, 8), extraData)) {
