@@ -42,8 +42,7 @@ import { LibCalls } from "./libs/LibCalls.sol";
  *
  * The contract is intended to be used via 3 cloning strategies:
  * - Non-upgradeable minimal proxy clone for minimal cost.
- * - Non-upgradeable proxy with embedded calldata as an immutable arg allowing anyone to execute a predetermined call.
- * - Upgradeable proxy to allow ownership handover. An upgradeable proxy cannot have embedded calldata.
+ * - Upgradeable proxy to allow ownership handover.
  *
  * For ERC-1271 signatures verified from the owner, they should be rehashed in a replay protection envelope:
  * keccak256(
@@ -55,18 +54,11 @@ import { LibCalls } from "./libs/LibCalls.sol";
  */
 contract Catapultar is ERC7821LIFI, EIP712, BitmapNonce, Ownable, Initializable, UUPSUpgradeable {
     error NotUpgradeable();
-    error CannotBeUpgradeable();
 
     /**
      * @dev Used to uniquely rehash ERC1271 signatures to identify them as originating from this account.
      */
     bytes32 constant REPLAY_PROTECTION = keccak256(bytes("Replay(address account,bytes32 payload)"));
-
-    /**
-     * @dev Determines whether pre-configured calls are allowed.
-     * The intended use-case is to save gas if the functionality is not needed.
-     */
-    bool immutable ALLOW_EMBEDDED_CALLS;
 
     /**
      * @notice Only allows owner or this contract to call.
@@ -85,14 +77,7 @@ contract Catapultar is ERC7821LIFI, EIP712, BitmapNonce, Ownable, Initializable,
         _;
     }
 
-    /**
-     * @param allowOneTimeCall Whether or not embedded calls are allowed. If set to false, logic associated with
-     * embedded calls is skipped.
-     */
-    constructor(
-        bool allowOneTimeCall
-    ) {
-        ALLOW_EMBEDDED_CALLS = allowOneTimeCall;
+    constructor() {
         _disableInitializers();
     }
 
@@ -121,7 +106,6 @@ contract Catapultar is ERC7821LIFI, EIP712, BitmapNonce, Ownable, Initializable,
         address owner
     ) external initializer {
         _initializeOwner(owner);
-        if (ALLOW_EMBEDDED_CALLS && !_notUpgradeable()) revert CannotBeUpgradeable();
     }
 
     /**
@@ -134,7 +118,10 @@ contract Catapultar is ERC7821LIFI, EIP712, BitmapNonce, Ownable, Initializable,
      * @param signature Bytes that represents the signature of the signed message.
      * @return result 0x1626ba7e if true or 0xffffffff is invalid.
      */
-    function isValidSignature(bytes32 hash, bytes calldata signature) public view virtual returns (bytes4 result) {
+    function isValidSignature(
+        bytes32 hash,
+        bytes calldata signature
+    ) public view virtual returns (bytes4 result) {
         bool success = SignatureCheckerLib.isValidSignatureNowCalldata(
             owner(),
             EfficientHashLib.hash(
@@ -158,32 +145,16 @@ contract Catapultar is ERC7821LIFI, EIP712, BitmapNonce, Ownable, Initializable,
      * @param wordPos Lefmost 248 bits of the nonce.
      * @param mask Bitmask used to invalidate nonces associated with the rightmost 8 bits
      */
-    function invalidateUnorderedNonces(uint256 wordPos, uint256 mask) external onlyOwnerOrSelf {
+    function invalidateUnorderedNonces(
+        uint256 wordPos,
+        uint256 mask
+    ) external onlyOwnerOrSelf {
         nonceBitmap[wordPos] |= mask;
 
         emit UnorderedNonceInvalidation(wordPos, mask);
     }
 
     // --- Proxy / Clone Helpers --- //
-
-    /**
-     * @notice Returns immutable calldata attached to a proxy.
-     * @dev This function must only be called from a proxy deployed with LibClone.createDeterministicClone.
-     * @return bytes32 Embedded call as the first 32 bytes of the immutable args attached to the proxy.
-     */
-    function _embeddedCall() internal view returns (bytes32) {
-        return bytes32(LibClone.argsOnClone(address(this), 0, 32));
-    }
-
-    /**
-     * @notice Returns immutable calldata attached to a proxy.
-     * @dev This function must only be called from a proxy deployed with LibClone.createDeterministicClone.
-     * @return bytes32 Embedded call as the first 32 bytes of the immutable args attached to the proxy.
-     */
-    function embeddedCall() external view returns (bytes32) {
-        if (!ALLOW_EMBEDDED_CALLS) return bytes32(0);
-        return _embeddedCall();
-    }
 
     /**
      * @notice Returns whether the contract has any storage set in the ERC1967 implementation slot.
@@ -216,7 +187,7 @@ contract Catapultar is ERC7821LIFI, EIP712, BitmapNonce, Ownable, Initializable,
      */
     function _authorizeUpgrade(
         address
-    ) internal view override onlyOwner {
+    ) internal view override onlyOwnerOrSelf {
         if (_notUpgradeable()) revert NotUpgradeable();
     }
 
@@ -244,8 +215,6 @@ contract Catapultar is ERC7821LIFI, EIP712, BitmapNonce, Ownable, Initializable,
         if (opData.length == 32) if (address(this) == msg.sender) return true;
 
         bytes32 callTypeHash = LibCalls.typehash(nonce, mode, calls);
-        // If ALLOW_EMBEDDED_CALLS is allowed (and no signature), then we check if the hash has been embedded.
-        if (ALLOW_EMBEDDED_CALLS) if (opData.length == 32) return callTypeHash == _embeddedCall();
         bytes32 digest = _hashTypedData(callTypeHash);
         return SignatureCheckerLib.isValidSignatureNowCalldata(owner(), digest, opData[0x20:]);
     }

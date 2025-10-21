@@ -25,9 +25,11 @@ abstract contract CatapultarTest is Test {
 
     function upgradeable() internal pure virtual returns (bool);
 
-    function embeddedCalls() internal pure virtual returns (bool);
-
-    function typehash(uint256 nonce, bytes32 mode, ERC7821.Call[] calldata calls) external pure returns (bytes32) {
+    function typehash(
+        uint256 nonce,
+        bytes32 mode,
+        ERC7821.Call[] calldata calls
+    ) external pure returns (bytes32) {
         return LibCalls.typehash(nonce, mode, calls);
     }
 
@@ -100,13 +102,11 @@ abstract contract CatapultarTest is Test {
         (, uint256 privateKey) = init();
         uint256 amount = 10 ** 18;
         bytes32 executionMode = bytes10(0x01000000000078210001);
-        uint256 nonce = 0;
+        uint256 nonce = 1;
 
         ERC7821.Call[] memory calls = new ERC7821.Call[](1);
         calls[0] = ERC7821.Call({
-            to: address(token),
-            data: abi.encodeCall(MockERC20.transfer, (makeAddr("to"), amount)),
-            value: 0
+            to: address(token), data: abi.encodeCall(MockERC20.transfer, (makeAddr("to"), amount)), value: 0
         });
 
         bytes32 domainSeparator = EIP712(address(executor)).DOMAIN_SEPARATOR();
@@ -125,16 +125,14 @@ abstract contract CatapultarTest is Test {
         (address owner, uint256 privateKey) = init();
         uint256 amount = 10 ** 18;
         bytes32 executionMode = bytes10(0x01000000000078210001);
-        uint256 nonce = 0;
+        uint256 nonce = 1;
 
         vm.prank(owner);
         executor.invalidateUnorderedNonces(0, 1 << 255);
 
         ERC7821.Call[] memory calls = new ERC7821.Call[](1);
         calls[0] = ERC7821.Call({
-            to: address(token),
-            data: abi.encodeCall(MockERC20.transfer, (makeAddr("to"), amount)),
-            value: 0
+            to: address(token), data: abi.encodeCall(MockERC20.transfer, (makeAddr("to"), amount)), value: 0
         });
 
         bytes32 domainSeparator = EIP712(address(executor)).DOMAIN_SEPARATOR();
@@ -153,18 +151,14 @@ abstract contract CatapultarTest is Test {
         (, uint256 privateKey) = init();
         uint256 amount = 10 ** 18;
         bytes32 executionMode = bytes10(0x01000000000078210001);
-        uint256 nonce = 0;
+        uint256 nonce = 1;
 
         ERC7821.Call[] memory calls = new ERC7821.Call[](2);
         calls[0] = ERC7821.Call({
-            to: address(token),
-            data: abi.encodeCall(MockERC20.transfer, (makeAddr("to"), amount / 2)),
-            value: 0
+            to: address(token), data: abi.encodeCall(MockERC20.transfer, (makeAddr("to"), amount / 2)), value: 0
         });
         calls[1] = ERC7821.Call({
-            to: address(token),
-            data: abi.encodeCall(MockERC20.transfer, (makeAddr("next"), amount / 2)),
-            value: 0
+            to: address(token), data: abi.encodeCall(MockERC20.transfer, (makeAddr("next"), amount / 2)), value: 0
         });
 
         bytes32 domainSeparator = EIP712(address(executor)).DOMAIN_SEPARATOR();
@@ -183,21 +177,17 @@ abstract contract CatapultarTest is Test {
         (address owner, uint256 privateKey) = init();
         uint256 amount = 10 ** 18;
         bytes32 executionMode = bytes10(0x01000000000078210001);
-        uint256 nonce = 0;
+        uint256 nonce = 1;
 
         vm.prank(owner);
         executor.invalidateUnorderedNonces(0, 1 << 255);
 
         ERC7821.Call[] memory calls = new ERC7821.Call[](2);
         calls[0] = ERC7821.Call({
-            to: address(token),
-            data: abi.encodeCall(MockERC20.transfer, (makeAddr("to"), amount / 2)),
-            value: 0
+            to: address(token), data: abi.encodeCall(MockERC20.transfer, (makeAddr("to"), amount / 2)), value: 0
         });
         calls[1] = ERC7821.Call({
-            to: address(token),
-            data: abi.encodeCall(MockERC20.transfer, (makeAddr("next"), amount / 2)),
-            value: 0
+            to: address(token), data: abi.encodeCall(MockERC20.transfer, (makeAddr("next"), amount / 2)), value: 0
         });
 
         bytes32 domainSeparator = EIP712(address(executor)).DOMAIN_SEPARATOR();
@@ -218,7 +208,7 @@ abstract contract CatapultarTest is Test {
     function test_upgrade() external {
         (address owner,) = init();
 
-        address newImplementation = address(new MockCatapultar(false));
+        address newImplementation = address(new MockCatapultar());
 
         vm.prank(makeAddr("notOwner"));
         vm.expectRevert(abi.encodeWithSignature("Unauthorized()"));
@@ -230,51 +220,31 @@ abstract contract CatapultarTest is Test {
     }
 
     function test_useUnorderedNonce() external {
-        executor.useUnorderedNonce(0);
-        executor.useUnorderedNonce(1);
-
         vm.expectRevert(abi.encodeWithSelector(BitmapNonce.InvalidNonce.selector));
         executor.useUnorderedNonce(0);
+
+        executor.useUnorderedNonce(1);
+        executor.useUnorderedNonce(2);
+
+        vm.expectRevert(abi.encodeWithSelector(BitmapNonce.InvalidNonce.selector));
+        executor.useUnorderedNonce(1);
     }
 
-    function test_useUnorderedNonce_no_collision(uint256 nonceA, uint256 nonceB) external {
+    function test_useUnorderedNonce_no_collision(
+        uint256 nonceA,
+        uint256 nonceB
+    ) external {
+        vm.assume(nonceA != 0);
+        vm.assume(nonceB != 0);
         vm.assume(nonceA != nonceB);
         executor.useUnorderedNonce(nonceA);
         executor.useUnorderedNonce(nonceB);
     }
 
-    function test_check_embedded_calls() external view {
-        bytes32 embed = executor.embeddedCall();
-        assertEq(embed, bytes32(0));
-    }
-
-    function test_embed_arbitrary(
-        bytes32 embed
-    ) external {
-        vm.skip(!embeddedCalls());
-
-        executor = MockCatapultar(payable(LibClone.cloneDeterministic(executorTemplate, abi.encodePacked(embed), 0)));
-
-        bytes32 read = executor.embeddedCall();
-        assertEq(read, embed);
-    }
-
-    function test_embed_new_address() external {
-        vm.skip(!embeddedCalls());
-
-        bytes32 embedA = bytes32(uint256(1));
-        bytes32 embedB = bytes32(uint256(2));
-
-        address cloneA = LibClone.cloneDeterministic(executorTemplate, abi.encodePacked(embedA), 0);
-        address cloneB = LibClone.cloneDeterministic(executorTemplate, abi.encodePacked(embedB), 0);
-
-        assertNotEq(cloneA, cloneB);
-    }
-
     function test_validateOpData() external {
         ERC7821.Call[] memory calls = new ERC7821.Call[](0);
         bytes32 mode = bytes32(0);
-        bytes memory opData = abi.encode(0);
+        bytes memory opData = abi.encode(1);
         bool result;
 
         vm.prank(address(executor));
@@ -286,7 +256,7 @@ abstract contract CatapultarTest is Test {
         result = executor.validateOpData(mode, calls, opData);
         assertEq(result, false);
 
-        opData = abi.encode(1);
+        opData = abi.encode(2);
         vm.prank(address(executor));
         result = executor.validateOpData(mode, calls, opData);
         assertEq(result, true);
@@ -302,7 +272,7 @@ abstract contract CatapultarTest is Test {
         uint256 snapshot = vm.snapshot();
 
         vm.prank(address(executor));
-        result = executor.validateOpData(mode, calls, abi.encode(0));
+        result = executor.validateOpData(mode, calls, abi.encode(1));
         assertEq(result, true);
 
         vm.revertTo(snapshot);
@@ -316,7 +286,7 @@ abstract contract CatapultarTest is Test {
         vm.startPrank(address(executor));
 
         vm.expectRevert(abi.encodeWithSelector(BitmapNonce.InvalidNonce.selector));
-        executor.validateOpData(mode, calls, abi.encode(0));
+        executor.validateOpData(mode, calls, abi.encode(1));
 
         vm.expectRevert(abi.encodeWithSelector(BitmapNonce.InvalidNonce.selector));
         executor.validateOpData(mode, calls, abi.encode(1));
@@ -342,36 +312,12 @@ abstract contract CatapultarTest is Test {
 
     function testRevert_invalidateUnorderedNonces_asBatch() external {
         ERC7821.Call[] memory calls = new ERC7821.Call[](1);
-        calls[0] =
-            ERC7821.Call({ to: address(0), data: abi.encodeCall(executor.invalidateUnorderedNonces, (0, 2)), value: 0 });
+        calls[0] = ERC7821.Call({
+            to: address(0), data: abi.encodeCall(executor.invalidateUnorderedNonces, (0, 2)), value: 0
+        });
 
         vm.prank(address(executor));
-        executor.execute(bytes10(0x01000000000078210001), abi.encode(calls, abi.encode(0)));
-    }
-
-    function test_validateOpData_embedded_calls() external {
-        vm.skip(!embeddedCalls());
-
-        ERC7821.Call[] memory calls = new ERC7821.Call[](1);
-        uint256 nonce = 0;
-        bytes32 mode = bytes32(0);
-        bytes32 typeHash = this.typehash(nonce, mode, calls);
-
-        // Check that our default account (that has 0 embedded) return false
-        bytes memory opData = abi.encode(nonce);
-        vm.prank(makeAddr("random"));
-        bool result = executor.validateOpData(mode, calls, opData);
-        assertEq(result, false);
-
-        // We need to deploy a proxy specifically with the embedded typehash.
-        executor = MockCatapultar(payable(LibClone.cloneDeterministic(executorTemplate, abi.encodePacked(typeHash), 0)));
-
-        bytes32 embed = executor.embeddedCall();
-        assertEq(embed, typeHash);
-
-        vm.prank(makeAddr("random"));
-        result = executor.validateOpData(mode, calls, opData);
-        assertEq(result, true);
+        executor.execute(bytes10(0x01000000000078210001), abi.encode(calls, abi.encode(1)));
     }
 
     function test_validateOpData_signatures() external {
@@ -448,30 +394,33 @@ abstract contract CatapultarTest is Test {
         // 0xf23a6e61: `onERC1155Received(address,address,uint256,uint256,bytes)`.
         // 0xbc197c81: `onERC1155BatchReceived(address,address,uint256[],uint256[],bytes)`.
 
-        address(executor).call(
-            abi.encodeWithSignature(
-                "onERC721Received(address,address,uint256,bytes)", address(0), address(0), uint256(0), new bytes(0)
-            )
-        );
-        address(executor).call(
-            abi.encodeWithSignature(
-                "onERC1155Received(address,address,uint256,uint256,bytes)",
-                address(0),
-                address(0),
-                uint256(0),
-                uint256(0),
-                new bytes(0)
-            )
-        );
-        address(executor).call(
-            abi.encodeWithSignature(
-                "onERC1155BatchReceived(address,address,uint256[],uint256[],bytes)",
-                address(0),
-                address(0),
-                new uint256[](0),
-                new uint256[](0),
-                new bytes(0)
-            )
-        );
+        address(executor)
+            .call(
+                abi.encodeWithSignature(
+                    "onERC721Received(address,address,uint256,bytes)", address(0), address(0), uint256(0), new bytes(0)
+                )
+            );
+        address(executor)
+            .call(
+                abi.encodeWithSignature(
+                    "onERC1155Received(address,address,uint256,uint256,bytes)",
+                    address(0),
+                    address(0),
+                    uint256(0),
+                    uint256(0),
+                    new bytes(0)
+                )
+            );
+        address(executor)
+            .call(
+                abi.encodeWithSignature(
+                    "onERC1155BatchReceived(address,address,uint256[],uint256[],bytes)",
+                    address(0),
+                    address(0),
+                    new uint256[](0),
+                    new uint256[](0),
+                    new bytes(0)
+                )
+            );
     }
 }
