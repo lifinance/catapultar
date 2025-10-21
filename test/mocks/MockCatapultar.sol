@@ -4,9 +4,13 @@ pragma solidity ^0.8.30;
 import { Catapultar } from "../../src/Catapultar.sol";
 
 contract MockCatapultar is Catapultar {
-    constructor()  { }
+    constructor() { }
 
-    function validateOpData(bytes32 mode, Call[] calldata calls, bytes calldata opData) external returns (bool) {
+    function validateOpData(
+        bytes32 mode,
+        Call[] calldata calls,
+        bytes calldata opData
+    ) external returns (bool) {
         return _validateOpData(mode, calls, opData);
     }
 

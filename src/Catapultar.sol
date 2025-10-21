@@ -78,8 +78,7 @@ contract Catapultar is ERC7821LIFI, EIP712, BitmapNonce, Ownable, Initializable,
         _;
     }
 
-    constructor(
-    ) {
+    constructor() {
         _disableInitializers();
     }
 
@@ -120,7 +119,10 @@ contract Catapultar is ERC7821LIFI, EIP712, BitmapNonce, Ownable, Initializable,
      * @param signature Bytes that represents the signature of the signed message.
      * @return result 0x1626ba7e if true or 0xffffffff is invalid.
      */
-    function isValidSignature(bytes32 hash, bytes calldata signature) public view virtual returns (bytes4 result) {
+    function isValidSignature(
+        bytes32 hash,
+        bytes calldata signature
+    ) public view virtual returns (bytes4 result) {
         bool success = SignatureCheckerLib.isValidSignatureNowCalldata(
             owner(),
             EfficientHashLib.hash(
@@ -144,7 +146,10 @@ contract Catapultar is ERC7821LIFI, EIP712, BitmapNonce, Ownable, Initializable,
      * @param wordPos Lefmost 248 bits of the nonce.
      * @param mask Bitmask used to invalidate nonces associated with the rightmost 8 bits
      */
-    function invalidateUnorderedNonces(uint256 wordPos, uint256 mask) external onlyOwnerOrSelf {
+    function invalidateUnorderedNonces(
+        uint256 wordPos,
+        uint256 mask
+    ) external onlyOwnerOrSelf {
         nonceBitmap[wordPos] |= mask;
 
         emit UnorderedNonceInvalidation(wordPos, mask);

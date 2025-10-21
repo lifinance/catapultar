@@ -25,7 +25,11 @@ abstract contract CatapultarTest is Test {
 
     function upgradeable() internal pure virtual returns (bool);
 
-    function typehash(uint256 nonce, bytes32 mode, ERC7821.Call[] calldata calls) external pure returns (bytes32) {
+    function typehash(
+        uint256 nonce,
+        bytes32 mode,
+        ERC7821.Call[] calldata calls
+    ) external pure returns (bytes32) {
         return LibCalls.typehash(nonce, mode, calls);
     }
 
@@ -102,9 +106,7 @@ abstract contract CatapultarTest is Test {
 
         ERC7821.Call[] memory calls = new ERC7821.Call[](1);
         calls[0] = ERC7821.Call({
-            to: address(token),
-            data: abi.encodeCall(MockERC20.transfer, (makeAddr("to"), amount)),
-            value: 0
+            to: address(token), data: abi.encodeCall(MockERC20.transfer, (makeAddr("to"), amount)), value: 0
         });
 
         bytes32 domainSeparator = EIP712(address(executor)).DOMAIN_SEPARATOR();
@@ -130,9 +132,7 @@ abstract contract CatapultarTest is Test {
 
         ERC7821.Call[] memory calls = new ERC7821.Call[](1);
         calls[0] = ERC7821.Call({
-            to: address(token),
-            data: abi.encodeCall(MockERC20.transfer, (makeAddr("to"), amount)),
-            value: 0
+            to: address(token), data: abi.encodeCall(MockERC20.transfer, (makeAddr("to"), amount)), value: 0
         });
 
         bytes32 domainSeparator = EIP712(address(executor)).DOMAIN_SEPARATOR();
@@ -155,14 +155,10 @@ abstract contract CatapultarTest is Test {
 
         ERC7821.Call[] memory calls = new ERC7821.Call[](2);
         calls[0] = ERC7821.Call({
-            to: address(token),
-            data: abi.encodeCall(MockERC20.transfer, (makeAddr("to"), amount / 2)),
-            value: 0
+            to: address(token), data: abi.encodeCall(MockERC20.transfer, (makeAddr("to"), amount / 2)), value: 0
         });
         calls[1] = ERC7821.Call({
-            to: address(token),
-            data: abi.encodeCall(MockERC20.transfer, (makeAddr("next"), amount / 2)),
-            value: 0
+            to: address(token), data: abi.encodeCall(MockERC20.transfer, (makeAddr("next"), amount / 2)), value: 0
         });
 
         bytes32 domainSeparator = EIP712(address(executor)).DOMAIN_SEPARATOR();
@@ -188,14 +184,10 @@ abstract contract CatapultarTest is Test {
 
         ERC7821.Call[] memory calls = new ERC7821.Call[](2);
         calls[0] = ERC7821.Call({
-            to: address(token),
-            data: abi.encodeCall(MockERC20.transfer, (makeAddr("to"), amount / 2)),
-            value: 0
+            to: address(token), data: abi.encodeCall(MockERC20.transfer, (makeAddr("to"), amount / 2)), value: 0
         });
         calls[1] = ERC7821.Call({
-            to: address(token),
-            data: abi.encodeCall(MockERC20.transfer, (makeAddr("next"), amount / 2)),
-            value: 0
+            to: address(token), data: abi.encodeCall(MockERC20.transfer, (makeAddr("next"), amount / 2)), value: 0
         });
 
         bytes32 domainSeparator = EIP712(address(executor)).DOMAIN_SEPARATOR();
@@ -238,7 +230,10 @@ abstract contract CatapultarTest is Test {
         executor.useUnorderedNonce(1);
     }
 
-    function test_useUnorderedNonce_no_collision(uint256 nonceA, uint256 nonceB) external {
+    function test_useUnorderedNonce_no_collision(
+        uint256 nonceA,
+        uint256 nonceB
+    ) external {
         vm.assume(nonceA != 0);
         vm.assume(nonceB != 0);
         vm.assume(nonceA != nonceB);
@@ -317,8 +312,9 @@ abstract contract CatapultarTest is Test {
 
     function testRevert_invalidateUnorderedNonces_asBatch() external {
         ERC7821.Call[] memory calls = new ERC7821.Call[](1);
-        calls[0] =
-            ERC7821.Call({ to: address(0), data: abi.encodeCall(executor.invalidateUnorderedNonces, (0, 2)), value: 0 });
+        calls[0] = ERC7821.Call({
+            to: address(0), data: abi.encodeCall(executor.invalidateUnorderedNonces, (0, 2)), value: 0
+        });
 
         vm.prank(address(executor));
         executor.execute(bytes10(0x01000000000078210001), abi.encode(calls, abi.encode(1)));
@@ -398,30 +394,33 @@ abstract contract CatapultarTest is Test {
         // 0xf23a6e61: `onERC1155Received(address,address,uint256,uint256,bytes)`.
         // 0xbc197c81: `onERC1155BatchReceived(address,address,uint256[],uint256[],bytes)`.
 
-        address(executor).call(
-            abi.encodeWithSignature(
-                "onERC721Received(address,address,uint256,bytes)", address(0), address(0), uint256(0), new bytes(0)
-            )
-        );
-        address(executor).call(
-            abi.encodeWithSignature(
-                "onERC1155Received(address,address,uint256,uint256,bytes)",
-                address(0),
-                address(0),
-                uint256(0),
-                uint256(0),
-                new bytes(0)
-            )
-        );
-        address(executor).call(
-            abi.encodeWithSignature(
-                "onERC1155BatchReceived(address,address,uint256[],uint256[],bytes)",
-                address(0),
-                address(0),
-                new uint256[](0),
-                new uint256[](0),
-                new bytes(0)
-            )
-        );
+        address(executor)
+            .call(
+                abi.encodeWithSignature(
+                    "onERC721Received(address,address,uint256,bytes)", address(0), address(0), uint256(0), new bytes(0)
+                )
+            );
+        address(executor)
+            .call(
+                abi.encodeWithSignature(
+                    "onERC1155Received(address,address,uint256,uint256,bytes)",
+                    address(0),
+                    address(0),
+                    uint256(0),
+                    uint256(0),
+                    new bytes(0)
+                )
+            );
+        address(executor)
+            .call(
+                abi.encodeWithSignature(
+                    "onERC1155BatchReceived(address,address,uint256[],uint256[],bytes)",
+                    address(0),
+                    address(0),
+                    new uint256[](0),
+                    new uint256[](0),
+                    new bytes(0)
+                )
+            );
     }
 }

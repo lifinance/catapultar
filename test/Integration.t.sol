@@ -248,11 +248,19 @@ contract IntegrationTest is Test {
         assertEq(DummyContract(dummy).store(1), 3, "Should have been called three times");
     }
 
-    function typehash(uint256 nonce, bytes32 mode, ERC7821.Call[] calldata calls) external pure returns (bytes32) {
+    function typehash(
+        uint256 nonce,
+        bytes32 mode,
+        ERC7821.Call[] calldata calls
+    ) external pure returns (bytes32) {
         return LibCalls.typehash(nonce, mode, calls);
     }
 
-    function assembleExtraData(bytes1 revertMode, uint256 nonce, uint256 index) internal pure returns (bytes32) {
+    function assembleExtraData(
+        bytes1 revertMode,
+        uint256 nonce,
+        uint256 index
+    ) internal pure returns (bytes32) {
         uint256 extraData = uint256(bytes32(bytes1(revertMode)));
         extraData = extraData + ((nonce << (9 * 8)) >> 8);
         extraData = extraData + uint256(uint64(index));

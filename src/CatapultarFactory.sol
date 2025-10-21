@@ -41,7 +41,10 @@ contract CatapultarFactory {
     }
 
     /// @param salt The first 20 bytes of salt has to be the owner or 0.
-    function deploy(address owner, bytes32 salt) external ownerInSalt(salt, owner) returns (address proxy) {
+    function deploy(
+        address owner,
+        bytes32 salt
+    ) external ownerInSalt(salt, owner) returns (address proxy) {
         proxy = LibClone.cloneDeterministic_PUSH0(address(EXECUTOR), salt);
 
         Catapultar(payable(proxy)).init(owner);
@@ -58,7 +61,10 @@ contract CatapultarFactory {
     }
 
     /// @param salt The first 20 bytes of salt has to be the owner or 0.
-    function deployUpgradeable(address owner, bytes32 salt) external ownerInSalt(salt, owner) returns (address proxy) {
+    function deployUpgradeable(
+        address owner,
+        bytes32 salt
+    ) external ownerInSalt(salt, owner) returns (address proxy) {
         proxy = LibClone.deployDeterministicERC1967(EXECUTOR, salt);
 
         Catapultar(payable(proxy)).init(owner);
@@ -85,7 +91,10 @@ contract CatapultarFactory {
      * @param salt A bytes32 value intended to pseudo-randomize the deployed address.
      * @param owner A desired callable parameter for a proxy address
      */
-    modifier ownerInSalt(bytes32 salt, address owner) {
+    modifier ownerInSalt(
+        bytes32 salt,
+        address owner
+    ) {
         LibClone.checkStartsWith(salt, owner);
         _;
     }
