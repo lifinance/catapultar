@@ -118,7 +118,10 @@ contract CatapultarFactoryTest is Test {
 
     // --- Check salt contains owner --- //
 
-    function testRevert_deploy_salt_does_not_contain_owner(address owner, bytes32 salt) external {
+    function testRevert_deploy_salt_does_not_contain_owner(
+        address owner,
+        bytes32 salt
+    ) external {
         vm.assume(owner != address(0));
         if (bytes20(salt) != bytes20(0) && address(uint160(bytes20(salt))) != owner) {
             vm.expectRevert(abi.encodeWithSignature("SaltDoesNotStartWith()"));
@@ -129,7 +132,10 @@ contract CatapultarFactoryTest is Test {
         factory.deploy(KeyedOwnable.KeyType.ECDSAOrSmartContract, keys, salt);
     }
 
-    function testRevert_deployWithEmbedCall_salt_does_not_contain_owner(address owner, bytes32 salt) external {
+    function testRevert_deployWithEmbedCall_salt_does_not_contain_owner(
+        address owner,
+        bytes32 salt
+    ) external {
         vm.assume(owner != address(0));
         if (bytes20(salt) != bytes20(0) && address(uint160(bytes20(salt))) != owner) {
             vm.expectRevert(abi.encodeWithSignature("SaltDoesNotStartWith()"));
@@ -140,7 +146,10 @@ contract CatapultarFactoryTest is Test {
         factory.deployWithEmbedCall(KeyedOwnable.KeyType.ECDSAOrSmartContract, keys, salt, bytes32(0));
     }
 
-    function testRevert_deployUpgradeable_salt_does_not_contain_owner(address owner, bytes32 salt) external {
+    function testRevert_deployUpgradeable_salt_does_not_contain_owner(
+        address owner,
+        bytes32 salt
+    ) external {
         vm.assume(owner != address(0));
         if (bytes20(salt) != bytes20(0) && address(uint160(bytes20(salt))) != owner) {
             vm.expectRevert(abi.encodeWithSignature("SaltDoesNotStartWith()"));
@@ -151,7 +160,10 @@ contract CatapultarFactoryTest is Test {
         factory.deployUpgradeable(KeyedOwnable.KeyType.ECDSAOrSmartContract, keys, salt);
     }
 
-    function testRevert_predictDeploy_salt_does_not_contain_owner(address owner, bytes32 salt) external {
+    function testRevert_predictDeploy_salt_does_not_contain_owner(
+        address owner,
+        bytes32 salt
+    ) external {
         vm.assume(owner != address(0));
         if (bytes20(salt) != bytes20(0) && address(uint160(bytes20(salt))) != owner) {
             vm.expectRevert(abi.encodeWithSignature("SaltDoesNotStartWith()"));
@@ -162,7 +174,10 @@ contract CatapultarFactoryTest is Test {
         factory.predictDeploy(KeyedOwnable.KeyType.ECDSAOrSmartContract, keys, salt);
     }
 
-    function testRevert_predictDeployWithEmbedCall_salt_does_not_contain_owner(address owner, bytes32 salt) external {
+    function testRevert_predictDeployWithEmbedCall_salt_does_not_contain_owner(
+        address owner,
+        bytes32 salt
+    ) external {
         vm.assume(owner != address(0));
         if (bytes20(salt) != bytes20(0) && address(uint160(bytes20(salt))) != owner) {
             vm.expectRevert(abi.encodeWithSignature("SaltDoesNotStartWith()"));
@@ -173,7 +188,10 @@ contract CatapultarFactoryTest is Test {
         factory.predictDeployWithEmbedCall(KeyedOwnable.KeyType.ECDSAOrSmartContract, keys, salt, bytes32(0));
     }
 
-    function testRevert_predictDeployUpgradeable_salt_does_not_contain_owner(address owner, bytes32 salt) external {
+    function testRevert_predictDeployUpgradeable_salt_does_not_contain_owner(
+        address owner,
+        bytes32 salt
+    ) external {
         vm.assume(owner != address(0));
         if (bytes20(salt) != bytes20(0) && address(uint160(bytes20(salt))) != owner) {
             vm.expectRevert(abi.encodeWithSignature("SaltDoesNotStartWith()"));

@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 pragma solidity ^0.8.30;
 
+import { Stowaway } from "stowaway/src/Stowaway.sol";
+
+import { ERC7821 } from "solady/src/accounts/ERC7821.sol";
 import { EIP712 } from "solady/src/utils/EIP712.sol";
 import { EfficientHashLib } from "solady/src/utils/EfficientHashLib.sol";
 import { Initializable } from "solady/src/utils/Initializable.sol";
@@ -54,27 +57,18 @@ import { LibCalls } from "./libs/LibCalls.sol";
  */
 contract Catapultar is ERC7821LIFI, EIP712, BitmapNonce, KeyedOwnable, Initializable, UUPSUpgradeable {
     error NotUpgradeable();
-    error CannotBeUpgradeable();
+    error AlreadySet();
+
+    event SignatureSet(bytes32 indexed hash, uint256 nonce);
 
     /**
      * @dev Used to uniquely rehash ERC1271 signatures to identify them as originating from this account.
      */
     bytes32 constant REPLAY_PROTECTION = keccak256(bytes("Replay(address account,bytes32 payload)"));
 
-    /**
-     * @dev Determines whether pre-configured calls are allowed.
-     * The intended use-case is to save gas if the functionality is not needed.
-     */
-    bool immutable ALLOW_EMBEDDED_CALLS;
+    mapping(bytes32 hash => uint256 nonce) public approvedDigest;
 
-    /**
-     * @param allowOneTimeCall Whether or not embedded calls are allowed. If set to false, logic associated with
-     * embedded calls is skipped.
-     */
-    constructor(
-        bool allowOneTimeCall
-    ) {
-        ALLOW_EMBEDDED_CALLS = allowOneTimeCall;
+    constructor() {
         _disableInitializers();
     }
 
@@ -95,13 +89,31 @@ contract Catapultar is ERC7821LIFI, EIP712, BitmapNonce, KeyedOwnable, Initializ
         return _domainSeparator();
     }
 
-    /**
-     * @dev If ALLOW_EMBEDDED_CALLS is true and the contract is being cloned as an upgradeable contract, the function
-     * will revert.
-     */
-    function init(KeyType ktp, bytes32[] calldata owner) external payable initializer {
+    function init(
+        KeyType ktp,
+        bytes32[] calldata owner
+    ) external payable initializer {
         _transferOwnership(ktp, owner);
-        if (ALLOW_EMBEDDED_CALLS && !_notUpgradeable()) revert CannotBeUpgradeable();
+    }
+
+    /**
+     * @dev Setting either a transaction or signature as validated is not straight forward.
+     * - Transaction: Provide the typehash of the calls, which includes the nonce and mode. You need to set the nonce to
+     * the same nonce you used for hashing.
+     * - Signing: Provide the non-rehashed message with nonce uint256.max.
+     * This is a security feature.
+     */
+    function setSignature(
+        bytes32 hash,
+        uint256 nonce
+    ) public {
+        if (!ownerOrSelf() && _getInitializedVersion() != 0) revert Unauthorized();
+
+        uint256 currentNonce = approvedDigest[hash];
+        if (currentNonce != 0) revert AlreadySet();
+
+        approvedDigest[hash] = nonce;
+        emit SignatureSet(hash, nonce);
     }
 
     /**
@@ -114,12 +126,16 @@ contract Catapultar is ERC7821LIFI, EIP712, BitmapNonce, KeyedOwnable, Initializ
      * @param signature Bytes that represents the signature of the signed message.
      * @return result 0x1626ba7e if true or 0xffffffff is invalid.
      */
-    function isValidSignature(bytes32 hash, bytes calldata signature) public view virtual returns (bytes4 result) {
+    function isValidSignature(
+        bytes32 hash,
+        bytes calldata signature
+    ) public view virtual returns (bytes4 result) {
         bytes32 digest = EfficientHashLib.hash(
             REPLAY_PROTECTION, // Offset hash to ensure no standard payload replicates this structure.
             asUnsafeBytes32(address(this)),
             hash
         );
+        if (signature.length == 0 && approvedDigest[digest] == type(uint256).max) return bytes4(0xffffffff);
         bool isValid = _validateSignature(digest, signature);
         assembly ("memory-safe") {
             // `success ? bytes4(keccak256("isValidSignature(bytes32,bytes)")) : 0xffffffff`.
@@ -135,32 +151,16 @@ contract Catapultar is ERC7821LIFI, EIP712, BitmapNonce, KeyedOwnable, Initializ
      * @param wordPos Lefmost 248 bits of the nonce.
      * @param mask Bitmask used to invalidate nonces associated with the rightmost 8 bits
      */
-    function invalidateUnorderedNonces(uint256 wordPos, uint256 mask) external onlyOwnerOrSelf {
+    function invalidateUnorderedNonces(
+        uint256 wordPos,
+        uint256 mask
+    ) external onlyOwnerOrSelf {
         nonceBitmap[wordPos] |= mask;
 
         emit UnorderedNonceInvalidation(wordPos, mask);
     }
 
     // --- Proxy / Clone Helpers --- //
-
-    /**
-     * @notice Returns immutable calldata attached to a proxy.
-     * @dev This function must only be called from a proxy deployed with LibClone.createDeterministicClone.
-     * @return bytes32 Embedded call as the first 32 bytes of the immutable args attached to the proxy.
-     */
-    function _embeddedCall() internal view returns (bytes32) {
-        return bytes32(LibClone.argsOnClone(address(this), 0, 32));
-    }
-
-    /**
-     * @notice Returns immutable calldata attached to a proxy.
-     * @dev This function must only be called from a proxy deployed with LibClone.createDeterministicClone.
-     * @return bytes32 Embedded call as the first 32 bytes of the immutable args attached to the proxy.
-     */
-    function embeddedCall() external view returns (bytes32) {
-        if (!ALLOW_EMBEDDED_CALLS) return bytes32(0);
-        return _embeddedCall();
-    }
 
     /**
      * @notice Returns whether the contract has any storage set in the ERC1967 implementation slot.
@@ -221,8 +221,9 @@ contract Catapultar is ERC7821LIFI, EIP712, BitmapNonce, KeyedOwnable, Initializ
         if (opData.length == 32) if (address(this) == msg.sender) return true;
 
         bytes32 callTypeHash = LibCalls.typehash(nonce, mode, calls);
-        // If ALLOW_EMBEDDED_CALLS is allowed (and no signature), then we check if the hash has been embedded.
-        if (ALLOW_EMBEDDED_CALLS) if (opData.length == 32) return callTypeHash == _embeddedCall();
+        // We need to check if the hash matches before. This is required for "embedded" calls since we cannot know the
+        // address ahead of time. 0 Nonce is disallowed by _useUnorderedNonce
+        if (opData.length == 32) return approvedDigest[callTypeHash] == nonce;
         bytes32 digest = _hashTypedData(callTypeHash);
 
         return _validateSignature(digest, opData[0x20:]);
@@ -245,6 +246,7 @@ contract Catapultar is ERC7821LIFI, EIP712, BitmapNonce, KeyedOwnable, Initializ
     /// @notice LibZip will handle fallbacks for gas efficiency savings on cheap execution but expensive calldata
     /// chains.
     fallback() external payable override receiverFallback {
+        Stowaway.searchAndCall(ERC7821.execute.selector);
         LibZip.cdFallback();
     }
 }

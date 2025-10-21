@@ -23,10 +23,12 @@ abstract contract BitmapNonce {
     }
 
     /// @notice Checks whether a nonce is taken and sets the bit at the bit position in the bitmap at the word position
+    /// @dev Disallows nonce 0
     /// @param nonce The nonce to spend
     function _useUnorderedNonce(
         uint256 nonce
     ) internal {
+        if (nonce == 0) revert InvalidNonce();
         (uint256 wordPos, uint256 bitPos) = bitmapPositions(nonce);
         uint256 bit = 1 << bitPos;
         uint256 flipped = nonceBitmap[wordPos] ^= bit;

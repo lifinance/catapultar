@@ -61,13 +61,17 @@ contract ERC7821LIFITest is Test {
         bool fail;
     }
 
-    function testERC7821LIFI_nonces(uint256 nonce, RandomBytes[] calldata randomBytes) external {
+    function testERC7821LIFI_nonces(
+        uint256 nonce,
+        RandomBytes[] calldata randomBytes
+    ) external {
         ERC7821.Call[] memory calls = new ERC7821.Call[](randomBytes.length);
         for (uint256 i; i < randomBytes.length; ++i) {
             calls[i] = ERC7821.Call({
                 to: address(this),
                 data: abi.encodeWithSignature(
-                    randomBytes[i].fail ? "revertsWithCustomError(bytes)" : "returnsBytes(bytes)", randomBytes[i].payload
+                    randomBytes[i].fail ? "revertsWithCustomError(bytes)" : "returnsBytes(bytes)",
+                    randomBytes[i].payload
                 ),
                 value: 0
             });
@@ -115,13 +119,13 @@ contract ERC7821LIFITest is Test {
     // function testRevert_TooManyCalls() external {
     //     ERC7821.Call[] memory calls = new ERC7821.Call[](uint256(type(uint64).max) + 1);
 
-    //     bytes memory executionData = abi.encode(calls, abi.encode(0));
-    //     mbe.setValidCalldata(abi.encode(0));
+    // bytes memory executionData = abi.encode(calls, abi.encode(0));
+    // mbe.setValidCalldata(abi.encode(0));
 
-    //     vm.prank(address(mbe));
-    //     vm.expectRevert(abi.encodeWithSelector(ERC7821LIFI.TooManyCalls.selector));
-    //     mbe.execute(bytes10(0x01010000000078210001), executionData);
-    // }
+    // vm.prank(address(mbe));
+    // vm.expectRevert(abi.encodeWithSelector(ERC7821LIFI.TooManyCalls.selector));
+    // mbe.execute(bytes10(0x01010000000078210001), executionData);
+    //}
 
     function testRevert_noOpData() external {
         ERC7821.Call[] memory calls = new ERC7821.Call[](1);

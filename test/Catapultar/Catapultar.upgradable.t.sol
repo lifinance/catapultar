@@ -11,25 +11,11 @@ import { CatapultarTest } from "./Catapultar.base.t.sol";
 
 contract CatapultarUpgradeableTest is CatapultarTest {
     function deploy() internal override returns (address template, address proxied) {
-        template = address(new MockCatapultar(false));
+        template = address(new MockCatapultar());
         proxied = LibClone.deployERC1967(template);
     }
 
     function upgradeable() internal pure override returns (bool) {
         return true;
-    }
-
-    function embeddedCalls() internal pure override returns (bool) {
-        return false;
-    }
-
-    function test_revert_init_with_embedded_calls() external {
-        address template = address(new MockCatapultar(true));
-        address proxied = LibClone.deployERC1967(template);
-
-        vm.expectRevert(abi.encodeWithSelector(Catapultar.CannotBeUpgradeable.selector));
-        bytes32[] memory keys = new bytes32[](1);
-        keys[0] = bytes32(uint256(uint160(makeAddr("owner"))));
-        MockCatapultar(payable(proxied)).init(KeyedOwnable.KeyType.ECDSAOrSmartContract, keys);
     }
 }

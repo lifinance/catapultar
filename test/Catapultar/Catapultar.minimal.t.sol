@@ -8,15 +8,11 @@ import { CatapultarTest } from "./Catapultar.base.t.sol";
 
 contract CatapultarMinimalTest is CatapultarTest {
     function deploy() internal override returns (address template, address proxied) {
-        template = address(new MockCatapultar(false));
+        template = address(new MockCatapultar());
         proxied = LibClone.clone_PUSH0(template);
     }
 
     function upgradeable() internal pure override returns (bool) {
-        return false;
-    }
-
-    function embeddedCalls() internal pure override returns (bool) {
         return false;
     }
 }

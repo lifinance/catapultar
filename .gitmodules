@@ -4,3 +4,6 @@
 [submodule "lib/solady"]
 	path = lib/solady
 	url = https://github.com/Vectorized/solady
+[submodule "lib/stowaway"]
+	path = lib/stowaway
+	url = https://github.com/reednaa/stowaway

@@ -15,7 +15,7 @@ import { KeyedOwnable } from "./libs/KeyedOwnable.sol";
  *
  * Three cloning strategies are supported:
  * - Non-upgradeable minimal PUSH_0 clone for a low cost batch execution account.
- * - Non-upgradeable embedded args clone for a short lived account with a pre-configured allowed call.
+ * - Non-upgradeable minimal PUSH_0 clone with a pre-approved hash for either a signature or tx batch.
  * - Upgradeable ERC1967 proxy for a durable long term account.
  *
  * After the proxy has been deployed, init is called to set the owner.
@@ -34,14 +34,12 @@ import { KeyedOwnable } from "./libs/KeyedOwnable.sol";
  *
  */
 contract CatapultarFactory {
-    address public immutable EXECUTOR_NO_EMBEDDED_CALLS;
-    address public immutable EXECUTOR_EMBEDDED_CALLS;
+    address public immutable EXECUTOR;
 
     constructor() {
         // Whether or not a contract supports immutable calls is set in the constructor. Since this contracts supports
         // both types, we need to deploy 2 versions of the contract: one with embedded calls enabled and one without.
-        EXECUTOR_NO_EMBEDDED_CALLS = address(new Catapultar(false));
-        EXECUTOR_EMBEDDED_CALLS = address(new Catapultar(true));
+        EXECUTOR = address(new Catapultar());
     }
 
     /// @param salt The first 20 bytes of salt has to be the owner or 0.
@@ -50,7 +48,7 @@ contract CatapultarFactory {
         bytes32[] calldata owner,
         bytes32 salt
     ) external payable ownerInSalt(salt, ktp, owner) returns (address proxy) {
-        proxy = LibClone.cloneDeterministic_PUSH0(address(EXECUTOR_NO_EMBEDDED_CALLS), salt);
+        proxy = LibClone.cloneDeterministic_PUSH0(EXECUTOR, salt);
 
         Catapultar(payable(proxy)).init{ value: msg.value }(ktp, owner);
     }
@@ -63,7 +61,7 @@ contract CatapultarFactory {
         bytes32[] calldata owner,
         bytes32 salt
     ) external view ownerInSalt(salt, ktp, owner) returns (address proxy) {
-        return LibClone.predictDeterministicAddress_PUSH0(address(EXECUTOR_NO_EMBEDDED_CALLS), salt, address(this));
+        return LibClone.predictDeterministicAddress_PUSH0(EXECUTOR, salt, address(this));
     }
 
     /// @param salt The first 20 bytes of salt has to be the owner or 0.
@@ -73,8 +71,10 @@ contract CatapultarFactory {
         bytes32 salt,
         bytes32 callsTypeHash
     ) external payable ownerInSalt(salt, ktp, owner) returns (address proxy) {
-        proxy = LibClone.cloneDeterministic(address(EXECUTOR_EMBEDDED_CALLS), abi.encodePacked(callsTypeHash), salt);
+        bytes32 saltWithCalls = EfficientHashLib.hash(salt, callsTypeHash);
+        proxy = LibClone.cloneDeterministic_PUSH0(EXECUTOR, saltWithCalls);
 
+        Catapultar(payable(proxy)).setSignature(callsTypeHash, 1);
         Catapultar(payable(proxy)).init{ value: msg.value }(ktp, owner);
     }
 
@@ -87,9 +87,8 @@ contract CatapultarFactory {
         bytes32 salt,
         bytes32 callsTypeHash
     ) external view ownerInSalt(salt, ktp, owner) returns (address proxy) {
-        return LibClone.predictDeterministicAddress(
-            address(EXECUTOR_EMBEDDED_CALLS), abi.encodePacked(callsTypeHash), salt, address(this)
-        );
+        bytes32 saltWithCalls = EfficientHashLib.hash(salt, callsTypeHash);
+        return LibClone.predictDeterministicAddress_PUSH0(EXECUTOR, saltWithCalls, address(this));
     }
 
     /// @param salt The first 20 bytes of salt has to be the owner or 0.
@@ -98,7 +97,7 @@ contract CatapultarFactory {
         bytes32[] calldata owner,
         bytes32 salt
     ) external payable ownerInSalt(salt, ktp, owner) returns (address proxy) {
-        proxy = LibClone.deployDeterministicERC1967(address(EXECUTOR_NO_EMBEDDED_CALLS), salt);
+        proxy = LibClone.deployDeterministicERC1967(EXECUTOR, salt);
 
         Catapultar(payable(proxy)).init{ value: msg.value }(ktp, owner);
     }
@@ -113,7 +112,7 @@ contract CatapultarFactory {
         bytes32[] calldata owner,
         bytes32 salt
     ) external view ownerInSalt(salt, ktp, owner) returns (address proxy) {
-        return LibClone.predictDeterministicAddressERC1967(address(EXECUTOR_NO_EMBEDDED_CALLS), salt, address(this));
+        return LibClone.predictDeterministicAddressERC1967(EXECUTOR, salt, address(this));
     }
 
     // --- Helpers --- //
@@ -125,11 +124,14 @@ contract CatapultarFactory {
      * @param salt A bytes32 value intended to pseudo-randomize the deployed address.
      * @param owner A desired callable parameter for a proxy address
      */
-    modifier ownerInSalt(bytes32 salt, KeyedOwnable.KeyType ktp, bytes32[] calldata owner) {
+    modifier ownerInSalt(
+        bytes32 salt,
+        KeyedOwnable.KeyType ktp,
+        bytes32[] calldata owner
+    ) {
         if (KeyedOwnable.KeyType.ECDSAOrSmartContract == ktp && owner.length == 1) {
             LibClone.checkStartsWith(salt, address(uint160(uint256(owner[0]))));
         } else {
-            // TODO: this is cheating but it _technically is valid
             bytes20 ownerHash = bytes20(EfficientHashLib.hash(bytes32(uint256(uint8(ktp))), owner[0], owner[1]));
             LibClone.checkStartsWith(salt, address(ownerHash));
         }
