@@ -84,12 +84,12 @@ contract IntegrationTest is Test {
         globalCall[0] = ERC7821.Call({
             to: address(0),
             value: 0,
-            data: abi.encodeCall(ERC7821.execute, (NO_REVERT_MODE, abi.encode(calls, abi.encode(0))))
+            data: abi.encodeCall(ERC7821.execute, (NO_REVERT_MODE, abi.encode(calls, abi.encode(1))))
         });
         globalCall[1] = ERC7821.Call({
             to: address(proxy),
             value: 0,
-            data: abi.encodeCall(ERC7821.execute, (REVERT_MODE, abi.encode(calls, abi.encode(1))))
+            data: abi.encodeCall(ERC7821.execute, (REVERT_MODE, abi.encode(calls, abi.encode(2))))
         });
 
         // Lets modify calls to have the first transaction fail.
@@ -106,12 +106,12 @@ contract IntegrationTest is Test {
         globalCall[2] = ERC7821.Call({
             to: address(proxy),
             value: 0,
-            data: abi.encodeCall(ERC7821.execute, (NO_REVERT_MODE, abi.encode(calls, abi.encode(2))))
+            data: abi.encodeCall(ERC7821.execute, (NO_REVERT_MODE, abi.encode(calls, abi.encode(3))))
         });
         globalCall[3] = ERC7821.Call({
             to: address(0),
             value: 0,
-            data: abi.encodeCall(ERC7821.execute, (REVERT_MODE, abi.encode(calls, abi.encode(3))))
+            data: abi.encodeCall(ERC7821.execute, (REVERT_MODE, abi.encode(calls, abi.encode(4))))
         });
 
         // Lets modify calls to have the last transaction fail.
@@ -121,12 +121,12 @@ contract IntegrationTest is Test {
         globalCall[4] = ERC7821.Call({
             to: address(proxy),
             value: 0,
-            data: abi.encodeCall(ERC7821.execute, (NO_REVERT_MODE, abi.encode(calls, abi.encode(4))))
+            data: abi.encodeCall(ERC7821.execute, (NO_REVERT_MODE, abi.encode(calls, abi.encode(5))))
         });
         globalCall[5] = ERC7821.Call({
             to: address(0),
             value: 0,
-            data: abi.encodeCall(ERC7821.execute, (REVERT_MODE, abi.encode(calls, abi.encode(5))))
+            data: abi.encodeCall(ERC7821.execute, (REVERT_MODE, abi.encode(calls, abi.encode(6))))
         });
 
         // Sign the batch.
@@ -194,7 +194,7 @@ contract IntegrationTest is Test {
         // Call 3
         vm.expectEmit();
         emit CallReverted(
-            assembleExtraData(0x00, 2, 0),
+            assembleExtraData(0x00, 3, 0),
             abi.encodeWithSelector(
                 DummyContract.CustomErrorPayload.selector,
                 (bytes("Once upon a time, there was a little smart contract called Catapultar"))
@@ -211,7 +211,7 @@ contract IntegrationTest is Test {
         // Call 4
         vm.expectEmit();
         emit CallReverted(
-            assembleExtraData(0x01, 3, 0),
+            assembleExtraData(0x01, 4, 0),
             abi.encodeWithSelector(
                 DummyContract.CustomErrorPayload.selector,
                 (bytes("Once upon a time, there was a little smart contract called Catapultar"))
@@ -220,7 +220,7 @@ contract IntegrationTest is Test {
         // Call 5
         vm.expectEmit();
         emit CallReverted(
-            assembleExtraData(0x00, 4, 0),
+            assembleExtraData(0x00, 5, 0),
             abi.encodeWithSelector(
                 DummyContract.CustomErrorPayload.selector,
                 (bytes("Once upon a time, there was a little smart contract called Catapultar"))
@@ -237,14 +237,14 @@ contract IntegrationTest is Test {
         // Call 6
         vm.expectEmit();
         emit CallReverted(
-            assembleExtraData(0x01, 5, 0),
+            assembleExtraData(0x01, 6, 0),
             abi.encodeWithSelector(
                 DummyContract.CustomErrorPayload.selector,
                 (bytes("Once upon a time, there was a little smart contract called Catapultar"))
             )
         );
         vm.expectEmit();
-        emit CallReverted(assembleExtraData(0x01, 5, 1), abi.encodeWithSelector(DummyContract.CustomError.selector));
+        emit CallReverted(assembleExtraData(0x01, 6, 1), abi.encodeWithSelector(DummyContract.CustomError.selector));
 
         payable(proxy).call(compressedCallPayload);
 
@@ -252,11 +252,19 @@ contract IntegrationTest is Test {
         assertEq(DummyContract(dummy).store(1), 3, "Should have been called three times");
     }
 
-    function typehash(uint256 nonce, bytes32 mode, ERC7821.Call[] calldata calls) external pure returns (bytes32) {
+    function typehash(
+        uint256 nonce,
+        bytes32 mode,
+        ERC7821.Call[] calldata calls
+    ) external pure returns (bytes32) {
         return LibCalls.typehash(nonce, mode, calls);
     }
 
-    function assembleExtraData(bytes1 revertMode, uint256 nonce, uint256 index) internal pure returns (bytes32) {
+    function assembleExtraData(
+        bytes1 revertMode,
+        uint256 nonce,
+        uint256 index
+    ) internal pure returns (bytes32) {
         uint256 extraData = uint256(bytes32(bytes1(revertMode)));
         extraData = extraData + ((nonce << (9 * 8)) >> 8);
         extraData = extraData + uint256(uint64(index));

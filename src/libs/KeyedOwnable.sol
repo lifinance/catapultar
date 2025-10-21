@@ -18,6 +18,7 @@ import { console } from "forge-std/console.sol";
 contract KeyedOwnable {
     error DirtyEthereumAddress(bytes32);
     error InvalidKey();
+    error Unauthorized();
 
     event OwnershipTransferred(KeyType newKey, bytes32[] newOwner);
 
@@ -27,9 +28,9 @@ contract KeyedOwnable {
         WebAuthnP256
     }
 
-    /*´:°•.°+.*•´.*:˚.°*.˚•´.°:°•.°•.*•´.*:˚.°*.˚•´.°:°•.°+.*•´.*:*/
-    /*                          STORAGE                           */
-    /*.•°:°.´+˚.*°.˚:*.´•*.+°.•°:´*.´•*.•°.•°:°.´:•˚°.*°.˚:*.´+°.•*/
+    /* ´:°•.°+.*•´.*:˚.°*.˚•´.°:°•.°•.*•´.*:˚.°*.˚•´.°:°•.°+.*•´.*:*/
+    /* STORAGE */
+    /* .•°:°.´+˚.*°.˚:*.´•*.+°.•°:´*.´•*.•°.•°:°.´:•˚°.*°.˚:*.´+°.•*/
 
     /// @dev The owner slot is given by:
     /// `bytes32(~uint256(uint32(bytes4(keccak256("_OWNER_SLOT_NOT")))))`.
@@ -40,8 +41,16 @@ contract KeyedOwnable {
 
     KeyType public ownerKeyType;
 
-    function _setOwnerKeySlice(uint256 index, bytes32 val) private {
+    /**
+     * @notice Sets a slice of a key.
+     * @dev This function does not implement bounds check based on ownerKeyType.
+     */
+    function _setOwnerKeySlice(
+        uint256 index,
+        bytes32 val
+    ) private {
         assembly ("memory-safe") {
+            // Subtract the index so we get away from the "small" space.
             sstore(sub(_OWNER_SLOT, index), val)
         }
     }
@@ -55,6 +64,7 @@ contract KeyedOwnable {
         uint256 index
     ) internal view returns (bytes32 val) {
         assembly ("memory-safe") {
+            // Subtract the index so we get away from the "small" space.
             val := sload(sub(_OWNER_SLOT, index))
         }
     }
@@ -79,11 +89,10 @@ contract KeyedOwnable {
         KeyType keyType
     ) internal pure returns (uint256 len) {
         assembly ("memory-safe") {
-            len :=
-                add( // 0: 1, 1: 2, 2: 2
-                    keyType,
-                    lt(keyType, 2) // 0: 1, 1: 1 otherwise 0
-                )
+            len := add( // 0: 1, 1: 2, 2: 2
+                keyType,
+                lt(keyType, 2) // 0: 1, 1: 1 otherwise 0
+            )
         }
     }
 
@@ -105,7 +114,23 @@ contract KeyedOwnable {
         _;
     }
 
-    function _isValidKey(KeyType keyType, bytes32[] calldata key) internal pure returns (bool valid) {
+    /**
+     * @notice Returns whether a boolean for whether the caller is owner or address(this).
+     */
+    function ownerOrSelf() internal returns (bool v) {
+        assembly ("memory-safe") {
+            v := eq(caller(), address())
+            if iszero(v) {
+                // If _OWNER_SLOT has higher bits set (not KeyType.ECDSAOrSmartContract) then this will never be true.
+                v := eq(caller(), sload(_OWNER_SLOT))
+            }
+        }
+    }
+
+    function _isValidKey(
+        KeyType keyType,
+        bytes32[] calldata key
+    ) internal pure returns (bool valid) {
         uint256 expectedKeyLength = _keyTypeLength(keyType);
         address addr;
         assembly ("memory-safe") {
@@ -115,49 +140,54 @@ contract KeyedOwnable {
             case 0 {
                 // Load the first element of key
                 addr := calldataload(key.offset)
-                valid :=
+                valid := and(
+                    valid,
                     and(
-                        valid,
-                        and(
-                            // Check the upper 12 bytes
-                            eq(shr(mul(8, 20), addr), 0),
-                            // Check the lower 20 bytes
-                            not(eq(shl(mul(8, 12), addr), 0))
-                        )
+                        // Check the upper 12 bytes
+                        eq(shr(mul(8, 20), addr), 0),
+                        // Check the lower 20 bytes
+                        not(eq(shl(mul(8, 12), addr), 0))
                     )
+                )
             }
             case 1 {
-                valid :=
-                    and(
-                        valid,
-                        not(
-                            or(
-                                // Check if first word of key is 0
-                                eq(calldataload(key.offset), 0),
-                                // Check if second word of key is 0.
-                                eq(calldataload(add(key.offset, 0x20)), 0)
-                            )
+                valid := and(
+                    valid,
+                    not(
+                        or(
+                            // Check if first word of key is 0
+                            eq(calldataload(key.offset), 0),
+                            // Check if second word of key is 0.
+                            eq(calldataload(add(key.offset, 0x20)), 0)
                         )
                     )
+                )
             }
             case 2 {
-                valid :=
-                    and(
-                        valid,
-                        not(
-                            or(
-                                // Check if first word of key is 0
-                                eq(calldataload(key.offset), 0),
-                                // Check if second word of key is 0.
-                                eq(calldataload(add(key.offset, 0x20)), 0)
-                            )
+                valid := and(
+                    valid,
+                    not(
+                        or(
+                            // Check if first word of key is 0
+                            eq(calldataload(key.offset), 0),
+                            // Check if second word of key is 0.
+                            eq(calldataload(add(key.offset, 0x20)), 0)
                         )
                     )
+                )
             }
         }
     }
 
-    function _transferOwnership(KeyType ktp, bytes32[] calldata nextKey) internal {
+    /**
+     * @notice Transfer ownership to someone else using a keytype and a key.
+     * @param ktp Key type of the provided key.
+     * @param nextKey Bytes of the provided key. Keys chunks are encoded based on the key type provided.
+     */
+    function _transferOwnership(
+        KeyType ktp,
+        bytes32[] calldata nextKey
+    ) internal {
         if (!_isValidKey(ktp, nextKey)) revert InvalidKey();
 
         uint256 nextKeyLength = nextKey.length;
@@ -166,6 +196,18 @@ contract KeyedOwnable {
         }
         ownerKeyType = ktp;
         emit OwnershipTransferred(ktp, nextKey);
+    }
+
+    /**
+     * @notice Transfer ownership to someone else using a keytype and a key.
+     * @param ktp Key type of the provided key.
+     * @param nextKey Bytes of the provided key. Keys chunks are encoded based on the key type provided.
+     */
+    function transferOwnership(
+        KeyType ktp,
+        bytes32[] calldata nextKey
+    ) public payable onlyOwnerOrSelf {
+        _transferOwnership(ktp, nextKey);
     }
 
     /**
@@ -184,11 +226,13 @@ contract KeyedOwnable {
         emit OwnershipTransferred(KeyType.ECDSAOrSmartContract, nextKeys);
     }
 
-    ///
     /// @dev Based on ithacaxyz@account::unwrapAndValidateSignature
     /// https://github.com/ithacaxyz/account/blob/7dd8a5d91c162b89316e367f0fb159f47abfeab0/src/IthacaAccount.sol#L491
     /// @param signature `abi.encodePacked(bytes(signature), bool(prehash))`.
-    function _validateSignature(bytes32 digest, bytes calldata signature) internal view returns (bool) {
+    function _validateSignature(
+        bytes32 digest,
+        bytes calldata signature
+    ) internal view returns (bool) {
         // If the signature's length is 64 or 65, treat the signature like a "Ethereum" signature.
         if (LibBit.or(signature.length == 64, signature.length == 65)) {
             address account = _asAddressNotDirty(_getOwnerKeySlice(0));
@@ -215,7 +259,7 @@ contract KeyedOwnable {
             return WebAuthn.verify(
                 abi.encode(digest), // Challenge.
                 false, // Require user verification optional.
-                // This is simply `abi.decode(signature, (WebAuthn.WebAuthnAuth))`.
+                    // This is simply `abi.decode(signature, (WebAuthn.WebAuthnAuth))`.
                 WebAuthn.tryDecodeAuth(signature), // Auth.
                 x,
                 y

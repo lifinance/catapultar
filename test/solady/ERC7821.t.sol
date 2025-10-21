@@ -94,7 +94,10 @@ contract ERC7821Test is SoladyTest {
         mbe.execute{ value: _totalValue(calls) }(_SUPPORTED_MODE, _encode(calls, ""));
     }
 
-    function _encode(ERC7821LIFI.Call[] memory calls, bytes memory opData) internal returns (bytes memory) {
+    function _encode(
+        ERC7821LIFI.Call[] memory calls,
+        bytes memory opData
+    ) internal returns (bytes memory) {
         if (_randomChance(2) && opData.length == 0) return abi.encode(calls);
         return abi.encode(calls, opData);
     }

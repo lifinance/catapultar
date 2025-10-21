@@ -37,7 +37,11 @@ contract LibCallsTest is Test {
         );
     }
 
-    function test_typehash(uint256 nonce, bytes32 mode, ERC7821.Call[] calldata calls) external pure {
+    function test_typehash(
+        uint256 nonce,
+        bytes32 mode,
+        ERC7821.Call[] calldata calls
+    ) external pure {
         bytes32 libraryTypeHash = LibCalls.typehash(nonce, mode, calls);
         bytes32 expectedTypeHash = typehashReference(nonce, mode, calls);
 
