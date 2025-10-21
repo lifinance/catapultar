@@ -32,19 +32,17 @@ import { Catapultar } from "./Catapultar.sol";
  *
  */
 contract CatapultarFactory {
-    address public immutable EXECUTOR_NO_EMBEDDED_CALLS;
-    address public immutable EXECUTOR_EMBEDDED_CALLS;
+    address public immutable EXECUTOR;
 
     constructor() {
         // Whether or not a contract supports immutable calls is set in the constructor. Since this contracts supports
         // both types, we need to deploy 2 versions of the contract: one with embedded calls enabled and one without.
-        EXECUTOR_NO_EMBEDDED_CALLS = address(new Catapultar(false));
-        EXECUTOR_EMBEDDED_CALLS = address(new Catapultar(true));
+        EXECUTOR = address(new Catapultar());
     }
 
     /// @param salt The first 20 bytes of salt has to be the owner or 0.
     function deploy(address owner, bytes32 salt) external ownerInSalt(salt, owner) returns (address proxy) {
-        proxy = LibClone.cloneDeterministic_PUSH0(address(EXECUTOR_NO_EMBEDDED_CALLS), salt);
+        proxy = LibClone.cloneDeterministic_PUSH0(address(EXECUTOR), salt);
 
         Catapultar(payable(proxy)).init(owner);
     }
@@ -56,36 +54,12 @@ contract CatapultarFactory {
         address owner,
         bytes32 salt
     ) external view ownerInSalt(salt, owner) returns (address proxy) {
-        return LibClone.predictDeterministicAddress_PUSH0(address(EXECUTOR_NO_EMBEDDED_CALLS), salt, address(this));
-    }
-
-    /// @param salt The first 20 bytes of salt has to be the owner or 0.
-    function deployWithEmbedCall(
-        address owner,
-        bytes32 salt,
-        bytes32 callsTypeHash
-    ) external ownerInSalt(salt, owner) returns (address proxy) {
-        proxy = LibClone.cloneDeterministic(address(EXECUTOR_EMBEDDED_CALLS), abi.encodePacked(callsTypeHash), salt);
-
-        Catapultar(payable(proxy)).init(owner);
-    }
-
-    /// @dev Do not trust that the owner of the returned proxy is equal to the provided owner. Ownership may have been
-    /// handed over.
-    /// @param salt The first 20 bytes of salt has to be the owner or 0.
-    function predictDeployWithEmbedCall(
-        address owner,
-        bytes32 salt,
-        bytes32 callsTypeHash
-    ) external view ownerInSalt(salt, owner) returns (address proxy) {
-        return LibClone.predictDeterministicAddress(
-            address(EXECUTOR_EMBEDDED_CALLS), abi.encodePacked(callsTypeHash), salt, address(this)
-        );
+        return LibClone.predictDeterministicAddress_PUSH0(EXECUTOR, salt, address(this));
     }
 
     /// @param salt The first 20 bytes of salt has to be the owner or 0.
     function deployUpgradeable(address owner, bytes32 salt) external ownerInSalt(salt, owner) returns (address proxy) {
-        proxy = LibClone.deployDeterministicERC1967(address(EXECUTOR_NO_EMBEDDED_CALLS), salt);
+        proxy = LibClone.deployDeterministicERC1967(EXECUTOR, salt);
 
         Catapultar(payable(proxy)).init(owner);
     }
@@ -99,7 +73,7 @@ contract CatapultarFactory {
         address owner,
         bytes32 salt
     ) external view ownerInSalt(salt, owner) returns (address proxy) {
-        return LibClone.predictDeterministicAddressERC1967(address(EXECUTOR_NO_EMBEDDED_CALLS), salt, address(this));
+        return LibClone.predictDeterministicAddressERC1967(EXECUTOR, salt, address(this));
     }
 
     // --- Helpers --- //
