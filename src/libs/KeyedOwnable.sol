@@ -278,7 +278,7 @@ contract KeyedOwnable {
         assembly ("memory-safe") {
             // Shift away 20 bytes of the addres.
             // Check if not 0.
-            dirty := iszero(eq(shr(mul(8, 20), addr), 0))
+            dirty := iszero(eq(shr(mul(8, 20), elem), 0))
             addr := elem
         }
         if (dirty) revert DirtyEthereumAddress(elem);
