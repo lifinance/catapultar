@@ -40,9 +40,9 @@ import { LibCalls } from "./libs/LibCalls.sol";
  *
  * Additionally, as an account it can be initialised with a call that anyone can make.
  *
- * The contract is intended to be used via 3 cloning strategies:
+ * The contract is intended to be used via two cloning strategies:
  * - Non-upgradeable minimal proxy clone for minimal cost.
- * - Upgradeable proxy to allow ownership handover.
+ * - Upgradeable proxy to allow implementation upgrades, new features, or bug fixes.
  *
  * For ERC-1271 signatures verified from the owner, they should be rehashed in a replay protection envelope:
  * keccak256(

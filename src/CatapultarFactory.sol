@@ -11,9 +11,8 @@ import { Catapultar } from "./Catapultar.sol";
  * @custom:version 0.0.1
  * @notice Facilitates the deployment of clones of Catapultar.
  *
- * Three cloning strategies are supported:
+ * Two cloning strategies are supported:
  * - Non-upgradeable minimal PUSH_0 clone for a low cost batch execution account.
- * - Non-upgradeable embedded args clone for a short lived account with a pre-configured allowed call.
  * - Upgradeable ERC1967 proxy for a durable long term account.
  *
  * After the proxy has been deployed, init is called to set the owner.
