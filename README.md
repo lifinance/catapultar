@@ -182,7 +182,7 @@ Each batch is an array of `Call` objects. The mode and nonce are provided as par
 
 ```solidity
 // Deploy
-address proxy = factory.deploy(owner, salt);
+address proxy = factory.deploy(ktp, owner, salt);
 
 // Prepare batch
 Call[] memory calls = new Call[](2);
