@@ -233,10 +233,14 @@ contract KeyedOwnable {
         }
 
         unchecked {
-            uint256 n = signature.length - 1;
-            signature = LibBytes.truncatedCalldata(signature, n);
-            // Do the prehash if last byte is non-zero.
-            if ((uint256(LibBytes.loadCalldata(signature, n + 1)) & 0xff) != 0) digest = EfficientHashLib.sha2(digest); // `sha256(abi.encode(digest))`.
+            uint256 n = signature.length;
+            // Remove the last byte from the signature
+            signature = LibBytes.truncatedCalldata(signature, n - 1);
+            // Do the prehash if last byte is non-zero. Select the last word of the signature, then select the last byte
+            // of the word.
+            if ((uint256(LibBytes.loadCalldata(signature, n - 32)) & 0xff) != 0) {
+                digest = EfficientHashLib.sha2(digest); // `sha256(abi.encode(digest))`.
+            }
         }
 
         if (ownerKeyType == KeyType.P256) {

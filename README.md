@@ -1,6 +1,6 @@
 ## Catapultar
 
-Catapultar is an optimised smart account primarily intended to be used as a batch executor. It consists of a base template — [`Catapultar.sol`](./src/Catapultar.sol) — and a proxy factory — [`CatapultarFactory.sol`](./src/CatapultarFactory.sol) — to aid with the deployment of various versions of proxies.
+Catapultar is an optimised smart account primarily intended to be used as a batch or scheduled executor. It consists of a base template — [`Catapultar.sol`](./src/Catapultar.sol) — and a proxy factory — [`CatapultarFactory.sol`](./src/CatapultarFactory.sol) — to aid with the deployment of various versions of proxies.
 
 It is based on Solady's [`ERC7821.sol`](https://github.com/vectorized/solady/blob/main/src/accounts/ERC7821.sol) for efficient portable batch execution.
 
@@ -8,11 +8,15 @@ It is based on Solady's [`ERC7821.sol`](https://github.com/vectorized/solady/blo
 
 A smart contract account that can be used to scale a transaction dispatch environment without relying on nonce spamming while still working as a minimal SCA for an end user. It should provide durable double spend protection ensuring dispatched transactions are not nefariously nor accidentally executed twice.
 
+The smart contract account should also be usable in a custodianless flow where someone wants to execute a complex actions on behalf of a user.
+
 To scale a transaction dispatch environment, execution mode `0x01010000000078210001` can be used. It is a once callable, revert ignoring batch call. It allows a set of transactions to be executed in single call with no call blocking others.
 
 To provide durable double spend protections, execution mode `0x01000000000078210001` can be used. It is a once executable, revert raising batch call. It allows a set of transaction to be executed conditionally.
 
 Both execution modes can be combined with an outer signed `0x01010000000078210001` calling itself allowing for a one time callable batch with inner unsigned `0x01000000000078210001` allowing for safe re-tryable transactions. A transaction dispatch service can maintain a list of `0x01000000000078210001`s. Once the transaction executor is available, all outstanding `0x01000000000078210001`s can be executed through a single `0x01010000000078210001`.
+
+The smart account can be deterministic deployed with a pre-configured call. This allows for token deliveries or action delegation to an address where the smart account can later be deployed to and the embedded action can be executed.
 
 #### Smart Account Tradeoffs
 
@@ -28,11 +32,11 @@ Smart accounts are built for efficiency; To be used on Ethereum gas costs have t
 | Embed action on deploy          |     Yes      |       Yes-ish          |    With Module   |   With Module  |
 | Supports EIP-7702               |     No       |         Yes            |    Yes           |      Yes       |
 | Requires EIP-7702               |     No       |         Yes            |    No            |      No        |
-| Full Passkey Support            |     Yes      |   Yes     |    With Module   |  With Module   |
+| Full Passkey Support            |     Yes      |         Yes            |    With Module   |  With Module   |
 | Solady LibZip                   |     Yes      |         No             |    No            |  With Module   |
 | Account Deploy                  |   Factory    |   EIP-7702 Delegate    |    Factory       |  Factory       |
 | Permissionless chain deploy     |     Yes      |         Yes            |    Yes					 |   Yes          |
-| Account Init                    |    ~110k     |   EIP-7702 Delegate    |  More expensive  | More expensive |
+| Account Init                    |    ~117k     |   EIP-7702 Delegate    |  More expensive  | More expensive |
 | Modular (ERC-7579)              |     No       |        No              |    Yes           |   Yes          |
 
 
@@ -62,7 +66,7 @@ In general, there are two main approaches to implementing EIP-7702 support for s
 	- Individual batch: Each transaction in the batch is executed independently; failures do not block others. Nonce is always spent.
 	- Nested batches: Mix conditional and individual batches for complex workflows.
 - **Signature Validation:**
-	- Supports ECDSA and ERC-1271 signatures.
+	- Supports ECDSA, ERC-1271, P256, and WebAuth P256 signatures.
 	- Implements replay protection: signatures are valid only for a specific account instance.
 - **Proxy Deployment Strategies:**
 	- Minimal proxy (low cost, non-upgradeable).
@@ -90,7 +94,7 @@ Use the `CatapultarFactory` contract to deploy Catapultar proxies:
 	```
 	Deploys an ERC1967 upgradeable proxy. Ownership can be transferred and logic upgraded.
 
-For all deployments, the first 20 bytes of `salt` should be the owner address or zero. Use the `predictDeploy*` functions to precompute addresses before deployment.
+For all deployments, the first 20 bytes of `salt` should be the owner address or zero. For P256 accounts, the first 20 bytes should be the last 20 bytes of the hash of the entire key. Use the `predictDeploy*` functions to precompute addresses before deployment.
 
 | Feature               | Minimal Proxy |     Digest Proxy    | Upgradeable Proxy |
 | --------------------- | :-----------: | :-----------------: | :---------------: |
@@ -200,8 +204,7 @@ On chains where calldata is expensive, Catapultar supports Solady's `LibZip::cdF
 
 ### Stowaway
 
-This proxy implements **[Reednaa's Stowaway](https://github.com/reednaa/stowaway)** to catch stray fallback functions. To make use of Stowaway encode a `ERC7821::execute` call into a bytes field which will be delivered to the account. You can optionally LibZip the call.
-
+This proxy implements **[Reednaa's Stowaway](https://github.com/reednaa/stowaway)** to catch stray fallback functions. To make use of Stowaway encode a `ERC7821::execute` call into any bytes field which will be delivered to the account. You can optionally LibZip the call.
 
 ### Usage Warnings
 
