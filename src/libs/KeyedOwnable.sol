@@ -27,7 +27,7 @@ contract KeyedOwnable {
 
     /// @dev The owner slot is given by:
     /// `bytes32(~uint256(uint32(bytes4(keccak256("_OWNER_SLOT_NOT")))))`.
-    /// The storage slot is intentionally choosen such that it overlaps with Solady's storage slot.
+    /// The storage slot is intentionally chosen such that it overlaps with Solady's storage slot.
     /// If an upgradeable contract by misfortune upgrades to an Ownable and not KeyedOwnable contract, then if the key
     /// used is ECDSAOrSmartContract, there is a chance that the account is still in control of someone.
     bytes32 internal constant _OWNER_SLOT = 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffff74873927;
@@ -72,7 +72,7 @@ contract KeyedOwnable {
     }
 
     /**
-     * @notice Returns the number of words that a key should occopy.
+     * @notice Returns the number of words that a key should occupy.
      * Should return:
      * KeyType.ECDSAOrSmartContract = 1
      * KeyType.P256 = 2
@@ -236,7 +236,7 @@ contract KeyedOwnable {
             uint256 n = signature.length - 1;
             signature = LibBytes.truncatedCalldata(signature, n);
             // Do the prehash if last byte is non-zero.
-            if (uint256(LibBytes.loadCalldata(signature, n + 1)) & 0xff != 0) digest = EfficientHashLib.sha2(digest); // `sha256(abi.encode(digest))`.
+            if ((uint256(LibBytes.loadCalldata(signature, n + 1)) & 0xff) != 0) digest = EfficientHashLib.sha2(digest); // `sha256(abi.encode(digest))`.
         }
 
         if (ownerKeyType == KeyType.P256) {
@@ -274,7 +274,7 @@ contract KeyedOwnable {
     ) internal pure returns (address addr) {
         bool dirty;
         assembly ("memory-safe") {
-            // Shift away 20 bytes of the addres.
+            // Shift away 20 bytes of the address.
             // Check if not 0.
             dirty := iszero(eq(shr(mul(8, 20), elem), 0))
             addr := elem

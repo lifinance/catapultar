@@ -37,7 +37,7 @@ contract deploy is multichain {
     ) public iterChains(chains) broadcast returns (address acc) {
         CatapultarFactory factory = CatapultarFactory(fac);
 
-        bytes32[] memory ownerArray = new bytes32[](0);
+        bytes32[] memory ownerArray = new bytes32[](1);
         ownerArray[0] = bytes32(uint256(uint160(owner)));
 
         bytes32 salt = bytes32(bytes20(owner));

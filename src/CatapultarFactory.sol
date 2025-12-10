@@ -15,7 +15,6 @@ import { KeyedOwnable } from "./libs/KeyedOwnable.sol";
  *
  * Two cloning strategies are supported:
  * - Non-upgradeable minimal PUSH_0 clone for a low cost batch execution account.
- * - Non-upgradeable minimal PUSH_0 clone with a pre-approved hash for either a signature or tx batch.
  * - Upgradeable ERC1967 proxy for a durable long term account.
  *
  * After the proxy has been deployed, init is called to set the owner.
@@ -29,9 +28,7 @@ import { KeyedOwnable } from "./libs/KeyedOwnable.sol";
  *
  * If deploy is called twice with the same parameters (owner, salt), the second transaction will fall. In those cases,
  * the predictDeploy* functions can be used to re-discover the deployed contract.
- * The owner of a deployed proxy may not be the same as the owner it was deployed with. Catapultar uses Solady Ownable
- * which allows ownership transfers.
- *
+ * The owner of a deployed proxy may not be the same as the owner it was deployed with.
  */
 contract CatapultarFactory {
     address public immutable EXECUTOR;
@@ -142,7 +139,7 @@ contract CatapultarFactory {
      * @notice Requires that the salt contains the owner as the first 20 bytes or they are 0.
      * @dev When deploying proxies, it may not be safe to set the first 20 bytes to 0. If this is desired, the risk is
      * entirely up to the user.
-     * For a key larger than 20 bytes, the first 20 bytes are taken of keccak256(ktp, keccak256(owner[0]))
+     * For a key larger than 20 bytes, the first 20 bytes are taken of keccak256(ktp, keccak256(owner))
      * @param salt A bytes32 value intended to pseudo-randomize the deployed address.
      * @param ktp The keytype for the account
      * @param owner A desired callable parameter for a proxy address

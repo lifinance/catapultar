@@ -24,7 +24,7 @@ import { LibCalls } from "./libs/LibCalls.sol";
  * If provided, each call in a batch will be tried individually and the contract emits a event with the revert data.
  *
  * Intended use case is:
- * - 0x01000000000078210001: Executing a set of conditional trasactions.
+ * - 0x01000000000078210001: Executing a set of conditional transactions.
  * If 1 transaction in a set fails, the entire set should fail. This can allow for retrying the transaction at a later
  * time since the nonce is not spent.
  *
@@ -137,7 +137,7 @@ contract Catapultar is ERC7821LIFI, EIP712, BitmapNonce, KeyedOwnable, Initializ
             asUnsafeBytes32(address(this)),
             hash
         );
-        if (signature.length == 0 && approvedDigest[digest] == DigestApproval.Signature) return bytes4(0xffffffff);
+        if (signature.length == 0 && approvedDigest[digest] == DigestApproval.Signature) return bytes4(0x1626ba7e);
         bool isValid = _validateSignature(digest, signature);
         assembly ("memory-safe") {
             // `success ? bytes4(keccak256("isValidSignature(bytes32,bytes)")) : 0xffffffff`.

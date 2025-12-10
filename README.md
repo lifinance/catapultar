@@ -200,14 +200,15 @@ On chains where calldata is expensive, Catapultar supports Solady's `LibZip::cdF
 
 ### Stowaway
 
-This proxy implements **[Reednaa's Stowaway](https://github.com/reednaa/stowaway)** to catch stray fallback functions. To make use of Stowaway encode a `ERC7821::execute` call into a bytes field which will be delievered to the account. You can optionally LibZip the call.
+This proxy implements **[Reednaa's Stowaway](https://github.com/reednaa/stowaway)** to catch stray fallback functions. To make use of Stowaway encode a `ERC7821::execute` call into a bytes field which will be delivered to the account. You can optionally LibZip the call.
+
 
 ### Usage Warnings
 
 When the smart account calls itself, it can bypass security checks on important functions. This feature is used to allow other accounts to execute all functions for a signer. The following have authorization that can be bypassed if called from itself:
 
-- The `exeute` endpoint does not require a signature IFF the caller is the SCA. 
-- The SCA can authorize an upgrade of the underlying SCA if the contract is upgradable.
+- The `execute` endpoint does not require a signature IFF the caller is the SCA. 
+- The SCA can authorize an upgrade of the underlying SCA if the contract is upgradeable.
 - The SCA can upgrade the contract owner.
 
 The only way to have the SCA call itself is through the batch endpoint. The batch endpoint requires a structured signed message but the encoded messages themselves are not structured. It is very important to parse and validate that **ALL** signed batches are legit and safe. Take the following batch:
@@ -225,7 +226,8 @@ If A implement ERC-1271, it can execute **ANY** call it desires on the SCA. Usin
 5. SCA will validate the batch by staticcall A, A returns true.
 6. Custom calldata will be executed in context of SCA.
 
-Additionally, remember that token allowances are long lived. If a token allowance is set on a contract, no signature or approval is needed to withdraw tokens.
+Additionally, remember that token allowances are long-lived. If a token allowance is set on a contract, no signature or approval is needed to withdraw tokens.
+
 
 ## Development
 

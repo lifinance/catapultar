@@ -2,7 +2,6 @@
 pragma solidity ^0.8.30;
 
 // forge-lint: disable-start(unsafe-typecast)
-// forge-lint: disable-start(erc20-unchecked-transfer)
 
 import { Test } from "forge-std/Test.sol";
 
