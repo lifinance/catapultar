@@ -252,7 +252,7 @@ contract KeyedOwnable {
             return WebAuthn.verify(
                 abi.encode(digest), // Challenge.
                 false, // Require user verification optional.
-                    // This is simply `abi.decode(signature, (WebAuthn.WebAuthnAuth))`.
+                // This is simply `abi.decode(signature, (WebAuthn.WebAuthnAuth))`.
                 WebAuthn.tryDecodeAuth(signature), // Auth.
                 x,
                 y

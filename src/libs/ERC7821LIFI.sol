@@ -148,12 +148,12 @@ abstract contract ERC7821LIFI is ERC7821 {
             if iszero(success) {
                 mstore(m, extraData) // Place extraData
                 mstore(add(m, 0x20), 0x40) // Set offset for bytes
-                    // Compute the padded length for ABI alignment. ((rdsize + 31) / 32 * 32)
+                // Compute the padded length for ABI alignment. ((rdsize + 31) / 32 * 32)
                 let sizeAfterPad := and(add(returndatasize(), 31), not(31))
                 mstore(add(add(m, 0x40), sizeAfterPad), 0) // Clear out potential overflowing returndata.
                 mstore(add(m, 0x40), returndatasize()) // Place length of returndata
                 returndatacopy(add(m, 0x60), 0x00, returndatasize()) // Place returndata
-                    // Emit CallReverted(bytes32 extraData, bytes revertData).
+                // Emit CallReverted(bytes32 extraData, bytes revertData).
                 log1(m, add(0x60, sizeAfterPad), _CALL_REVERTED_EVENT_SIGNATURE)
 
                 if iszero(shr(mul(31, 8), extraData)) {
