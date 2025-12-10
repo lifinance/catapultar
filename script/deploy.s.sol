@@ -4,6 +4,7 @@ pragma solidity ^0.8.30;
 import { multichain } from "./multichain.s.sol";
 
 import { CatapultarFactory } from "../src/CatapultarFactory.sol";
+import { KeyedOwnable } from "../src/libs/KeyedOwnable.sol";
 
 contract deploy is multichain {
     error NotExpectedAddress(address expected, address deployedTo);
@@ -11,6 +12,10 @@ contract deploy is multichain {
     function run(
         string[] calldata chains
     ) public iterChains(chains) broadcast returns (CatapultarFactory factory) {
+        return deployFactory();
+    }
+
+    function deployFactory() internal returns (CatapultarFactory factory) {
         address expectedFactoryAddress = getExpectedCreate2Address(
             bytes32(0), // salt
             type(CatapultarFactory).creationCode,
@@ -22,5 +27,27 @@ contract deploy is multichain {
                 revert NotExpectedAddress(expectedFactoryAddress, address(factory));
             }
         }
+        return CatapultarFactory(expectedFactoryAddress);
+    }
+
+    function account(
+        address fac,
+        string[] calldata chains,
+        address owner
+    ) public iterChains(chains) broadcast returns (address acc) {
+        CatapultarFactory factory = CatapultarFactory(fac);
+
+        bytes32[] memory ownerArray = new bytes32[](0);
+        ownerArray[0] = bytes32(uint256(uint160(owner)));
+
+        bytes32 salt = bytes32(bytes20(owner));
+        address expectedAccountAddress =
+            factory.predictDeploy(KeyedOwnable.KeyType.ECDSAOrSmartContract, ownerArray, salt);
+
+        if (expectedAccountAddress.code.length == 0) {
+            acc = factory.deploy(KeyedOwnable.KeyType.ECDSAOrSmartContract, ownerArray, salt);
+            if (acc != expectedAccountAddress) revert NotExpectedAddress(expectedAccountAddress, acc);
+        }
+        return expectedAccountAddress;
     }
 }

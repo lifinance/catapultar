@@ -2,14 +2,11 @@
 pragma solidity ^0.8.30;
 
 import { EfficientHashLib } from "solady/src/utils/EfficientHashLib.sol";
-import { FixedPointMathLib } from "solady/src/utils/FixedPointMathLib.sol";
 import { LibBit } from "solady/src/utils/LibBit.sol";
 import { LibBytes } from "solady/src/utils/LibBytes.sol";
 import { P256 } from "solady/src/utils/P256.sol";
 import { SignatureCheckerLib } from "solady/src/utils/SignatureCheckerLib.sol";
 import { WebAuthn } from "solady/src/utils/WebAuthn.sol";
-
-import { console } from "forge-std/console.sol";
 
 /**
  * @notice Complex single owner authorization mixin.
@@ -117,7 +114,7 @@ contract KeyedOwnable {
     /**
      * @notice Returns whether a boolean for whether the caller is owner or address(this).
      */
-    function ownerOrSelf() internal returns (bool v) {
+    function ownerOrSelf() internal view returns (bool v) {
         assembly ("memory-safe") {
             v := eq(caller(), address())
             if iszero(v) {

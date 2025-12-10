@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 pragma solidity ^0.8.30;
 
+// forge-lint: disable-start(unsafe-typecast)
+// forge-lint: disable-start(erc20-unchecked-transfer)
+
 import { Test } from "forge-std/Test.sol";
 
 import { CatapultarFactory } from "../src/CatapultarFactory.sol";
@@ -34,7 +37,7 @@ contract CatapultarFactoryTest is Test {
     }
 
     /// forge-config: default.isolate = true
-    function test_deployWithEmbedCall() external {
+    function test_deployWithDigest() external {
         address owner = makeAddr("owner");
         bytes32 salt = bytes32(bytes20(uint160(owner)));
 
@@ -42,15 +45,15 @@ contract CatapultarFactoryTest is Test {
         keys[0] = bytes32(uint256(uint160(owner)));
 
         address deployedTo =
-            factory.deployWithEmbedCall(KeyedOwnable.KeyType.ECDSAOrSmartContract, keys, salt, bytes32(0));
-        vm.snapshotGasLastCall("deployWithEmbedCall");
+            factory.deployWithDigest(KeyedOwnable.KeyType.ECDSAOrSmartContract, keys, salt, bytes32(0), false);
+        vm.snapshotGasLastCall("deployWithDigest");
 
         // Check that the deployed proxy has code.
         assertNotEq(deployedTo.code.length, 0);
 
         // Try deploying again.
         vm.expectRevert(abi.encodeWithSignature("DeploymentFailed()"));
-        factory.deployWithEmbedCall(KeyedOwnable.KeyType.ECDSAOrSmartContract, keys, salt, bytes32(0));
+        factory.deployWithDigest(KeyedOwnable.KeyType.ECDSAOrSmartContract, keys, salt, bytes32(0), false);
     }
 
     /// forge-config: default.isolate = true
@@ -85,7 +88,7 @@ contract CatapultarFactoryTest is Test {
         assertEq(predictedDeployedTo, deployedTo);
     }
 
-    function test_predictDeployWithEmbedCall() external {
+    function test_predictDeployWithDigest() external {
         address owner = makeAddr("owner");
         bytes32 salt = bytes32(bytes20(uint160(owner)));
 
@@ -95,10 +98,10 @@ contract CatapultarFactoryTest is Test {
         keys[0] = bytes32(uint256(uint160(owner)));
 
         address predictedDeployedTo =
-            factory.predictDeployWithEmbedCall(KeyedOwnable.KeyType.ECDSAOrSmartContract, keys, salt, embeddedCall);
+            factory.predictDeployWithDigest(KeyedOwnable.KeyType.ECDSAOrSmartContract, keys, salt, embeddedCall, false);
 
         address deployedTo =
-            factory.deployWithEmbedCall(KeyedOwnable.KeyType.ECDSAOrSmartContract, keys, salt, embeddedCall);
+            factory.deployWithDigest(KeyedOwnable.KeyType.ECDSAOrSmartContract, keys, salt, embeddedCall, false);
         assertEq(predictedDeployedTo, deployedTo);
     }
 
@@ -132,7 +135,7 @@ contract CatapultarFactoryTest is Test {
         factory.deploy(KeyedOwnable.KeyType.ECDSAOrSmartContract, keys, salt);
     }
 
-    function testRevert_deployWithEmbedCall_salt_does_not_contain_owner(
+    function testRevert_deployWithDigest_salt_does_not_contain_owner(
         address owner,
         bytes32 salt
     ) external {
@@ -143,7 +146,7 @@ contract CatapultarFactoryTest is Test {
         bytes32[] memory keys = new bytes32[](1);
         keys[0] = bytes32(uint256(uint160(owner)));
 
-        factory.deployWithEmbedCall(KeyedOwnable.KeyType.ECDSAOrSmartContract, keys, salt, bytes32(0));
+        factory.deployWithDigest(KeyedOwnable.KeyType.ECDSAOrSmartContract, keys, salt, bytes32(0), false);
     }
 
     function testRevert_deployUpgradeable_salt_does_not_contain_owner(
@@ -174,7 +177,7 @@ contract CatapultarFactoryTest is Test {
         factory.predictDeploy(KeyedOwnable.KeyType.ECDSAOrSmartContract, keys, salt);
     }
 
-    function testRevert_predictDeployWithEmbedCall_salt_does_not_contain_owner(
+    function testRevert_predictDeployWithDigest_salt_does_not_contain_owner(
         address owner,
         bytes32 salt
     ) external {
@@ -185,7 +188,7 @@ contract CatapultarFactoryTest is Test {
         bytes32[] memory keys = new bytes32[](1);
         keys[0] = bytes32(uint256(uint160(owner)));
 
-        factory.predictDeployWithEmbedCall(KeyedOwnable.KeyType.ECDSAOrSmartContract, keys, salt, bytes32(0));
+        factory.predictDeployWithDigest(KeyedOwnable.KeyType.ECDSAOrSmartContract, keys, salt, bytes32(0), false);
     }
 
     function testRevert_predictDeployUpgradeable_salt_does_not_contain_owner(

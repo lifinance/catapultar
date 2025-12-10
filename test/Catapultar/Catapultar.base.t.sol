@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 pragma solidity ^0.8.30;
 
+// forge-lint: disable-start(unsafe-typecast)
+// forge-lint: disable-start(erc20-unchecked-transfer)
+// forge-lint: disable-start(unchecked-call)
+
 import { Test } from "forge-std/Test.sol";
 
 import { ERC7821 } from "solady/src/accounts/ERC7821.sol";
@@ -341,7 +345,7 @@ abstract contract CatapultarTest is Test {
         executor.execute(bytes10(0x01000000000078210001), abi.encode(calls, abi.encode(1)));
     }
 
-    function test_validateOpData_embedded_calls() external {
+    function test_validateOpData_digest() external {
         ERC7821.Call[] memory calls = new ERC7821.Call[](1);
         uint256 nonce = 1;
         bytes32 mode = bytes32(0);
@@ -355,10 +359,10 @@ abstract contract CatapultarTest is Test {
 
         // We need to deploy a proxy specifically with the embedded typehash.
         executor = MockCatapultar(payable(LibClone.cloneDeterministic(executorTemplate, 0)));
-        executor.setSignature(typeHash, 1);
+        executor.setSignature(typeHash, Catapultar.DigestApproval.Call);
 
-        uint256 embeddedAt = executor.approvedDigest(typeHash);
-        assertEq(embeddedAt, 1);
+        uint8 embeddedAt = uint8(executor.approvedDigest(typeHash));
+        assertEq(embeddedAt, uint8(Catapultar.DigestApproval.Call));
 
         vm.prank(makeAddr("random"));
         result = executor.validateOpData(mode, calls, opData);
@@ -439,13 +443,14 @@ abstract contract CatapultarTest is Test {
         // 0xf23a6e61: `onERC1155Received(address,address,uint256,uint256,bytes)`.
         // 0xbc197c81: `onERC1155BatchReceived(address,address,uint256[],uint256[],bytes)`.
 
-        address(executor)
+        (bool success,) = address(executor)
             .call(
                 abi.encodeWithSignature(
                     "onERC721Received(address,address,uint256,bytes)", address(0), address(0), uint256(0), new bytes(0)
                 )
             );
-        address(executor)
+        assertEq(success, true);
+        (success,) = address(executor)
             .call(
                 abi.encodeWithSignature(
                     "onERC1155Received(address,address,uint256,uint256,bytes)",
@@ -456,7 +461,9 @@ abstract contract CatapultarTest is Test {
                     new bytes(0)
                 )
             );
-        address(executor)
+        assertEq(success, true);
+
+        (success,) = address(executor)
             .call(
                 abi.encodeWithSignature(
                     "onERC1155BatchReceived(address,address,uint256[],uint256[],bytes)",
@@ -467,5 +474,6 @@ abstract contract CatapultarTest is Test {
                     new bytes(0)
                 )
             );
+        assertEq(success, true);
     }
 }

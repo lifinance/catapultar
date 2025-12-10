@@ -5,8 +5,8 @@ import { ERC7821 } from "solady/src/accounts/ERC7821.sol";
 import { EfficientHashLib } from "solady/src/utils/EfficientHashLib.sol";
 
 struct Calls {
-    bytes32 mode;
     uint256 nonce;
+    bytes32 mode;
     ERC7821.Call[] calls;
 }
 

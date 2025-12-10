@@ -41,13 +41,13 @@ Use the `CatapultarFactory` contract to deploy Catapultar proxies:
 
 - **Minimal Proxy:**
 	```solidity
-	factory.deploy(owner, salt);
+	factory.deploy(ktp, owner, salt);
 	```
 	Deploys a minimal proxy for batch execution.
 
 - **Proxy with Embedded Call:**
 	```solidity
-	factory.deployWithEmbedCall(owner, salt, callsTypeHash);
+	factory.deployWithDigest(ktp, owner, salt, callsTypeHash, isSignature);
 	```
 	Deploys a proxy with a pre-configured allowed call.
 
@@ -59,12 +59,12 @@ Use the `CatapultarFactory` contract to deploy Catapultar proxies:
 
 For all deployments, the first 20 bytes of `salt` should be the owner address or zero. Use the `predictDeploy*` functions to precompute addresses before deployment.
 
-| Feature               | Minimal Proxy | Embedded Call Proxy | Upgradeable Proxy |
+| Feature               | Minimal Proxy |     Digest Proxy    | Upgradeable Proxy |
 | --------------------- | :-----------: | :-----------------: | :---------------: |
 | Upgradable            |      No       |         No          |        Yes        |
 | Embedded Call Support |      No       |         Yes         |        No         |
 | Ownership Transfer    |      Yes      |         Yes         |        Yes        |
-| Gas Cost              |    Lowest     |         Low         |      Higher       |
+| Gas Cost              |    Lowest     |        Lowest       |      Higher       |
 
 ### Execution Modes (ERC-7821)
 

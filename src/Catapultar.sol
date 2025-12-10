@@ -7,9 +7,7 @@ import { ERC7821 } from "solady/src/accounts/ERC7821.sol";
 import { EIP712 } from "solady/src/utils/EIP712.sol";
 import { EfficientHashLib } from "solady/src/utils/EfficientHashLib.sol";
 import { Initializable } from "solady/src/utils/Initializable.sol";
-import { LibClone } from "solady/src/utils/LibClone.sol";
 import { LibZip } from "solady/src/utils/LibZip.sol";
-import { SignatureCheckerLib } from "solady/src/utils/SignatureCheckerLib.sol";
 import { UUPSUpgradeable } from "solady/src/utils/UUPSUpgradeable.sol";
 
 import { BitmapNonce } from "./libs/BitmapNonce.sol";
@@ -20,7 +18,7 @@ import { LibCalls } from "./libs/LibCalls.sol";
 /**
  * @title For throwing transactions into the mempool – Catapultar
  * @author Alexander @ LIFI (https://li.fi)
- * @custom:version 0.0.1
+ * @custom:version 0.1.0
  * @notice Batch executing smart account with ECDSA and ERC1271 signature validation logic.
  * This batch execution account supports ERC-7821 interfaces and supports the failure mode flag 01.
  * If provided, each call in a batch will be tried individually and the contract emits a event with the revert data.
@@ -42,10 +40,9 @@ import { LibCalls } from "./libs/LibCalls.sol";
  *
  * Additionally, as an account it can be initialised with a call that anyone can make.
  *
- * The contract is intended to be used via 3 cloning strategies:
+ * The contract is intended to be used via 2 cloning strategies:
  * - Non-upgradeable minimal proxy clone for minimal cost.
- * - Non-upgradeable proxy with embedded calldata as an immutable arg allowing anyone to execute a predetermined call.
- * - Upgradeable proxy to allow ownership handover. An upgradeable proxy cannot have embedded calldata.
+ * - Upgradeable proxy to allow ownership handover.
  *
  * For ERC-1271 signatures verified from the owner, they should be rehashed in a replay protection envelope:
  * keccak256(
@@ -57,24 +54,30 @@ import { LibCalls } from "./libs/LibCalls.sol";
  */
 contract Catapultar is ERC7821LIFI, EIP712, BitmapNonce, KeyedOwnable, Initializable, UUPSUpgradeable {
     error NotUpgradeable();
-    error AlreadySet();
 
-    event SignatureSet(bytes32 indexed hash, uint256 nonce);
+    event SignatureSet(bytes32 indexed hash, DigestApproval flag);
 
     /**
      * @dev Used to uniquely rehash ERC1271 signatures to identify them as originating from this account.
      */
     bytes32 constant REPLAY_PROTECTION = keccak256(bytes("Replay(address account,bytes32 payload)"));
 
-    mapping(bytes32 hash => uint256 nonce) public approvedDigest;
+    enum DigestApproval {
+        Unset,
+        Call,
+        Signature
+    }
+
+    mapping(bytes32 hash => DigestApproval flag) public approvedDigest;
 
     constructor() {
+        // This contract is intended to be used through a proxy. This proxy target should not be used.
         _disableInitializers();
     }
 
     function _domainNameAndVersion() internal pure override returns (string memory name, string memory version) {
         name = "Catapultar";
-        version = "0.0.1";
+        version = "0.1.0";
     }
 
     /**
@@ -97,23 +100,22 @@ contract Catapultar is ERC7821LIFI, EIP712, BitmapNonce, KeyedOwnable, Initializ
     }
 
     /**
-     * @dev Setting either a transaction or signature as validated is not straight forward.
-     * - Transaction: Provide the typehash of the calls, which includes the nonce and mode. You need to set the nonce to
-     * the same nonce you used for hashing.
-     * - Signing: Provide the non-rehashed message with nonce uint256.max.
-     * This is a security feature.
+     * @notice Allow setting a signed object as validated through owner or self call.
+     * @param hash Signed object as:
+     * - Transaction: Provide the typehash of the calls, which includes the nonce and mode.
+     * - Signing: Provide the non-rehashed message
+     * It is possible to store a signing digest as a call or a call digest as a signature. This should be an invalid
+     * statement since signatures are rehashed using REPLAY_PROTECTION which would invalidate any overlap.
+     * @param flag Indicator for whether the digest is for a call or signing.
      */
     function setSignature(
         bytes32 hash,
-        uint256 nonce
+        DigestApproval flag
     ) public {
         if (!ownerOrSelf() && _getInitializedVersion() != 0) revert Unauthorized();
 
-        uint256 currentNonce = approvedDigest[hash];
-        if (currentNonce != 0) revert AlreadySet();
-
-        approvedDigest[hash] = nonce;
-        emit SignatureSet(hash, nonce);
+        approvedDigest[hash] = flag;
+        emit SignatureSet(hash, flag);
     }
 
     /**
@@ -135,7 +137,7 @@ contract Catapultar is ERC7821LIFI, EIP712, BitmapNonce, KeyedOwnable, Initializ
             asUnsafeBytes32(address(this)),
             hash
         );
-        if (signature.length == 0 && approvedDigest[digest] == type(uint256).max) return bytes4(0xffffffff);
+        if (signature.length == 0 && approvedDigest[digest] == DigestApproval.Signature) return bytes4(0xffffffff);
         bool isValid = _validateSignature(digest, signature);
         assembly ("memory-safe") {
             // `success ? bytes4(keccak256("isValidSignature(bytes32,bytes)")) : 0xffffffff`.
@@ -218,14 +220,15 @@ contract Catapultar is ERC7821LIFI, EIP712, BitmapNonce, KeyedOwnable, Initializ
         _useUnorderedNonce(nonce);
         // If there are only 32 bytes of opdata, there is no signature.
         // The simplest case is if we called ourself in a batch.
-        if (opData.length == 32) if (address(this) == msg.sender) return true;
+        bool opdataLength32 = opData.length == 32;
+        if (opdataLength32) if (address(this) == msg.sender) return true;
 
         bytes32 callTypeHash = LibCalls.typehash(nonce, mode, calls);
         // We need to check if the hash matches before. This is required for "embedded" calls since we cannot know the
-        // address ahead of time. 0 Nonce is disallowed by _useUnorderedNonce
-        if (opData.length == 32) return approvedDigest[callTypeHash] == nonce;
-        bytes32 digest = _hashTypedData(callTypeHash);
+        // address ahead of time. 0 and type(uint256).max are disallowed by _useUnorderedNonce.
+        if (opdataLength32 && approvedDigest[callTypeHash] == DigestApproval.Call) return true;
 
+        bytes32 digest = _hashTypedData(callTypeHash);
         return _validateSignature(digest, opData[0x20:]);
     }
 

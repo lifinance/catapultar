@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.4;
 
+// forge-lint: disable-start(screaming-snake-case-immutable)
+
 import { ERC20 } from "solady/src/tokens/ERC20.sol";
 import { Brutalizer } from "solady/test/utils/Brutalizer.sol";
 

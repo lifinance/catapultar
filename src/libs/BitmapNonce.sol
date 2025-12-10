@@ -18,7 +18,9 @@ abstract contract BitmapNonce {
     function bitmapPositions(
         uint256 nonce
     ) private pure returns (uint256 wordPos, uint256 bitPos) {
+        // forge-lint: disable-next-line(unsafe-typecast)
         wordPos = uint248(nonce >> 8);
+        // forge-lint: disable-next-line(unsafe-typecast)
         bitPos = uint8(nonce);
     }
 
@@ -30,6 +32,7 @@ abstract contract BitmapNonce {
     ) internal {
         if (nonce == 0) revert InvalidNonce();
         (uint256 wordPos, uint256 bitPos) = bitmapPositions(nonce);
+        // forge-lint: disable-next-line(incorrect-shift)
         uint256 bit = 1 << bitPos;
         uint256 flipped = nonceBitmap[wordPos] ^= bit;
 

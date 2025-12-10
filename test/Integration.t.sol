@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 pragma solidity ^0.8.30;
 
+// forge-lint: disable-start(unsafe-typecast)
+// forge-lint: disable-start(unchecked-call)
+
 import { Test } from "forge-std/Test.sol";
 
 import { ERC7821 } from "solady/src/accounts/ERC7821.sol";
@@ -246,7 +249,8 @@ contract IntegrationTest is Test {
         vm.expectEmit();
         emit CallReverted(assembleExtraData(0x01, 6, 1), abi.encodeWithSelector(DummyContract.CustomError.selector));
 
-        payable(proxy).call(compressedCallPayload);
+        (bool success,) = payable(proxy).call(compressedCallPayload);
+        assertEq(success, true);
 
         assertEq(DummyContract(dummy).store(0), 2, "Should have been called two times");
         assertEq(DummyContract(dummy).store(1), 3, "Should have been called three times");
