@@ -13,7 +13,7 @@ import { KeyedOwnable } from "./libs/KeyedOwnable.sol";
  * @custom:version 0.2.0
  * @notice Facilitates the deployment of clones of Catapultar.
  *
- * Three cloning strategies are supported:
+ * Two cloning strategies are supported:
  * - Non-upgradeable minimal PUSH_0 clone for a low cost batch execution account.
  * - Non-upgradeable minimal PUSH_0 clone with a pre-approved hash for either a signature or tx batch.
  * - Upgradeable ERC1967 proxy for a durable long term account.
