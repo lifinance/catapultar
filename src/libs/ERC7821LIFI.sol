@@ -72,8 +72,8 @@ abstract contract ERC7821LIFI is ERC7821 {
 
     // extraData has the following format:
     // [0] revert flag
-    // [1 .. 22] Nonce extract
-    // [23 .. 31] Index
+    // [1 .. 23] Nonce extract
+    // [24 .. 31] Index
 
     /**
      * @notice Executes the provides calls after validating opData
