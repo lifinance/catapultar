@@ -25,10 +25,6 @@ contract KeyedOwnable {
         WebAuthnP256
     }
 
-    /* ´:°•.°+.*•´.*:˚.°*.˚•´.°:°•.°•.*•´.*:˚.°*.˚•´.°:°•.°+.*•´.*:*/
-    /* STORAGE */
-    /* .•°:°.´+˚.*°.˚:*.´•*.+°.•°:´*.´•*.•°.•°:°.´:•˚°.*°.˚:*.´+°.•*/
-
     /// @dev The owner slot is given by:
     /// `bytes32(~uint256(uint32(bytes4(keccak256("_OWNER_SLOT_NOT")))))`.
     /// The storage slot is intentionally choosen such that it overlaps with Solady's storage slot.
@@ -208,7 +204,7 @@ contract KeyedOwnable {
     }
 
     /**
-     * @notice Transfer ownership to a ECDSAOrSmartContract through normal the transferOwnership interface
+     * @notice Transfer ownership to a ECDSAOrSmartContract through the normal transferOwnership interface
      */
     function transferOwnership(
         address newOwner
@@ -268,6 +264,11 @@ contract KeyedOwnable {
         return false;
     }
 
+    /**
+     * @notice Validates that the most significant bytes are 0.
+     * @param elem Bytes32 variable to validate against upper 12 bytes.
+     * @return addr 20 Least significant bytes of elem.
+     */
     function _asAddressNotDirty(
         bytes32 elem
     ) internal pure returns (address addr) {
