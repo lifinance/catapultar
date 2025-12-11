@@ -375,7 +375,6 @@ abstract contract CatapultarTest is Test {
         uint256 nonce = 1;
         ERC7821.Call[] memory calls = new ERC7821.Call[](0);
         bytes32 mode = bytes32(0);
-        bool result;
 
         bytes32 domainSeparator = EIP712(address(executor)).DOMAIN_SEPARATOR();
         bytes32 msgHash = keccak256(abi.encodePacked("\x19\x01", domainSeparator, this.typehash(nonce, mode, calls)));
@@ -385,16 +384,60 @@ abstract contract CatapultarTest is Test {
 
         uint256 snapshot = vm.snapshot();
 
-        result = executor.validateOpData(mode, calls, abi.encodePacked(nonce, signature));
-        assertEq(result, true);
+        assertTrue(executor.validateOpData(mode, calls, abi.encodePacked(nonce, signature)));
 
         vm.expectRevert(abi.encodeWithSignature("InvalidNonce()"));
         executor.validateOpData(mode, calls, abi.encodePacked(nonce, signature));
 
         vm.revertTo(snapshot);
 
-        result = executor.validateOpData(mode, calls, abi.encodePacked(nonce + 1, signature));
-        assertEq(result, false);
+        assertFalse(executor.validateOpData(mode, calls, abi.encodePacked(nonce + 1, signature)));
+    }
+
+    function test_validateOpData_signatures_multichain() external {
+        vm.chainId(100);
+        (, uint256 privateKey) = init();
+
+        uint256 nonce = 1;
+        ERC7821.Call[] memory calls = new ERC7821.Call[](0);
+        bytes32 mode = 0x0100000000007821000100000000000000000000000000000000000000000000;
+
+        bytes32 domainSeparator = EIP712(address(executor)).DOMAIN_SEPARATOR();
+        bytes32 msgHash = keccak256(abi.encodePacked("\x19\x01", domainSeparator, this.typehash(nonce, mode, calls)));
+
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(privateKey, msgHash);
+        bytes memory signature = abi.encodePacked(r, s, v);
+
+        uint256 snapshot = vm.snapshot();
+
+        assertTrue(executor.validateOpData(mode, calls, abi.encodePacked(nonce, signature)));
+
+        vm.revertTo(snapshot);
+
+        vm.chainId(101);
+        assertFalse(executor.validateOpData(mode, calls, abi.encodePacked(nonce, signature)));
+
+        vm.chainId(100);
+        // Multichain flow
+        bytes32 multichainMode = 0x0100010000007821000100000000000000000000000000000000000000000000;
+        nonce = 2;
+        (, string memory name, string memory version, , , ,) = executor.eip712Domain();
+        domainSeparator = keccak256(abi.encode(
+            keccak256(bytes("EIP712Domain(string name,string version,address verifyingContract)")),
+            keccak256(bytes(name)),
+            keccak256(bytes(version)),
+            address(executor)
+        ));
+        msgHash = keccak256(abi.encodePacked("\x19\x01", domainSeparator, this.typehash(nonce, multichainMode, calls)));
+        (v, r, s) = vm.sign(privateKey, msgHash);
+        signature = abi.encodePacked(r, s, v);
+
+        assertTrue(executor.validateOpData(multichainMode, calls, abi.encodePacked(nonce, signature)));
+
+        // The nonce would technically not be spent but we are on the same storage.
+        vm.revertTo(snapshot);
+        vm.chainId(101);
+        assertTrue(executor.validateOpData(multichainMode, calls, abi.encodePacked(nonce, signature)));
     }
 
     bytes4 constant SUCCESS_IS_VALID_SIGNATURE = bytes4(keccak256("isValidSignature(bytes32,bytes)"));

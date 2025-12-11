@@ -233,7 +233,7 @@ contract Catapultar is ERC7821LIFI, EIP712, BitmapNonce, KeyedOwnable, Initializ
         assembly ("memory-safe") {
             // Shift away the 2 most significant bytes and move the selector into the least significant byte. This only
             // selects the multichain byte.
-            isMultichain := eq(shr(mul(31, 8), shl(mul(2, 8), mode)), 1)
+            isMultichain := shr(mul(31, 8), shl(mul(2, 8), mode))
         }
         // Sanity check: Mode is contained in callTypeHash so you can not nefariously select the hash strategy.
         // Additionally, _hashTypedDataSansChainId will not produce the same digest as _hashTypedData by just ignoring
