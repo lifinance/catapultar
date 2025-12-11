@@ -228,7 +228,17 @@ contract Catapultar is ERC7821LIFI, EIP712, BitmapNonce, KeyedOwnable, Initializ
         // address ahead of time. 0 and type(uint256).max are disallowed by _useUnorderedNonce.
         if (opdataLength32 && approvedDigest[callTypeHash] == DigestApproval.Call) return true;
 
-        bytes32 digest = _hashTypedData(callTypeHash);
+        // Validate whether the mode contains the multichain flag.
+        bool isMultichain;
+        assembly ("memory-safe") {
+            // Shift away the 2 most significant bytes and move the selector into the least significant byte. This only
+            // selects the multichain byte.
+            isMultichain := eq(shl(mul(2, 31), shr(mul(2, 8), mode)), 1)
+        }
+        // Sanity check: Mode is contained in callTypeHash so you can not nefariously select the hash strategy.
+        // Additionally, _hashTypedDataSansChainId will not produce the same digest as _hashTypedData by just ignoring
+        // the chainId. It has another typehash which differentiates their hashes.
+        bytes32 digest = isMultichain ? _hashTypedDataSansChainId(callTypeHash) : _hashTypedData(callTypeHash);
         return _validateSignature(digest, opData[0x20:]);
     }
 

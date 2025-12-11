@@ -113,6 +113,7 @@ Catapultar is not `ERC-7821` compatible but it follows `ERC-7821` specification.
 | Consume Nonce on Revert |         No         |         Yes        |         No         |
 | Batch of Batches        |         No         |         No         |         Yes        |
 | OpData Required         |         Yes        |         Yes        |         No         |
+| Multi-chain Signed      |         Yes	       |         Yes        |      Inherited     |
 
 
 #### opData
@@ -124,6 +125,14 @@ To execute a transaction batch `opData` is required for execution. As a result, 
 Since `0x01000000000078210002` does not execute a transaction batch but a batch of batches, it does not require `opData`.
 
 #### Execution Models
+
+- **0xXXXX00XXXXXX78210001**: Single-chain signed batch.
+
+	Uses `EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)` for the domain separator. This is the standard EIP712 domain separator which includes the chainId. A single-chain signed is only valid for a single chain.
+
+- **0xXXXX01XXXXXX78210001**: Multi-chain signed batch
+
+	Uses `EIP712Domain(string name,string version,address verifyingContract)` which does not include the chainId. This allows for executing a batch of calls on any chain with a deployed account.
 
 - **0x01000000000078210001**: Executing a set of conditional trasactions.
   

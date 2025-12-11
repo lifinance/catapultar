@@ -1,8 +1,8 @@
 {
   "erc20TransferBaseline": "29764",
   "erc20TransferBaselineSecond": "24964",
-  "erc20TransferSCA": "64938",
-  "erc20TransferSCAHotNonce": "40538",
-  "erc20TransferTwiceSCA": "91073",
-  "erc20TransferTwiceSCAHotNonce": "66673"
+  "erc20TransferSCA": "64985",
+  "erc20TransferSCAHotNonce": "40585",
+  "erc20TransferTwiceSCA": "91120",
+  "erc20TransferTwiceSCAHotNonce": "66720"
 }
