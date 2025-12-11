@@ -205,6 +205,8 @@ contract KeyedOwnable {
 
     /**
      * @notice Transfer ownership to a ECDSAOrSmartContract through the normal transferOwnership interface
+     * @dev Can be used to resignate ownership by setting the new owner to 0. Be aware that if an ownership change has
+     * been stored in the account, it can be used to bring back the owner again.
      */
     function transferOwnership(
         address newOwner
@@ -219,9 +221,14 @@ contract KeyedOwnable {
         emit OwnershipTransferred(KeyType.ECDSAOrSmartContract, nextKeys);
     }
 
-    /// @dev Based on ithacaxyz@account::unwrapAndValidateSignature
-    /// https://github.com/ithacaxyz/account/blob/7dd8a5d91c162b89316e367f0fb159f47abfeab0/src/IthacaAccount.sol#L491
-    /// @param signature `abi.encodePacked(bytes(signature), bool(prehash))`.
+    /**
+     * @dev Based on ithacaxyz@account::unwrapAndValidateSignature
+     * https://github.com/ithacaxyz/account/blob/7dd8a5d91c162b89316e367f0fb159f47abfeab0/src/IthacaAccount.sol#L491
+     * Notice! P256 signatures are 64 bytes long. This contract has been optimised for ECDSA owners.
+     * P256 signatures needs to append 2 bytes to their 64 bytes to get the signature to size 66. The last byte is a
+     * flag for rehashing the digest with SHA256.
+     * @param signature `abi.encodePacked(bytes(signature), bool(prehash))`.
+     */
     function _validateSignature(
         bytes32 digest,
         bytes calldata signature

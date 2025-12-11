@@ -79,6 +79,7 @@ contract CatapultarFactory {
         bytes32 saltWithDigest = EfficientHashLib.hash(salt, digest, bytes32(nonce));
         proxy = LibClone.cloneDeterministic_PUSH0(EXECUTOR, saltWithDigest);
 
+        // forge-lint: disable-next-line(unsafe-typecast)
         // wake-disable-next-line reentrancy
         Catapultar(payable(proxy)).setSignature(digest, Catapultar.DigestApproval(uint8(nonce)));
         Catapultar(payable(proxy)).init{ value: msg.value }(ktp, owner);
