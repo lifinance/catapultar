@@ -111,7 +111,7 @@ contract Catapultar is ERC7821LIFI, EIP712, BitmapNonce, KeyedOwnable, Initializ
     function setSignature(
         bytes32 hash,
         DigestApproval flag
-    ) public {
+    ) public payable {
         if (!ownerOrSelf() && _getInitializedVersion() != 0) revert Unauthorized();
 
         approvedDigest[hash] = flag;
@@ -156,7 +156,7 @@ contract Catapultar is ERC7821LIFI, EIP712, BitmapNonce, KeyedOwnable, Initializ
     function invalidateUnorderedNonces(
         uint256 wordPos,
         uint256 mask
-    ) external onlyOwnerOrSelf {
+    ) external payable onlyOwnerOrSelf {
         nonceBitmap[wordPos] |= mask;
 
         emit UnorderedNonceInvalidation(wordPos, mask);
@@ -233,7 +233,7 @@ contract Catapultar is ERC7821LIFI, EIP712, BitmapNonce, KeyedOwnable, Initializ
         assembly ("memory-safe") {
             // Shift away the 2 most significant bytes and move the selector into the least significant byte. This only
             // selects the multichain byte.
-            isMultichain := eq(shl(mul(2, 31), shr(mul(2, 8), mode)), 1)
+            isMultichain := eq(shr(mul(31, 8), shl(mul(2, 8), mode)), 1)
         }
         // Sanity check: Mode is contained in callTypeHash so you can not nefariously select the hash strategy.
         // Additionally, _hashTypedDataSansChainId will not produce the same digest as _hashTypedData by just ignoring

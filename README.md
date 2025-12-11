@@ -8,15 +8,15 @@ It is based on Solady's [`ERC7821.sol`](https://github.com/vectorized/solady/blo
 
 A smart contract account that can be used to scale a transaction dispatch environment without relying on nonce spamming while still working as a minimal SCA for an end user. It should provide durable double spend protection ensuring dispatched transactions are not nefariously nor accidentally executed twice.
 
-The smart contract account should also be usable in a custodianless flow where someone wants to execute a complex actions on behalf of a user.
+The smart contract account should also be usable in a custodianless flow where someone wants to execute a complex action on behalf of a use.
 
 To scale a transaction dispatch environment, execution mode `0x01010000000078210001` can be used. It is a once callable, revert ignoring batch call. It allows a set of transactions to be executed in single call with no call blocking others.
 
-To provide durable double spend protections, execution mode `0x01000000000078210001` can be used. It is a once executable, revert raising batch call. It allows a set of transaction to be executed conditionally.
+To provide durable double-spend protections, execution mode `0x01000000000078210001` can be used. It is a once executable, revert raising batch call. It allows a set of transaction to be executed conditionally.
 
 Both execution modes can be combined with an outer signed `0x01010000000078210001` calling itself allowing for a one time callable batch with inner unsigned `0x01000000000078210001` allowing for safe re-tryable transactions. A transaction dispatch service can maintain a list of `0x01000000000078210001`s. Once the transaction executor is available, all outstanding `0x01000000000078210001`s can be executed through a single `0x01010000000078210001`.
 
-The smart account can be deterministic deployed with a pre-configured call. This allows for token deliveries or action delegation to an address where the smart account can later be deployed to and the embedded action can be executed.
+The smart account can be deterministically deployed with a pre-configured call. This allows for token deliveries or action delegation to an address where the smart account can later be deployed to and the embedded action can be executed.
 
 #### Smart Account Tradeoffs
 
