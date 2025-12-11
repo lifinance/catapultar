@@ -257,7 +257,8 @@ contract KeyedOwnable {
             bytes32 x = _getOwnerKeySlice(0);
             bytes32 y = _getOwnerKeySlice(1);
             return P256.verifySignature(digest, r, s, x, y);
-        } else if (ownerKeyType == KeyType.WebAuthnP256) {
+        }
+        if (ownerKeyType == KeyType.WebAuthnP256) {
             bytes32 x = _getOwnerKeySlice(0);
             bytes32 y = _getOwnerKeySlice(1);
             return WebAuthn.verify(
@@ -268,7 +269,8 @@ contract KeyedOwnable {
                 x,
                 y
             );
-        } else if (ownerKeyType == KeyType.ECDSAOrSmartContract) {
+        }
+        if (ownerKeyType == KeyType.ECDSAOrSmartContract) {
             address account = _asAddressNotDirty(_getOwnerKeySlice(0));
             return SignatureCheckerLib.isValidSignatureNowCalldata(account, digest, signature);
         }

@@ -7,7 +7,9 @@ import { KeyedOwnable } from "../../src/libs/KeyedOwnable.sol";
 
 import { MockKeyedOwnable } from "../mocks/MockKeyedOwnable.sol";
 
+import { Base64 } from "solady/src/utils/Base64.sol";
 import { P256 } from "solady/src/utils/P256.sol";
+import { WebAuthn } from "solady/src/utils/WebAuthn.sol";
 
 // From Solady
 contract P256VerifierEtcher is Test {
@@ -343,6 +345,58 @@ contract KeyedOwnableTest is P256VerifierEtcher {
         (r, s) = vm.signP256(privatekeyP256, rehashedDigest);
         signature = abi.encodePacked(r, P256.normalized(s), bytes2(0));
         bytes memory signatureRehash = abi.encodePacked(r, P256.normalized(s), bytes2(uint16(1)));
+
+        // We now have the choise whether we wanna directly verify the digest or through rehashing first.
+        assertEq(ownable.validateSignature(rehashedDigest, signature), true);
+        assertEq(ownable.validateSignature(randomDigest, signatureRehash), true);
+
+        assertEq(ownable.validateSignature(randomDigest, signature), false);
+        assertEq(ownable.validateSignature(rehashedDigest, signatureRehash), false);
+    }
+
+    function _signedWebAuthnAuth(
+        bytes32 digest,
+        uint256 privatekeyP256
+    ) internal pure returns (WebAuthn.WebAuthnAuth memory auth) {
+        bytes memory challenge = abi.encode(digest);
+
+        // Data is stolen from Solady/test/WebAuthn.t.sol
+        auth.authenticatorData = hex"49960de5880e8c687434170f6476605b8fe4aeb9a28632c7995cf3ba831d9763050000010a";
+        auth.clientDataJSON = string(
+            abi.encodePacked(
+                '{"type":"webauthn.get","challenge":"',
+                Base64.encode(challenge, true, true),
+                '","origin":"http://localhost:3005","crossOrigin":false}'
+            )
+        );
+        auth.challengeIndex = 23;
+        auth.typeIndex = 1;
+        // Create signable messageHash.
+        bytes32 messageHash = sha256(abi.encodePacked(auth.authenticatorData, sha256(bytes(auth.clientDataJSON))));
+        (bytes32 r, bytes32 s) = vm.signP256(privatekeyP256, messageHash);
+        auth.r = r;
+        auth.s = P256.normalized(s);
+    }
+
+    function test_validateSignature_WebAuthn() external {
+        // We need to switch the account to a P256 owner.
+        (uint256 privatekeyP256, bytes32[] memory publickeyP256) = makeP256("WebAuthnP256Owner");
+        vm.prank(address(ownable));
+        ownable.transferOwnership(KeyedOwnable.KeyType.WebAuthnP256, publickeyP256);
+
+        bytes32 randomDigest = keccak256(bytes("randomDigest"));
+        WebAuthn.WebAuthnAuth memory auth = _signedWebAuthnAuth(randomDigest, privatekeyP256);
+        bytes memory signature = abi.encode(auth, false);
+
+        assertTrue(ownable.validateSignature(randomDigest, signature));
+
+        // Check if it works if we want to rehash the signature:
+        bytes32 rehashedDigest = sha256(abi.encodePacked(randomDigest));
+        assertEq(ownable.validateSignature(rehashedDigest, signature), false);
+
+        auth = _signedWebAuthnAuth(rehashedDigest, privatekeyP256);
+        signature = abi.encodePacked(abi.encode(auth), false);
+        bytes memory signatureRehash = abi.encodePacked(abi.encode(auth), true);
 
         // We now have the choise whether we wanna directly verify the digest or through rehashing first.
         assertEq(ownable.validateSignature(rehashedDigest, signature), true);
