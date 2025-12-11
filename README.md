@@ -57,7 +57,7 @@ In general, there are two main approaches to implementing EIP-7702 support for s
 - To simulate dual mode transaction, mode `0x01000000000078210001` transactions can be submitted to the relevant proxy using the context of `msg.sender === proxy`.
 - Catapultar contains no gas controls. If dual mode transactions are used, gas controls should be handled off-chain. Gas-spending untrusted contracts should be executed individually.
 - Catapultar contains no calldata manipulation. Injection of `erc20::balanceOf()` or similar manipulations should be on external contracts.
-- Catapultar does not support external delegate calls. Delegate calls are dangourus, particularly for upgradeable contracts. They can change the owner of Catapultar but also the implementation of a proxy (ERC-1967).
+- Catapultar does not support external delegate calls. Delegate calls are dangerous, particularly for upgradeable contracts. They can change the owner of Catapultar but also the implementation of a proxy (ERC-1967).
 
 #### Key Features
 
@@ -134,7 +134,7 @@ Since `0x01000000000078210002` does not execute a transaction batch but a batch 
 
 	Uses `EIP712Domain(string name,string version,address verifyingContract)` which does not include the chainId. This allows for executing a batch of calls on any chain with a deployed account.
 
-- **0x01000000000078210001**: Executing a set of conditional trasactions.
+- **0x01000000000078210001**: Executing a set of conditional transactons.
   
 	If 1 transaction in a set fails, the entire set should fail. This can allow for retrying the transaction at a later time since the nonce is not spent.
  
