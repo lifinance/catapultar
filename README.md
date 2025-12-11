@@ -6,15 +6,15 @@ It is based on Solady's [`ERC7821.sol`](https://github.com/vectorized/solady/blo
 
 ### Design Goal
 
-A smart contract account that can be used to scale a transaction dispatch environment without relying on nonce spamming while still working as a minimal SCA for an end user. It should provide durable double spend protection ensuring dispatched transactions are not nefariously nor accidentally executed twice.
+A smart contract account that can be used to scale a transaction dispatch environment without relying on nonce spamming while still working as a minimal SCA for an end user. It should provide durable double-spend protection ensuring dispatched transactions are not nefariously nor accidentally executed twice.
 
-The smart contract account should also be usable in a custodianless flow where someone wants to execute a complex action on behalf of a use.
+The smart contract account should also be usable in a custodianless flow where someone wants to execute a complex action on behalf of a user.
 
-To scale a transaction dispatch environment, execution mode `0x01010000000078210001` can be used. It is a once callable, revert ignoring batch call. It allows a set of transactions to be executed in single call with no call blocking others.
+To scale a transaction dispatch environment, execution mode `0x01010000000078210001` can be used. It is a once-callable, revert-ignoring batch call. It allows a set of transactions to be executed in single call with no call blocking others.
 
-To provide durable double-spend protections, execution mode `0x01000000000078210001` can be used. It is a once executable, revert raising batch call. It allows a set of transaction to be executed conditionally.
+To provide durable double-spend protections, execution mode `0x01000000000078210001` can be used. It is a once-executable, revert-raising batch call. It allows a set of transaction to be executed conditionally.
 
-Both execution modes can be combined with an outer signed `0x01010000000078210001` calling itself allowing for a one time callable batch with inner unsigned `0x01000000000078210001` allowing for safe re-tryable transactions. A transaction dispatch service can maintain a list of `0x01000000000078210001`s. Once the transaction executor is available, all outstanding `0x01000000000078210001`s can be executed through a single `0x01010000000078210001`.
+Both execution modes can be combined with an outer signed `0x01010000000078210001` calling itself allowing for a one-time callable batch with inner unsigned `0x01000000000078210001` allowing for safe re-tryable transactions. A transaction dispatch service can maintain a list of `0x01000000000078210001`s. Once the transaction executor is available, all outstanding `0x01000000000078210001`s can be executed through a single `0x01010000000078210001`.
 
 The smart account can be deterministically deployed with a pre-configured call. This allows for token deliveries or action delegation to an address where the smart account can later be deployed to and the embedded action can be executed.
 
@@ -22,22 +22,22 @@ The smart account can be deterministically deployed with a pre-configured call. 
 
 Smart accounts are built for efficiency; To be used on Ethereum gas costs have to be kept minimal. As a result, feature space of the account is limited. Below a table comparing popular smart accounts can be found:
 
-| Feature                         |  Catapultar  | Ithaca account (Porto) |  Biconomy Nexus  | Zerodev Kernel |
-| ------------------------------- | :----------: | :--------------------: | :--------------: | :------------: |
-| Multiple Keys                   |      1       |         Yes            |Yes (K1Validator) |   With Module  |
-| Multiple Signatures             |     No       |         No             |    With Module   |   With Module  |
-| Call Batching                   |  ERC-7821*   |        ERC-7821     	  |    ERC-7821      |    ERC-7821    |
-| Call Batching (Ignore failures) |     Yes      |         No             |    No            |   With Module  |
-| Nonces                          |Permit2 style |       4337 style       |    ERC-4337      |   ERC-4337     |
-| Embed action on deploy          |     Yes      |       Yes-ish          |    With Module   |   With Module  |
-| Supports EIP-7702               |     No       |         Yes            |    Yes           |      Yes       |
-| Requires EIP-7702               |     No       |         Yes            |    No            |      No        |
-| Full Passkey Support            |     Yes      |         Yes            |    With Module   |  With Module   |
-| Solady LibZip                   |     Yes      |         No             |    No            |  With Module   |
-| Account Deploy                  |   Factory    |   EIP-7702 Delegate    |    Factory       |  Factory       |
-| Permissionless chain deploy     |     Yes      |         Yes            |    Yes					 |   Yes          |
-| Account Init                    |    ~117k     |   EIP-7702 Delegate    |  More expensive  | More expensive |
-| Modular (ERC-7579)              |     No       |        No              |    Yes           |   Yes          |
+| Feature                         |  Catapultar   | Ithaca account (Porto) |  Biconomy Nexus   | Zerodev Kernel |
+| ------------------------------- | :-----------: | :--------------------: | :---------------: | :------------: |
+| Multiple Keys                   |       1       |          Yes           | Yes (K1Validator) |  With Module   |
+| Multiple Signatures             |      No       |           No           |    With Module    |  With Module   |
+| Call Batching                   |   ERC-7821*   |        ERC-7821        |     ERC-7821      |    ERC-7821    |
+| Call Batching (Ignore failures) |      Yes      |           No           |        No         |  With Module   |
+| Nonces                          | Permit2 style |       4337 style       |     ERC-4337      |    ERC-4337    |
+| Embed action on deploy          |      Yes      |        Yes-ish         |    With Module    |  With Module   |
+| Supports EIP-7702               |      No       |          Yes           |        Yes        |      Yes       |
+| Requires EIP-7702               |      No       |          Yes           |        No         |       No       |
+| Full Passkey Support            |      Yes      |          Yes           |    With Module    |  With Module   |
+| Solady LibZip                   |      Yes      |           No           |        No         |  With Module   |
+| Account Deploy                  |    Factory    |   EIP-7702 Delegate    |      Factory      |    Factory     |
+| Permissionless chain deploy     |      Yes      |          Yes           |        Yes        |      Yes       |
+| Account Init                    |     ~117k     |   EIP-7702 Delegate    |  More expensive   | More expensive |
+| Modular (ERC-7579)              |      No       |           No           |        Yes        |      Yes       |
 
 
 #### EIP-7702
@@ -70,7 +70,7 @@ In general, there are two main approaches to implementing EIP-7702 support for s
 	- Implements replay protection: signatures are valid only for a specific account instance.
 - **Proxy Deployment Strategies:**
 	- Minimal proxy (low cost, non-upgradeable).
-	- Upgradeable ERC-1967 proxy (ownership handover, upgradable logic).
+	- Upgradeable ERC-1967 proxy (ownership handover, Upgradeable logic).
 
 ### Account Deployment
 
@@ -96,12 +96,12 @@ Use the `CatapultarFactory` contract to deploy Catapultar proxies:
 
 For all deployments, the first 20 bytes of `salt` should be the owner address or zero. For P256 accounts, the first 20 bytes should be the last 20 bytes of the hash of the entire key. Use the `predictDeploy*` functions to precompute addresses before deployment.
 
-| Feature               | Minimal Proxy |     Digest Proxy    | Upgradeable Proxy |
-| --------------------- | :-----------: | :-----------------: | :---------------: |
-| Upgradable            |      No       |         No          |        Yes        |
-| Embedded Call Support |      No       |         Yes         |        No         |
-| Ownership Transfer    |      Yes      |         Yes         |        Yes        |
-| Gas Cost              |    Lowest     |        Lowest       |      Higher       |
+| Feature               | Minimal Proxy | Digest Proxy | Upgradeable Proxy |
+| --------------------- | :-----------: | :----------: | :---------------: |
+| Upgradeable           |      No       |      No      |        Yes        |
+| Embedded Call Support |      No       |     Yes      |        No         |
+| Ownership Transfer    |      Yes      |     Yes      |        Yes        |
+| Gas Cost              |    Lowest     |    Lowest    |      Higher       |
 
 ### Execution Modes (ERC-7821)
 
@@ -109,11 +109,11 @@ Catapultar is not `ERC-7821` compatible but it follows `ERC-7821` specification.
 
 | Execution Mode          | 0x0100....78210001 | 0x0101....78210001 | 0x0100....78210002 |
 | ----------------------- | :----------------: | :----------------: | :----------------: |
-| Raise Revert            |         Yes        |         No         |         Yes        |
-| Consume Nonce on Revert |         No         |         Yes        |         No         |
-| Batch of Batches        |         No         |         No         |         Yes        |
-| OpData Required         |         Yes        |         Yes        |         No         |
-| Multi-chain Signed      |         Yes	       |         Yes        |      Inherited     |
+| Raise Revert            |        Yes         |         No         |        Yes         |
+| Consume Nonce on Revert |         No         |        Yes         |         No         |
+| Batch of Batches        |         No         |         No         |        Yes         |
+| OpData Required         |        Yes         |        Yes         |         No         |
+| Multi-chain Signed      |        Yes         |        Yes         |     Inherited      |
 
 
 #### opData
@@ -223,7 +223,7 @@ When the smart account calls itself, it can bypass security checks on important 
 - The SCA can authorize an upgrade of the underlying SCA if the contract is upgradeable.
 - The SCA can upgrade the contract owner.
 
-The only way to have the SCA call itself is through the batch endpoint. The batch endpoint requires a structured signed message but the encoded messages themselves are not structured. It is very important to parse and validate that **ALL** signed batches are legit and safe. Take the following batch:
+The only way to have the SCA call itself is through the batch endpoint. The batch endpoint requires a structured signed message but the encoded messages themselves are not structured. It is critical to parse and validate that **ALL** signed batches are legit and safe. Take the following batch:
 
 - Call self, transferOwnership to A.
 - Call A

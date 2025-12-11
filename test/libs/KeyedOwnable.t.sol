@@ -238,7 +238,7 @@ contract KeyedOwnableTest is P256VerifierEtcher {
         // too long
         owner = new bytes32[](3);
         owner[0] = keccak256(bytes("x"));
-        owner[0] = keccak256(bytes("y"));
+        owner[1] = keccak256(bytes("y"));
         vm.expectRevert(KeyedOwnable.InvalidKey.selector);
         ownable.transferOwnership(KeyedOwnable.KeyType.P256, owner);
 
@@ -267,7 +267,7 @@ contract KeyedOwnableTest is P256VerifierEtcher {
         // too long
         owner = new bytes32[](3);
         owner[0] = keccak256(bytes("x"));
-        owner[0] = keccak256(bytes("y"));
+        owner[1] = keccak256(bytes("y"));
         vm.expectRevert(KeyedOwnable.InvalidKey.selector);
         ownable.transferOwnership(KeyedOwnable.KeyType.WebAuthnP256, owner);
     }
@@ -346,7 +346,7 @@ contract KeyedOwnableTest is P256VerifierEtcher {
         signature = abi.encodePacked(r, P256.normalized(s), bytes2(0));
         bytes memory signatureRehash = abi.encodePacked(r, P256.normalized(s), bytes2(uint16(1)));
 
-        // We now have the choise whether we wanna directly verify the digest or through rehashing first.
+        // We now have the choice whether we wanna directly verify the digest or through rehashing first.
         assertEq(ownable.validateSignature(rehashedDigest, signature), true);
         assertEq(ownable.validateSignature(randomDigest, signatureRehash), true);
 
@@ -398,7 +398,7 @@ contract KeyedOwnableTest is P256VerifierEtcher {
         signature = abi.encodePacked(abi.encode(auth), false);
         bytes memory signatureRehash = abi.encodePacked(abi.encode(auth), true);
 
-        // We now have the choise whether we wanna directly verify the digest or through rehashing first.
+        // We now have the choice whether we wanna directly verify the digest or through rehashing first.
         assertEq(ownable.validateSignature(rehashedDigest, signature), true);
         assertEq(ownable.validateSignature(randomDigest, signatureRehash), true);
 
