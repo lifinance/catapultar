@@ -79,12 +79,8 @@ contract CatapultarFactory {
         bytes32 saltWithDigest = EfficientHashLib.hash(salt, digest, bytes32(nonce));
         proxy = LibClone.cloneDeterministic_PUSH0(EXECUTOR, saltWithDigest);
 
-        Catapultar.DigestApproval approval;
-        assembly ("memory-safe") {
-            approval := nonce
-        }
         // wake-disable-next-line reentrancy
-        Catapultar(payable(proxy)).setSignature(digest, approval);
+        Catapultar(payable(proxy)).setSignature(digest, Catapultar.DigestApproval(uint8(nonce)));
         Catapultar(payable(proxy)).init{ value: msg.value }(ktp, owner);
     }
 
@@ -160,9 +156,7 @@ contract CatapultarFactory {
         if (ktp == KeyedOwnable.KeyType.ECDSAOrSmartContract && owner.length == 1) {
             return address(uint160(uint256(owner[0])));
         } else {
-            bytes20 ownerHash =
-                bytes20(EfficientHashLib.hash(bytes32(uint256(uint8(ktp))), EfficientHashLib.hash(owner)));
-            return address(ownerHash);
+            return address(bytes20(EfficientHashLib.hash(bytes32(uint256(uint8(ktp))), EfficientHashLib.hash(owner))));
         }
     }
 }
