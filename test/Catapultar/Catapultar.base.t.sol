@@ -421,13 +421,15 @@ abstract contract CatapultarTest is Test {
         // Multichain flow
         bytes32 multichainMode = 0x0100010000007821000100000000000000000000000000000000000000000000;
         nonce = 2;
-        (, string memory name, string memory version, , , ,) = executor.eip712Domain();
-        domainSeparator = keccak256(abi.encode(
-            keccak256(bytes("EIP712Domain(string name,string version,address verifyingContract)")),
-            keccak256(bytes(name)),
-            keccak256(bytes(version)),
-            address(executor)
-        ));
+        (, string memory name, string memory version,,,,) = executor.eip712Domain();
+        domainSeparator = keccak256(
+            abi.encode(
+                keccak256(bytes("EIP712Domain(string name,string version,address verifyingContract)")),
+                keccak256(bytes(name)),
+                keccak256(bytes(version)),
+                address(executor)
+            )
+        );
         msgHash = keccak256(abi.encodePacked("\x19\x01", domainSeparator, this.typehash(nonce, multichainMode, calls)));
         (v, r, s) = vm.sign(privateKey, msgHash);
         signature = abi.encodePacked(r, s, v);
