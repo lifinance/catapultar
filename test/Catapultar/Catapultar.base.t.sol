@@ -443,11 +443,16 @@ abstract contract CatapultarTest is Test {
     }
 
     bytes4 constant SUCCESS_IS_VALID_SIGNATURE = bytes4(keccak256("isValidSignature(bytes32,bytes)"));
+    bytes4 constant IS_NOT_VALID_SIGNATURE = bytes4(uint32(0xFFFFFFFF));
 
     function test_isValidSignature() external {
         (, uint256 privateKey) = init();
 
         bytes32 msgHash = keccak256(bytes("RandomPayload"));
+        // Check that a random signature is not valid.
+        bytes4 result = executor.isValidSignature(msgHash, abi.encodePacked(keccak256(""), keccak256("")));
+        assertEq(bytes32(result), bytes32(IS_NOT_VALID_SIGNATURE));
+
         bytes32 toSign = keccak256(
             abi.encode(keccak256(bytes("Replay(address account,bytes32 payload)")), address(executor), msgHash)
         );
@@ -456,7 +461,7 @@ abstract contract CatapultarTest is Test {
 
         bytes memory signature = abi.encodePacked(r, s, v);
 
-        bytes4 result = executor.isValidSignature(msgHash, signature);
+        result = executor.isValidSignature(msgHash, signature);
 
         assertEq(bytes32(result), bytes32(SUCCESS_IS_VALID_SIGNATURE));
 
@@ -466,7 +471,32 @@ abstract contract CatapultarTest is Test {
 
         result = MockCatapultar(payable(newExecutorProxied)).isValidSignature(msgHash, signature);
 
-        assertNotEq(bytes32(result), bytes32(SUCCESS_IS_VALID_SIGNATURE));
+        assertEq(bytes32(result), bytes32(IS_NOT_VALID_SIGNATURE));
+    }
+
+    function test_isValidSignature_setSignature() external {
+        init();
+
+        bytes32 msgHash = keccak256(bytes("RandomPayload"));
+        bytes4 result = executor.isValidSignature(msgHash, hex"");
+        assertEq(bytes32(result), bytes32(IS_NOT_VALID_SIGNATURE));
+
+        bytes32 toSign = keccak256(
+            abi.encode(keccak256(bytes("Replay(address account,bytes32 payload)")), address(executor), msgHash)
+        );
+        // Set the signature (as call).
+        vm.prank(address(executor));
+        executor.setSignature(toSign, Catapultar.DigestApproval.Call);
+
+        result = executor.isValidSignature(msgHash, hex"");
+        assertEq(bytes32(result), bytes32(IS_NOT_VALID_SIGNATURE));
+
+        // Set the signature (as signature).
+        vm.prank(address(executor));
+        executor.setSignature(toSign, Catapultar.DigestApproval.Signature);
+
+        result = executor.isValidSignature(msgHash, hex"");
+        assertEq(bytes32(result), bytes32(SUCCESS_IS_VALID_SIGNATURE));
     }
 
     function testRevert_isValidSignature_no_rehash() external {
