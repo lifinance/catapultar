@@ -229,7 +229,7 @@ The only way to have the SCA call itself is through the batch endpoint. The batc
 - Call A
 - Call self, transferOwnership to original owner.
 
-If A implement ERC-1271, it can execute **ANY** call it desires on the SCA. Using the above batch, it is possible to:
+If A implements ERC-1271, it can execute **ANY** call it desires on the SCA. Using the above batch, it is possible to:
 
 1. Call A with batch + custom calldata.
 2. Store custom calldata in transient storage and set custom calldata as signed  (by A).
