@@ -12,6 +12,9 @@ jobs:
   check:
     name: Foundry project
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: solidity
     steps:
       - uses: actions/checkout@v4
         with:
