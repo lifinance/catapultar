@@ -62,37 +62,37 @@ In general, there are two main approaches to implementing EIP-7702 support for s
 #### Key Features
 
 - **Batch Execution Modes:**
-	- Conditional batch: All transactions succeed or all fail. Nonce is only spent on success.
-	- Individual batch: Each transaction in the batch is executed independently; failures do not block others. Nonce is always spent.
-	- Nested batches: Mix conditional and individual batches for complex workflows.
+  - Conditional batch: All transactions succeed or all fail. Nonce is only spent on success.
+  - Individual batch: Each transaction in the batch is executed independently; failures do not block others. Nonce is always spent.
+  - Nested batches: Mix conditional and individual batches for complex workflows.
 - **Signature Validation:**
-	- Supports ECDSA, ERC-1271, P256, and WebAuth P256 signatures.
-	- Implements replay protection: signatures are valid only for a specific account instance.
+  - Supports ECDSA, ERC-1271, P256, and WebAuth P256 signatures.
+  - Implements replay protection: signatures are valid only for a specific account instance.
 - **Proxy Deployment Strategies:**
-	- Minimal proxy (low cost, non-upgradeable).
-	- Upgradeable ERC-1967 proxy (ownership handover, Upgradeable logic).
+  - Minimal proxy (low cost, non-upgradeable).
+  - Upgradeable ERC-1967 proxy (ownership handover, Upgradeable logic).
 
 ### Account Deployment
 
 Use the `CatapultarFactory` contract to deploy Catapultar proxies:
 
 - **Minimal Proxy:**
-	```solidity
-	factory.deploy(ktp, owner, salt);
-	```
-	Deploys a minimal proxy for batch execution.
+  ```solidity
+  factory.deploy(ktp, owner, salt);
+  ```
+  Deploys a minimal proxy for batch execution.
 
 - **Proxy with Embedded Call:**
-	```solidity
-	factory.deployWithDigest(ktp, owner, salt, callsTypeHash, isSignature);
-	```
-	Deploys a proxy with a pre-configured allowed call.
+  ```solidity
+  factory.deployWithDigest(ktp, owner, salt, callsTypeHash, isSignature);
+  ```
+  Deploys a proxy with a pre-configured allowed call.
 
 - **Upgradeable Proxy:**
-	```solidity
-	factory.deployUpgradeable(owner, salt);
-	```
-	Deploys an ERC1967 upgradeable proxy. Ownership can be transferred and logic upgraded.
+  ```solidity
+  factory.deployUpgradeable(owner, salt);
+  ```
+  Deploys an ERC1967 upgradeable proxy. Ownership can be transferred and logic upgraded.
 
 For all deployments, the first 20 bytes of `salt` should be the owner address or zero. For P256 accounts, the first 20 bytes should be the last 20 bytes of the hash of the entire key. Use the `predictDeploy*` functions to precompute addresses before deployment.
 
@@ -128,23 +128,23 @@ Since `0x01000000000078210002` does not execute a transaction batch but a batch 
 
 - **0xXXXX00XXXXXX78210001**: Single-chain signed batch.
 
-	Uses `EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)` for the domain separator. This is the standard EIP712 domain separator which includes the chainId. A single-chain signed is only valid for a single chain.
+  Uses `EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)` for the domain separator. This is the standard EIP712 domain separator which includes the chainId. A single-chain signed is only valid for a single chain.
 
 - **0xXXXX01XXXXXX78210001**: Multi-chain signed batch
 
-	Uses `EIP712Domain(string name,string version,address verifyingContract)` which does not include the chainId. This allows for executing a batch of calls on any chain with a deployed account.
+  Uses `EIP712Domain(string name,string version,address verifyingContract)` which does not include the chainId. This allows for executing a batch of calls on any chain with a deployed account.
 
-- **0x01000000000078210001**: Executing a set of conditional transactons.
+- **0x01000000000078210001**: Executing a set of conditional transactions.
   
-	If 1 transaction in a set fails, the entire set should fail. This can allow for retrying the transaction at a later time since the nonce is not spent.
+  If 1 transaction in a set fails, the entire set should fail. This can allow for retrying the transaction at a later time since the nonce is not spent.
  
 - **0x01010000000078210001**: Executing a set of individual transactions.
   
-	If 1 or more transactions in a set fails, the remaining transactions in the set should be executed. The nonce is always spent.
+  If 1 or more transactions in a set fails, the remaining transactions in the set should be executed. The nonce is always spent.
  
 - **0x01000000000078210001 inside 0x01010000000078210001**: Executing a large set of individual transactions containing conditional transactions.
   
-	Each 0x01000000000078210001 batch can be retried in the future if it fails with each 0x01010000000078210001 only being executable once. This allows a batch executor to schedule a set of transaction to be executed. The entire set should be executed individually (0x01010000000078210001) but each sub-batch or transaction needs to be executed conditionally (0x01000000000078210001).
+  Each 0x01000000000078210001 batch can be retried in the future if it fails with each 0x01010000000078210001 only being executable once. This allows a batch executor to schedule a set of transaction to be executed. The entire set should be executed individually (0x01010000000078210001) but each sub-batch or transaction needs to be executed conditionally (0x01000000000078210001).
 
 
 ### Account Signature Validation (ERC-1271)
@@ -153,13 +153,13 @@ To validate ERC-1271 signatures against the account, the message hash needs to b
 
 - Hash your payload as usual (e.g., EIP-712).
 - Compute the replay-protected hash:
-	```solidity
-	bytes32 replayHash = keccak256(abi.encode(
+  ```solidity
+  bytes32 replayHash = keccak256(abi.encode(
       keccak256(bytes("Replay(address account,bytes32 payload)")),
       address(account),
       payloadHash
   ));
-	```
+  ```
 - Sign and verify using `::isValidSignature`.
 
 ### Nonce Management
@@ -185,9 +185,9 @@ Batch execution uses a `Call` struct defined as:
 
 ```solidity
 struct Call {
-	address to;
-	uint256 value;
-	bytes data;
+  address to;
+  uint256 value;
+  bytes data;
 }
 ```
 
@@ -232,7 +232,7 @@ The only way to have the SCA call itself is through the batch endpoint. The batc
 If A implement ERC-1271, it can execute **ANY** call it desires on the SCA. Using the above batch, it is possible to:
 
 1. Call A with batch + custom calldata.
-2. Store custom calldata in transient storage and set custom calldata as signed	(by A).
+2. Store custom calldata in transient storage and set custom calldata as signed  (by A).
 3. Execute Batch On SCA -> SCA calls A.
 4. A calls SCA with custom calldata.
 5. SCA will validate the batch by staticcall A, A returns true.
