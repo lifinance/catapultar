@@ -1,5 +1,5 @@
 
-# Catapultar
+<h1 align="center">Catapultar</h1>
 
 Catapultar is an optimized smart account designed for reliable batch and scheduled execution. It focuses on compact, gas-efficient on-chain primitives and a small TypeScript helper library for account/transaction flows.
 
