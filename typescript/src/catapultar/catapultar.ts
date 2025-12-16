@@ -37,9 +37,6 @@ export class CatapultarTx<
   /** List of clalls the transaction contains. */
   calls: Call[] = [];
 
-  /** Ethers provider for async validation. */
-  // provider?: Provider;
-
   /**
    * Create a new Catapultar transaction batch.
    */
@@ -196,15 +193,6 @@ export class CatapultarTx<
 
     return this;
   }
-
-  // simulate(options?: { caller?: `0x${string}` }) {
-  //   const { caller = this.address } = options ?? {};
-  //   const provider = this.getAndCheckProvider();
-  //   return provider.call({
-  //     ...this.asCall(),
-  //     from: caller,
-  //   });
-  // }
 
   // --- Read objects relating to its construction --- ///
 

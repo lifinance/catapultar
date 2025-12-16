@@ -214,7 +214,7 @@ export class CatapultarAccount<
     if (this.hasWebAuthnP256Key()) {
       const sig = signature as KeyedSignature<AccountKeyType.WebAuthnP256>;
       // const abiencode the directory.
-      return encodeAbiParameters(
+      const encodedParams = encodeAbiParameters(
         parseAbiParameters([
           "WebAuthnAuth auth",
           "struct WebAuthnAuth { bytes authenticatorData; string clientDataJSON; uint256 challengeIndex; uint256 typeIndex; uint256 r; uint256 s;}",
@@ -227,6 +227,7 @@ export class CatapultarAccount<
           },
         ],
       );
+      return `${encodedParams}01`; // Use SHA256 hash.
     }
   }
 
