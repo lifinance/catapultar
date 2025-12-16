@@ -1,0 +1,40 @@
+name: Bun Test & Coverage
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v3
+        with:
+          bun-version: stable
+
+      - name: Install dependencies
+        run: bun install
+        id: install
+        working-directory: typescript
+
+      - name: Run tests
+        run: bun test
+        id: test
+        working-directory: typescript
+
+      - name: Generate lcov
+        run: bun run lcov
+        id: coverage
+        working-directory: typescript
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          files: typescript/lcov.info
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: true
