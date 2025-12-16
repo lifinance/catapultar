@@ -3,6 +3,7 @@ import { privateKeyToAccount } from "viem/accounts";
 import { anvil } from "viem/chains";
 import { CatapultarAccount } from "./account";
 import { random, asHex } from "../utils/helpers";
+import { AccountKeyType } from "../types/types";
 
 const rpcUrl = "http://127.0.0.1:8545";
 const chainId = 31337;

@@ -1,15 +1,26 @@
 import {
   createPublicClient,
+  decodeAbiParameters,
+  encodeAbiParameters,
   encodeFunctionData,
   http,
+  parseAbiParameters,
   recoverAddress,
 } from "viem";
-import type { Version, Call } from "../types/types";
+import {
+  type Version,
+  type Call,
+  AccountKeyType,
+  type AccountPublicVar,
+  type AccountConstructorParams,
+  type KeyedSignature,
+} from "../types/types";
 import { getViemChainId } from "../utils/viem";
 import CATAPULTAR_V0_1_0_ABI from "../abi/catapultarV0.1.0";
 import CATAPULTAR_FACTORY_V0_1_0_ABI from "../abi/catapultarFactoryV0.1.0";
 import { padEven, asHex } from "../utils/helpers";
 // import { CATAPULTAR_V0_0_1_ABI } from "../abi/catapultarV0.0.1";
+import { PublicKey, WebAuthnP256, WebCryptoP256 } from "ox";
 
 const factories: Record<string, `0x${string}`> = {
   "0.1.0": "0x",
@@ -19,6 +30,7 @@ const factories: Record<string, `0x${string}`> = {
 export class CatapultarAccount<
   V extends Version = "0.1.0",
   RPC extends string | undefined = undefined,
+  AKT extends AccountKeyType = AccountKeyType.ECDSAOrSmartContract,
 > {
   /** This is not the owner of the account, this is the smart account itself. */
   readonly address: `0x${string}`;
@@ -33,18 +45,13 @@ export class CatapultarAccount<
   rpc: RPC | undefined;
 
   /** Account to validate account signatures against. */
-  owner: `0x${string}`;
+  owner: AccountPublicVar<AKT>;
+  accountKeyType: AKT;
 
-  constructor(options: {
-    address: `0x${string}`;
-    chainId: number;
-    owner: `0x${string}`;
-    name?: string;
-    version?: V;
-    rpc?: RPC;
-  }) {
+  constructor(options: AccountConstructorParams<V, RPC, AKT>) {
     const {
       address,
+      accountKeyType = AccountKeyType.ECDSAOrSmartContract as AKT,
       chainId,
       owner,
       name = "Catapultar",
@@ -57,7 +64,22 @@ export class CatapultarAccount<
     this.chainId = chainId;
 
     // Validation
+    if (AccountKeyType.ECDSAOrSmartContract && Array.isArray(owner))
+      throw new Error(
+        `Only one key allowed for ECDSA or SmartContract: ${owner}`,
+      );
+    if (
+      [AccountKeyType.P256, AccountKeyType.WebAuthnP256].includes(
+        accountKeyType,
+      ) &&
+      !Array.isArray(owner)
+    )
+      throw new Error(
+        `P256 signatures requires the owner as exactly 2 points: ${owner}`,
+      );
     this.owner = owner;
+    this.accountKeyType = accountKeyType;
+
     this.rpc = rpc;
 
     // Custom domainSeparator
@@ -135,7 +157,7 @@ export class CatapultarAccount<
     };
   }
 
-  publicClient(this: CatapultarAccount<V, string>) {
+  publicClient(this: CatapultarAccount<any, string, any>) {
     const viemChain = getViemChainId(this.chainId);
     return createPublicClient({
       chain: viemChain,
@@ -143,7 +165,7 @@ export class CatapultarAccount<
     });
   }
 
-  abi(this: CatapultarAccount<V, any>): typeof CATAPULTAR_V0_1_0_ABI {
+  abi(this: CatapultarAccount<V, any, any>): typeof CATAPULTAR_V0_1_0_ABI {
     if (this.version.startsWith("0.1")) {
       return CATAPULTAR_V0_1_0_ABI;
     } else {
@@ -151,8 +173,61 @@ export class CatapultarAccount<
     }
   }
 
-  hasRpc(): this is CatapultarAccount<V, string> {
+  hasRpc(): this is CatapultarAccount<any, string, any> {
     return typeof this.rpc === "string" && this.rpc.length > 0;
+  }
+
+  hasECDSAOrSmartContractKey(): this is CatapultarAccount<
+    any,
+    any,
+    AccountKeyType.ECDSAOrSmartContract
+  > {
+    return this.accountKeyType === AccountKeyType.ECDSAOrSmartContract;
+  }
+
+  hasP256Key(): this is CatapultarAccount<any, any, AccountKeyType.P256> {
+    return this.accountKeyType === AccountKeyType.P256;
+  }
+
+  hasWebAuthnP256Key(): this is CatapultarAccount<
+    any,
+    any,
+    AccountKeyType.WebAuthnP256
+  > {
+    return this.accountKeyType === AccountKeyType.WebAuthnP256;
+  }
+
+  parseSignature(signature: KeyedSignature<AKT>): `0x${string}` | undefined {
+    if (this.hasECDSAOrSmartContractKey())
+      return signature as KeyedSignature<AccountKeyType.ECDSAOrSmartContract>;
+    if (this.hasP256Key()) {
+      let rawSignature = (
+        signature as KeyedSignature<AccountKeyType.P256>
+      ).replace("0x", "");
+      // If the signature is 64 bytes long (default) or 65 (mistake?)
+      // then add 0001 to the signature. This indicate an additional SHA256 hash.
+      if ([64 * 2, 65 * 2].includes(rawSignature.length)) {
+        rawSignature = `${padEven(rawSignature, 65)}${"01"}`;
+      }
+      return `0x${rawSignature}`;
+    }
+    if (this.hasWebAuthnP256Key()) {
+      const sig = signature as KeyedSignature<AccountKeyType.WebAuthnP256>;
+      // const abiencode the directory.
+      return encodeAbiParameters(
+        parseAbiParameters([
+          "WebAuthnAuth auth",
+          "struct WebAuthnAuth { bytes authenticatorData; string clientDataJSON; uint256 challengeIndex; uint256 typeIndex; uint256 r; uint256 s;}",
+        ]),
+        [
+          {
+            ...sig,
+            typeIndex: BigInt(sig.typeIndex),
+            challengeIndex: BigInt(sig.challengeIndex),
+          },
+        ],
+      );
+    }
   }
 
   // --- Writing Functions --- //
@@ -207,7 +282,7 @@ export class CatapultarAccount<
    * @returns Next valid nonce that has not been spent on-chain yet. If no nonce is found in the given attempts, -1 is returned.
    */
   async getNextValidNonce(
-    this: CatapultarAccount<V, string>,
+    this: CatapultarAccount<any, string, any>,
     options: { nonce: bigint; attempts?: number },
   ) {
     const { nonce: startingNonce, attempts = 10 } = options;
@@ -241,7 +316,7 @@ export class CatapultarAccount<
   }
 
   async validateNonces(
-    this: CatapultarAccount<V, string>,
+    this: CatapultarAccount<any, string, any>,
     options: { nonces: bigint[] },
   ) {
     const lookups: { [upper: string]: bigint } = {};
@@ -268,7 +343,8 @@ export class CatapultarAccount<
     }
   }
 
-  async getAccountOwner(this: CatapultarAccount<V, string>) {
+  // TODO: P256.
+  async getAccountOwner(this: CatapultarAccount<V, string, any>) {
     return this.publicClient().readContract({
       address: this.address,
       abi: this.abi(),
@@ -311,34 +387,83 @@ export class CatapultarAccount<
   }): Promise<boolean> {
     const { signature, hash } = options;
 
-    // Check ECDSA
-    let signer: `0x${string}` = "0x";
-    if (signature && signature.length > 2) {
-      signer = (await recoverAddress({
-        hash: hash,
-        signature,
-      })) as `0x${string}`;
+    if (this.hasECDSAOrSmartContractKey()) {
+      // Check ECDSA
+      let signer: `0x${string}` = "0x";
+      if (signature && signature.length > 2) {
+        signer = (await recoverAddress({
+          hash: hash,
+          signature,
+        })) as `0x${string}`;
+      }
+      if (this.owner === signer) return true;
+      if (!this.hasRpc()) return false;
+      const publicClient = this.publicClient();
+
+      const result1271 = await publicClient.readContract({
+        address: this.owner,
+        abi: this.abi(),
+        functionName: "isValidSignature",
+        args: [hash, signature],
+      });
+      if (result1271 === "0x1626ba7e") {
+        return true;
+      }
+      return false;
     }
-    if (this.owner === signer) return true;
+    // 0.0.1 does not support anymore validations
     if (this.version === "0.0.1") return false;
-    if (!this.hasRpc()) return false;
 
-    const result1271 = await this.publicClient().readContract({
-      address: this.owner,
-      abi: this.abi(),
-      functionName: "isValidSignature",
-      args: [hash, signature],
-    });
-    if (result1271 === "0x1626ba7e") {
-      return true;
+    // Lets run P256 and Webauth. First, lets check the formatting of the signature.
+    if ([64 * 2, 65 * 2].includes(signature.length)) {
+      return false;
     }
+    // Get last byte.
+    const lastByte = signature.slice(signature.length - 2);
+    if (lastByte != "00")
+      throw new Error(`Library cannot validate non-sha256'ed hash`);
 
+    const owner = this.owner as [`0x${string}`, `0x${string}`];
+    const publicKey = PublicKey.from({
+      x: BigInt(owner[0]),
+      y: BigInt(owner[1]),
+    });
+    if (this.hasP256Key()) {
+      const r = BigInt(signature.replace("0x", "").slice(0, 64));
+      const s = BigInt(signature.replace("0x", "").slice(64, 128));
+      return await WebCryptoP256.verify({
+        payload: hash,
+        publicKey,
+        signature: { r, s },
+      });
+    }
+    if (this.hasWebAuthnP256Key()) {
+      const unpackedSig = decodeAbiParameters(
+        parseAbiParameters([
+          "WebAuthnAuth auth",
+          "struct WebAuthnAuth { bytes authenticatorData; string clientDataJSON; uint256 challengeIndex; uint256 typeIndex; uint256 r; uint256 s;}",
+        ]),
+        signature,
+      )[0];
+      const metadata = {
+        authenticatorData: unpackedSig.authenticatorData,
+        clientDataJSON: unpackedSig.clientDataJSON,
+        challengeIndex: Number(unpackedSig.challengeIndex),
+        typeIndex: Number(unpackedSig.typeIndex),
+      };
+      return await WebAuthnP256.verify({
+        metadata,
+        challenge: hash,
+        publicKey,
+        signature: { r: unpackedSig.r, s: unpackedSig.s },
+      });
+    }
     return false;
   }
 
   // --- Validation --- //
 
-  async validateOwner(this: CatapultarAccount<V, string>) {
+  async validateOwner(this: CatapultarAccount<any, string, any>) {
     const actualAccountOwner = await this.getAccountOwner();
     if (this.owner !== actualAccountOwner)
       throw new Error(
@@ -348,7 +473,7 @@ export class CatapultarAccount<
   }
 
   async validateNonce(
-    this: CatapultarAccount<V, string>,
+    this: CatapultarAccount<any, string, any>,
     options: {
       nonce: bigint | undefined;
     },

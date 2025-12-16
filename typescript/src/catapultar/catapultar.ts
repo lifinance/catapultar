@@ -1,9 +1,12 @@
 import { encodeAbiParameters, encodeFunctionData, hashTypedData } from "viem";
 import { random, asHex } from "../utils/helpers";
 import {
+  AccountKeyType,
   CallsTyped,
   ExecutionMode,
+  type AccountConstructorParams,
   type Call,
+  type KeyedSignature,
   type Version,
 } from "../types/types";
 import { CatapultarAccount } from "./account";
@@ -22,7 +25,8 @@ import CATAPULTAR_V0_1_0_ABI from "../abi/catapultarV0.1.0";
 export class CatapultarTx<
   V extends Version = "0.1.0",
   RPC extends string | undefined = undefined,
-> extends CatapultarAccount<V, RPC> {
+  AKT extends AccountKeyType = AccountKeyType.ECDSAOrSmartContract,
+> extends CatapultarAccount<V, RPC, AKT> {
   /** Signature for the transaction. */
   signature?: `0x${string}`;
 
@@ -41,15 +45,8 @@ export class CatapultarTx<
    */
   constructor(options: {
     account:
-      | {
-          address: `0x${string}`;
-          chainId: number;
-          owner: `0x${string}`;
-          name?: string;
-          version?: V;
-          rpc?: RPC;
-        }
-      | CatapultarAccount<V, RPC>;
+      | AccountConstructorParams<V, RPC, AKT>
+      | CatapultarAccount<V, RPC, AKT>;
     mode?: ExecutionMode;
     nonce?: bigint;
     calls?: Call[];
@@ -126,6 +123,13 @@ export class CatapultarTx<
   }
 
   /**
+   * Sets a signature along with its type. If non-ecdsa signatures are being set, this provides additonal aids with encoding
+   */
+  setSignature(signature: KeyedSignature<AKT>) {
+    this.signature = this.parseSignature(signature)!;
+  }
+
+  /**
    * Adds list of calls to the Catapultar transaction. The calls will be executed with the configured mode.
    */
   addCall(...calls: Call[]) {
@@ -159,7 +163,19 @@ export class CatapultarTx<
     return Object.values(ExecutionMode).includes(this.mode);
   }
 
-  async hasValidSignature(options?: { noSignatureIsValid?: boolean }) {
+  /**
+   * @returns Whether the a multichain execution mode is set.
+   */
+  hasMultichainMode(): boolean {
+    return (
+      this.mode === ExecutionMode.RaiseRevertMultiChain ||
+      this.mode === ExecutionMode.SkipRevertMultiChain
+    );
+  }
+
+  async hasValidSignature(options?: {
+    noSignatureIsValid?: boolean;
+  }): Promise<boolean> {
     const { noSignatureIsValid = false } = options ?? {};
     if (this.signature === undefined) return noSignatureIsValid;
     return this.isSignatureValid({
@@ -212,12 +228,13 @@ export class CatapultarTx<
         `Nonce 0 is not allowed. It cannot be differentiated from an invalid nonce.`,
       );
     if (!this.nonce) throw new Error("Nonce has not been set");
-    if (!this.mode) throw new Error("Mode has not been set");
+    if (!this.mode || !this.hasValidMode())
+      throw new Error("Mode has not been set");
     if (!ignoreNoCalls && this.calls.length === 0)
       throw new Error("Calls have not been set");
 
     return {
-      domain: this.getDomainSeparator(),
+      domain: this.getDomainSeparator({ chain: !this.hasMultichainMode() }),
       types: CallsTyped,
       primaryType: "Calls",
       message: {
@@ -325,7 +342,8 @@ export class CatapultarTx<
 export class MetaCatapultarTx<
   V extends Version = "0.1.0",
   RPC extends string | undefined = undefined,
-> extends CatapultarAccount<V, RPC> {
+  AKT extends AccountKeyType = AccountKeyType.ECDSAOrSmartContract,
+> extends CatapultarAccount<V, RPC, AKT> {
   mode?: ExecutionMode;
   nonce?: bigint;
   calls: { calls: Call[]; nonce?: bigint; mode?: ExecutionMode }[] = [];
@@ -335,15 +353,8 @@ export class MetaCatapultarTx<
 
   constructor(options: {
     account:
-      | {
-          address: `0x${string}`;
-          chainId: number;
-          owner: `0x${string}`;
-          name?: string;
-          version?: V;
-          rpc?: RPC;
-        }
-      | CatapultarAccount<V, RPC>;
+      | AccountConstructorParams<V, RPC, AKT>
+      | CatapultarAccount<V, RPC, AKT>;
     mode?: ExecutionMode;
     nonce?: bigint;
     signature?: `0x${string}`;
