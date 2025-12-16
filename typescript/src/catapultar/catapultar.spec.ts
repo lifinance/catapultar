@@ -5,8 +5,8 @@ import { ExecutionMode } from "../types/types";
 import { anvil } from "viem/chains";
 import { createPublicClient, createWalletClient, http } from "viem";
 import { CatapultarAccount } from "./account";
+import { rpcUrl } from "../../test/setup";
 
-const rpcUrl = "http://127.0.0.1:8545";
 const chainId = 31337;
 const PUBLIC_DEFAULT_ANVIL_ACCOUNT_0 =
   "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
@@ -20,7 +20,7 @@ async function waitForTransaction(hash: `0x${string}`) {
   // We need to wait for the transaction to be finalised.
   const publicClient = createPublicClient({
     chain: anvil,
-    transport: http(rpcUrl),
+    transport: http(rpcUrl()),
   });
   await publicClient.getTransactionReceipt({ hash });
 }
@@ -295,7 +295,7 @@ describe("Catapultar", () => {
   describe("Integration", () => {
     const publicClient = createPublicClient({
       chain: anvil,
-      transport: http(rpcUrl),
+      transport: http(rpcUrl()),
     });
 
     const owner = privateKeyToAccount(random(32));
@@ -304,7 +304,7 @@ describe("Catapultar", () => {
     const executor = createWalletClient({
       account: wallet,
       chain: anvil,
-      transport: http(rpcUrl),
+      transport: http(rpcUrl()),
     });
 
     let deployedAccountV010: CatapultarAccount<"0.1.0", string>;
@@ -314,7 +314,7 @@ describe("Catapultar", () => {
         chainId,
         owner: owner.address,
         salt: `0x${asHex(0n, 20)}${random(12).replace("0x", "")}`,
-        rpc: rpcUrl,
+        rpc: rpcUrl(),
         factory: factories["0.1.0"],
         version: "0.1.0",
       });

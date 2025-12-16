@@ -3,4 +3,4 @@ set -e
 cd typescript
 bunx lint-staged
 bun run build
-bun test
+bun run test

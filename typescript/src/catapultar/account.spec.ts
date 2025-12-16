@@ -3,9 +3,8 @@ import { privateKeyToAccount } from "viem/accounts";
 import { anvil } from "viem/chains";
 import { CatapultarAccount } from "./account";
 import { random, asHex } from "../utils/helpers";
-import { AccountKeyType } from "../types/types";
+import { rpcUrl } from "../../test/setup";
 
-const rpcUrl = "http://127.0.0.1:8545";
 const chainId = 31337;
 const PUBLIC_DEFAULT_ANVIL_ACCOUNT_0 =
   "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
@@ -21,12 +20,12 @@ describe("Catapultar Account 0.1.0", () => {
   const executor = createWalletClient({
     account: wallet,
     chain: anvil,
-    transport: http(rpcUrl),
+    transport: http(rpcUrl()),
   });
 
   const publicClient = createPublicClient({
     chain: anvil,
-    transport: http(rpcUrl),
+    transport: http(rpcUrl()),
   });
 
   let deployedAccountV010: CatapultarAccount<"0.1.0", string>;
@@ -36,7 +35,7 @@ describe("Catapultar Account 0.1.0", () => {
       chainId,
       owner: owner.address,
       salt: `0x${asHex(0n, 20)}${random(12).replace("0x", "")}`,
-      rpc: rpcUrl,
+      rpc: rpcUrl(),
       factory: factories["0.1.0"],
       version: "0.1.0",
     });
