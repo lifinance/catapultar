@@ -1,4 +1,4 @@
 cd typescript
+bunx lint-staged
 bun run build
 bun test
-bunx lint-staged
