@@ -4,7 +4,7 @@
  * @param minimal Optional length. Default 2.
  * @param pad Value to pad with. Default: 0
  */
-export function padEven(s: string, minimal = 2, pad: string = '0') {
+export function padEven(s: string, minimal = 2, pad: string = "0") {
   return s.padStart(((Math.max(s.length + 1, minimal) / 2) | 0) * 2, pad);
 }
 
@@ -15,12 +15,12 @@ export function padEven(s: string, minimal = 2, pad: string = '0') {
  * @param prefix Value to prefix the hex string with. Default: ''
  * @returns Returns the provided value as a hex string.
  */
-export function toHex<T extends string = ''>(
+export function asHex<T extends string = "">(
   num: number | bigint,
   bytes: number = 1,
-  prefix?: T,
+  prefix?: T
 ): `${T}${string}` {
-  const p = (prefix ?? '') as T;
+  const p = (prefix ?? "") as T;
   return `${p}${padEven(num.toString(16), bytes * 2)}` as `${T}${string}`;
 }
 
@@ -29,10 +29,10 @@ export function toHex<T extends string = ''>(
  */
 export function saltContainsAddress(
   address: `0x${string}`,
-  salt: `0x${string}`,
+  salt: `0x${string}`
 ): boolean {
   const saltSlice = salt.slice(0, 42);
-  if (saltSlice === '0x0000000000000000000000000000000000000000') return true;
+  if (saltSlice === "0x0000000000000000000000000000000000000000") return true;
   return saltSlice === address;
 }
 
@@ -43,7 +43,7 @@ export function saltContainsAddress(
 export const random = (length: number): `0x${string}` =>
   `0x${Array.from(
     crypto.getRandomValues(new Uint8Array(Math.ceil((length * 2) / 2))),
-    (b) => b.toString(16).padStart(2, '0'),
+    (b) => b.toString(16).padStart(2, "0")
   )
-    .join('')
+    .join("")
     .slice(0, length * 2)}`;

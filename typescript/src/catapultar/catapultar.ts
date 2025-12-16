@@ -1,5 +1,5 @@
 import { encodeAbiParameters, encodeFunctionData, hashTypedData } from "viem";
-import { random, toHex } from "../utils/helpers";
+import { random, asHex } from "../utils/helpers";
 import {
   CallsTyped,
   ExecutionMode,
@@ -140,7 +140,9 @@ export class CatapultarTx<
    * An alternative way to sign this function is to set it manually as .signature.
    */
   async sign(
-    callback: (options: ReturnType<typeof this.getSignerData>) => Promise<string>,
+    callback: (
+      options: ReturnType<typeof this.getSignerData>
+    ) => Promise<string>,
     options?: { ignoreNoCalls?: boolean }
   ) {
     const signerData = this.getSignerData(options);
@@ -249,7 +251,7 @@ export class CatapultarTx<
     const v = BigInt(`0x${this.signature.slice(2 + 64 + 64, 2 + 64 + 64 + 2)}`);
     const normV = v >= 27 ? v - 27n : v;
     const vAndS = (normV << 255n) | s;
-    return `0x${toHex(r, 32)}${toHex(vAndS, 32)}`;
+    return `0x${asHex(r, 32)}${asHex(vAndS, 32)}`;
   }
 
   /**
@@ -268,9 +270,9 @@ export class CatapultarTx<
     await this.validateSignature({ noSignatureIsValid: true });
     if (this.signature) {
       const sig = compactSignature ? this.asCompactSignature() : this.signature;
-      return `0x${toHex(this.nonce, 32)}${sig.replace("0x", "")}`;
+      return `0x${asHex(this.nonce, 32)}${sig.replace("0x", "")}`;
     } else {
-      return toHex(this.nonce, 32, "0x");
+      return asHex(this.nonce, 32, "0x");
     }
   }
 
@@ -299,7 +301,8 @@ export class CatapultarTx<
    * @return As a call for further scheduling or manual transaction signing. If used for manual transaction.
    */
   async asCall(): Promise<Call> {
-    if (!this.hasValidMode()) throw new Error(`Mode incorrectly set: ${this.mode}`);
+    if (!this.hasValidMode())
+      throw new Error(`Mode incorrectly set: ${this.mode}`);
     const executionData = await this.getExecutionData();
     const data = encodeFunctionData({
       abi: CATAPULTAR_V0_1_0_ABI,

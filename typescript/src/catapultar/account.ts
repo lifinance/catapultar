@@ -3,18 +3,17 @@ import {
   encodeFunctionData,
   http,
   recoverAddress,
-  type Call,
 } from "viem";
-import type { Version } from "../types/types";
+import type { Version, Call } from "../types/types";
 import { getViemChainId } from "../utils/viem";
 import CATAPULTAR_V0_1_0_ABI from "../abi/catapultarV0.1.0";
 import CATAPULTAR_FACTORY_V0_1_0_ABI from "../abi/catapultarFactoryV0.1.0";
-import { padEven, toHex } from "../utils/helpers";
+import { padEven, asHex } from "../utils/helpers";
 // import { CATAPULTAR_V0_0_1_ABI } from "../abi/catapultarV0.0.1";
 
 const factories: Record<string, `0x${string}`> = {
   "0.1.0": "0x",
-  "0.0.1": "0x"
+  "0.0.1": "0x",
 } as const;
 
 export class CatapultarAccount<
@@ -77,11 +76,11 @@ export class CatapultarAccount<
     const { rpc, chainId, owner } = options;
     let factory: `0x${string}`;
     let version: V;
-      const viemChain = getViemChainId(chainId);
-      const publicClient = createPublicClient({
-        chain: viemChain,
-        transport: http(rpc),
-      });
+    const viemChain = getViemChainId(chainId);
+    const publicClient = createPublicClient({
+      chain: viemChain,
+      transport: http(rpc),
+    });
     if ("factory" in options) {
       factory = options.factory;
       const readVersion = await publicClient.readContract({
@@ -102,7 +101,7 @@ export class CatapultarAccount<
     ] as `0x${string}`[];
     let salt = options.salt;
     if (typeof salt === "bigint") {
-      salt = toHex(salt, 32, "0x");
+      salt = asHex(salt, 32, "0x");
     }
 
     // TODO: derive statically
@@ -185,13 +184,11 @@ export class CatapultarAccount<
       for (const bit of bits) {
         mask += 1n << bit;
       }
-      return [wordPos, mask];
+      return [wordPos, mask] as [bigint, bigint];
     });
     return bitMaps.map(([wordPos, mask]) => {
       const data = encodeFunctionData({
-        abi: [
-          "function invalidateUnorderedNonces(uint256 wordPos, uint256 mask) external",
-        ] as const,
+        abi: CATAPULTAR_V0_1_0_ABI,
         functionName: "invalidateUnorderedNonces",
         args: [wordPos, mask],
       });
