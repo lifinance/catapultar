@@ -431,9 +431,8 @@ abstract contract CatapultarTest is Test {
                     address(executor)
                 )
             );
-            bytes32 msgHash = keccak256(
-                abi.encodePacked("\x19\x01", domainSeparator, this.typehash(nonce, multichainMode, calls))
-            );
+            bytes32 msgHash =
+                keccak256(abi.encodePacked("\x19\x01", domainSeparator, this.typehash(nonce, multichainMode, calls)));
             (uint8 v, bytes32 r, bytes32 s) = vm.sign(privateKey, msgHash);
             bytes memory signature = abi.encodePacked(r, s, v);
 
