@@ -1,10 +1,11 @@
 
 <h1 align="center">Catapultar</h1>
 
-Catapultar is an optimized smart account designed for reliable batch and scheduled execution. It focuses on compact, gas-efficient on-chain primitives and a small TypeScript helper library for account/transaction flows.
+Catapultar is an optimized smart account designed for reliable batch and scheduled execution. The main designs goals have been: broad chain compatibility, gas-efficient, and portable. It has been designed to extend of `ERC7821` to facilitate easy switching.
 
-- **Solidity contracts:** core account and factory implementations live in the `solidity/` directory — see [solidity/README.md](solidity/README.md) for full details.
-- **TypeScript library:** universal helper library for account creation and transaction structures — see [typescript/README.md](typescript/README.md) for usage and API.
+This repository is a mono-repo consisting of 
+- **Solidity contracts:** core account and factory implementation — see [solidity/README.md](solidity/README.md) for further details.
+- **TypeScript library:** Smart account helper library for account creation, transaction structures, and versioning management — see [typescript/README.md](typescript/README.md) for further details.
 
 Repository layout (top-level):
 - `solidity/` — smart account, factory, tests, and deploy scripts
@@ -12,5 +13,5 @@ Repository layout (top-level):
 - `LICENSE` — project license
 - `README.md` — this overview
 
-License: This project is distributed under the GNU Lesser General Public License v3.0 only (LGPL-3.0-only). See `LICENSE` for terms. Third-party components used by the project (for example, Solady and Permit2) are under their own licenses; see `solidity/README.md` for details.
+License: This project is distributed under the GNU Lesser General Public License v3.0 only (LGPL-3.0-only). See `LICENSE` for terms. Third-party components used by the project (for example, Solady and Permit2) are under their own licenses; see `solidity/README.md` for more.
 
