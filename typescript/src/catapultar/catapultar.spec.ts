@@ -63,7 +63,7 @@ describe("Catapultar", () => {
       expect(() => tx.getSignerData()).toThrow(nonce0Error);
     });
 
-    it.concurrent("should return a valid domain seperator", () => {
+    it.concurrent("should return a valid domain separator", () => {
       const owner = "0x1111111111111111111111111111111111111110";
       const tx = new CatapultarTx({
         account: {
@@ -74,11 +74,11 @@ describe("Catapultar", () => {
         },
       });
 
-      const domainSeperator = tx.getDomainSeperator();
-      expect(domainSeperator.name).toBe("Catapultar");
-      expect(domainSeperator.version).toBe("0.0.1");
-      expect(domainSeperator.chainId).toBe(1);
-      expect(domainSeperator.verifyingContract).toBe(
+      const domainSeparator = tx.getDomainSeparator();
+      expect(domainSeparator.name).toBe("Catapultar");
+      expect(domainSeparator.version).toBe("0.0.1");
+      expect(domainSeparator.chainId).toBe(1);
+      expect(domainSeparator.verifyingContract).toBe(
         "0x1111111111111111111111111111111111111111",
       );
 
@@ -92,11 +92,11 @@ describe("Catapultar", () => {
         },
       });
 
-      const domainSeperatorNext = txNext.getDomainSeperator();
-      expect(domainSeperatorNext.name).toBe("Catapulting");
-      expect(domainSeperatorNext.version).toBe("0.1.0");
-      expect(domainSeperatorNext.chainId).toBe(2);
-      expect(domainSeperatorNext.verifyingContract).toBe(
+      const domainSeparatorNext = txNext.getDomainSeparator();
+      expect(domainSeparatorNext.name).toBe("Catapulting");
+      expect(domainSeparatorNext.version).toBe("0.1.0");
+      expect(domainSeparatorNext.chainId).toBe(2);
+      expect(domainSeparatorNext.verifyingContract).toBe(
         "0x1111111111111111111111111111111111111112",
       );
     });
@@ -332,13 +332,13 @@ describe("Catapultar", () => {
 
       // Send tokens to the account.
       const value = 1000000000000000000n;
-      const transferTranscation = await executor.sendTransaction({
+      const transferTransaction = await executor.sendTransaction({
         to: deployedAccountV010.address,
         value,
       });
-      await waitForTransaction(transferTranscation);
+      await waitForTransaction(transferTransaction);
 
-      // This is our validation statement. We will be transfering the value to this address.
+      // This is our validation statement. We will be transferring the value to this address.
       expect(await publicClient.getBalance({ address: owner.address })).toBe(
         0n,
       );
@@ -367,11 +367,11 @@ describe("Catapultar", () => {
     it.serial("execute meta transaction", async () => {
       // Send tokens to the account.
       const value = 1000000000000000000n;
-      const transferTranscation = await executor.sendTransaction({
+      const transferTransaction = await executor.sendTransaction({
         to: deployedAccountV010.address,
         value,
       });
-      await waitForTransaction(transferTranscation);
+      await waitForTransaction(transferTransaction);
 
       // Lets make 4 transactions that we will batch.
       const targets = [random(20), random(20), random(20), random(20)];

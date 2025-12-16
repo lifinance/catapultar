@@ -203,7 +203,7 @@ export class CatapultarTx<
 
   /**
    * Returns an Ethers compatible typed dict.
-   * @param options.ignoreNoCalls Do not trow an error if no calls have been configured. Default: false
+   * @param options.ignoreNoCalls Do not throw an error if no calls have been configured. Default: false
    */
   getSignerData(options?: { ignoreNoCalls?: boolean }) {
     const { ignoreNoCalls = false } = options ?? {};
@@ -217,7 +217,7 @@ export class CatapultarTx<
       throw new Error("Calls have not been set");
 
     return {
-      domain: this.getDomainSeperator(),
+      domain: this.getDomainSeparator(),
       types: CallsTyped,
       primaryType: "Calls",
       message: {

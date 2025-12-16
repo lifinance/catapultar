@@ -25,9 +25,9 @@ export class CatapultarAccount<
   /** ChainId of the account. */
   readonly chainId: number;
 
-  /** Name of the account. Used for the domainSeperator. */
+  /** Name of the account. Used for the domainSeparator. */
   readonly name: string;
-  /** Version of the account. Used for the domainSeperator. */
+  /** Version of the account. Used for the domainSeparator. */
   readonly version: V;
 
   rpc: RPC | undefined;
@@ -60,7 +60,7 @@ export class CatapultarAccount<
     this.owner = owner;
     this.rpc = rpc;
 
-    // Custom domainSeperator
+    // Custom domainSeparator
     this.name = name;
     this.version = version;
   }
@@ -279,9 +279,9 @@ export class CatapultarAccount<
   // --- Get Functions --- //
 
   /**
-   * @returns EIP-712 Domain Seperator for the account.
+   * @returns EIP-712 Domain Separator for the account.
    */
-  getDomainSeperator(options: { chain: boolean } = { chain: true }) {
+  getDomainSeparator(options: { chain: boolean } = { chain: true }) {
     const { chain } = options;
     if (chain) {
       return {
@@ -303,7 +303,7 @@ export class CatapultarAccount<
 
   /**
    * Return whether a signature is valid.
-   * @dev Does not support P256 sigantures
+   * @dev Does not support P256 signatures
    */
   async isSignatureValid(options: {
     signature: `0x${string}`;
