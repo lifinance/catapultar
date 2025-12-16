@@ -18,7 +18,7 @@ const factories: Record<string, `0x${string}`> = {
 
 export class CatapultarAccount<
   V extends Version = "0.1.0",
-  RPC extends string | undefined = undefined
+  RPC extends string | undefined = undefined,
 > {
   /** This is not the owner of the account, this is the smart account itself. */
   readonly address: `0x${string}`;
@@ -71,7 +71,7 @@ export class CatapultarAccount<
       owner: `0x${string}`;
       salt: `0x${string}` | bigint;
       rpc: string;
-    } & ({ version: V } | { factory: `0x${string}` })
+    } & ({ version: V } | { factory: `0x${string}` }),
   ): Promise<{ call: Call; account: CatapultarAccount<V, string> }> {
     const { rpc, chainId, owner } = options;
     let factory: `0x${string}`;
@@ -91,7 +91,7 @@ export class CatapultarAccount<
       version = readVersion as V;
     } else {
       version = options.version;
-      if (version === `0.0.1` || !(Object.keys(factories).includes(version))) {
+      if (version === `0.0.1` || !Object.keys(factories).includes(version)) {
         throw new Error(`Unsupported version: ${version}`);
       }
       factory = factories[version]!;
@@ -208,7 +208,7 @@ export class CatapultarAccount<
    */
   async getNextValidNonce(
     this: CatapultarAccount<V, string>,
-    options: { nonce: bigint; attempts?: number }
+    options: { nonce: bigint; attempts?: number },
   ) {
     const { nonce: startingNonce, attempts = 10 } = options;
 
@@ -242,7 +242,7 @@ export class CatapultarAccount<
 
   async validateNonces(
     this: CatapultarAccount<V, string>,
-    options: { nonces: bigint[] }
+    options: { nonces: bigint[] },
   ) {
     const lookups: { [upper: string]: bigint } = {};
     for (const nonce of options.nonces) {
@@ -251,7 +251,7 @@ export class CatapultarAccount<
       const val = lookups[wordPos.toString(16)];
       if (!val) lookups[wordPos.toString(16)] = 0n;
       if (val && val & (1n << bitPos))
-        throw new Error(`Dublicate Nonce ${nonce}`);
+        throw new Error(`Duplicate Nonce ${nonce}`);
       lookups[wordPos.toString(16)]! |= 1n << bitPos;
     }
     for (const [upper, word] of Object.entries(lookups)) {
@@ -263,7 +263,7 @@ export class CatapultarAccount<
       });
       if (spentNonces & word)
         throw new Error(
-          `Nonce collision on ${upper}, words: ${word} and ${spentNonces}`
+          `Nonce collision on ${upper}, words: ${word} and ${spentNonces}`,
         );
     }
   }
@@ -342,7 +342,7 @@ export class CatapultarAccount<
     const actualAccountOwner = await this.getAccountOwner();
     if (this.owner !== actualAccountOwner)
       throw new Error(
-        `Expected owner: ${actualAccountOwner}, Provided owner: ${this.owner}`
+        `Expected owner: ${actualAccountOwner}, Provided owner: ${this.owner}`,
       );
     return this;
   }
@@ -351,12 +351,12 @@ export class CatapultarAccount<
     this: CatapultarAccount<V, string>,
     options: {
       nonce: bigint | undefined;
-    }
+    },
   ) {
     const { nonce } = options;
     if (nonce === 0n)
       throw new Error(
-        "Nonce 0 is not allowed. It cannot be differentiated from an invalid nonce."
+        "Nonce 0 is not allowed. It cannot be differentiated from an invalid nonce.",
       );
     if (!nonce) throw new Error("No nonce has been set");
     await this.validateNonces({ nonces: [nonce] });

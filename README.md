@@ -4,7 +4,7 @@
 Catapultar is an optimized smart account designed for reliable batch and scheduled execution. It focuses on compact, gas-efficient on-chain primitives and a small TypeScript helper library for account/transaction flows.
 
 - **Solidity contracts:** core account and factory implementations live in the `solidity/` directory — see [solidity/README.md](solidity/README.md) for full details.
-- **TypeScript library:** universial helper library for account creation and transaction structures — see [typescript/README.md](typescript/README.md) for usage and API.
+- **TypeScript library:** universal helper library for account creation and transaction structures — see [typescript/README.md](typescript/README.md) for usage and API.
 
 Repository layout (top-level):
 - `solidity/` — smart account, factory, tests, and deploy scripts

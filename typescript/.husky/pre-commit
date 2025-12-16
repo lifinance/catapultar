@@ -1,0 +1,4 @@
+cd typescript
+bun run build
+bun test
+bunx lint-staged

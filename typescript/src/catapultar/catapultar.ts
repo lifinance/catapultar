@@ -21,7 +21,7 @@ import CATAPULTAR_V0_1_0_ABI from "../abi/catapultarV0.1.0";
  */
 export class CatapultarTx<
   V extends Version = "0.1.0",
-  RPC extends string | undefined = undefined
+  RPC extends string | undefined = undefined,
 > extends CatapultarAccount<V, RPC> {
   /** Signature for the transaction. */
   signature?: `0x${string}`;
@@ -98,7 +98,7 @@ export class CatapultarTx<
   setNonce(nonce: bigint) {
     if (nonce === 0n)
       throw new Error(
-        `Nonce 0 is not allowed. It cannot be differentiated from an invalid nonce.`
+        `Nonce 0 is not allowed. It cannot be differentiated from an invalid nonce.`,
       );
     this.nonce = nonce;
     return this;
@@ -142,9 +142,9 @@ export class CatapultarTx<
    */
   async sign(
     callback: (
-      options: ReturnType<typeof this.getSignerData>
+      options: ReturnType<typeof this.getSignerData>,
     ) => Promise<string>,
-    options?: { ignoreNoCalls?: boolean }
+    options?: { ignoreNoCalls?: boolean },
   ) {
     const signerData = this.getSignerData(options);
 
@@ -209,7 +209,7 @@ export class CatapultarTx<
     const { ignoreNoCalls = false } = options ?? {};
     if (this.nonce === 0n)
       throw new Error(
-        `Nonce 0 is not allowed. It cannot be differentiated from an invalid nonce.`
+        `Nonce 0 is not allowed. It cannot be differentiated from an invalid nonce.`,
       );
     if (!this.nonce) throw new Error("Nonce has not been set");
     if (!this.mode) throw new Error("Mode has not been set");
@@ -264,7 +264,7 @@ export class CatapultarTx<
   }): Promise<`0x${string}`> {
     if (this.nonce === 0n)
       throw new Error(
-        "Nonce 0 is not allowed. It cannot be differentiated from an invalid nonce."
+        "Nonce 0 is not allowed. It cannot be differentiated from an invalid nonce.",
       );
     if (!this.nonce) throw new Error("No nonce has been set");
     const { compactSignature = true } = options ?? {};
@@ -280,7 +280,7 @@ export class CatapultarTx<
   async getExecutionData() {
     return encodeAbiParameters(
       [{ type: "tuple[]", components: CallsTyped.Call }, { type: "bytes" }],
-      [this.calls, await this.getOpData()]
+      [this.calls, await this.getOpData()],
     );
   }
 
@@ -324,7 +324,7 @@ export class CatapultarTx<
  */
 export class MetaCatapultarTx<
   V extends Version = "0.1.0",
-  RPC extends string | undefined = undefined
+  RPC extends string | undefined = undefined,
 > extends CatapultarAccount<V, RPC> {
   mode?: ExecutionMode;
   nonce?: bigint;
@@ -385,7 +385,7 @@ export class MetaCatapultarTx<
   checkNonces() {
     const nonces = this.calls.map((tx) => tx.nonce).filter((n) => !!n);
     if ([...new Set(nonces)].length != nonces.length)
-      throw new Error(`Dublicate nonces were found: ${nonces}`);
+      throw new Error(`Duplicate nonces were found: ${nonces}`);
     return this;
   }
 
@@ -408,7 +408,7 @@ export class MetaCatapultarTx<
       .setNonce(this.outerNonce)
       .setMode(this.mode ?? ExecutionMode.SkipRevert)
       .addCall(
-        ...(await Promise.all(this.getCallsAsTxs().map((c) => c.asCall())))
+        ...(await Promise.all(this.getCallsAsTxs().map((c) => c.asCall()))),
       );
   }
 }

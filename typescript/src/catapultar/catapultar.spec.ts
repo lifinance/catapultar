@@ -79,7 +79,7 @@ describe("Catapultar", () => {
       expect(domainSeperator.version).toBe("0.0.1");
       expect(domainSeperator.chainId).toBe(1);
       expect(domainSeperator.verifyingContract).toBe(
-        "0x1111111111111111111111111111111111111111"
+        "0x1111111111111111111111111111111111111111",
       );
 
       const txNext = new CatapultarTx({
@@ -97,7 +97,7 @@ describe("Catapultar", () => {
       expect(domainSeperatorNext.version).toBe("0.1.0");
       expect(domainSeperatorNext.chainId).toBe(2);
       expect(domainSeperatorNext.verifyingContract).toBe(
-        "0x1111111111111111111111111111111111111112"
+        "0x1111111111111111111111111111111111111112",
       );
     });
 
@@ -123,10 +123,10 @@ describe("Catapultar", () => {
           });
         expect(await tx.hasValidSignature()).toBe(false);
         expect(await tx.hasValidSignature({ noSignatureIsValid: false })).toBe(
-          false
+          false,
         );
         expect(await tx.hasValidSignature({ noSignatureIsValid: true })).toBe(
-          true
+          true,
         );
 
         const digest = tx.getTypeHash({ ignoreNoCalls: true });
@@ -135,12 +135,12 @@ describe("Catapultar", () => {
 
         expect(await tx.hasValidSignature()).toBe(true);
         expect(await tx.hasValidSignature({ noSignatureIsValid: true })).toBe(
-          true
+          true,
         );
         expect(await tx.hasValidSignature({ noSignatureIsValid: true })).toBe(
-          true
+          true,
         );
-      }
+      },
     );
 
     it.concurrent("should allow you to BYO signer", async () => {
@@ -163,15 +163,15 @@ describe("Catapultar", () => {
         });
       expect(await tx.hasValidSignature()).toBe(false);
       expect(await tx.hasValidSignature({ noSignatureIsValid: false })).toBe(
-        false
+        false,
       );
       expect(await tx.hasValidSignature({ noSignatureIsValid: true })).toBe(
-        true
+        true,
       );
 
       // ! Wrap the signing function to carry over the context of wallet !
       await tx.sign(({ domain, types, primaryType, message }) =>
-        account.signTypedData({ domain, types, primaryType, message })
+        account.signTypedData({ domain, types, primaryType, message }),
       );
 
       // Check that it matches manual sign
@@ -181,7 +181,7 @@ describe("Catapultar", () => {
       expect(tx.signature).toBe(signature);
 
       expect(await tx.hasValidSignature({ noSignatureIsValid: false })).toBe(
-        true
+        true,
       );
     });
 
@@ -218,7 +218,7 @@ describe("Catapultar", () => {
       expect(opDataWithSignature.startsWith("0x")).toBe(true);
       expect(opDataWithSignature.length).toBe(2 + 194);
       expect(
-        opDataWithSignature.endsWith(tx.signature!.replace("0x", ""))
+        opDataWithSignature.endsWith(tx.signature!.replace("0x", "")),
       ).toBe(true);
 
       const opDataWithCompactSignature = await tx.getOpData({
@@ -262,7 +262,7 @@ describe("Catapultar", () => {
       expect(batchTx.nonce).toBe(outerNonce);
     });
 
-    it.concurrent("should validate that nonces are not dublicates", () => {
+    it.concurrent("should validate that nonces are not Duplicates", () => {
       const address = "0x1111111111111111111111111111111111111111";
       const call = {
         calls: [
@@ -284,10 +284,10 @@ describe("Catapultar", () => {
       });
       mTx.addCalls(...calls);
       expect(() => mTx.checkNonces()).toThrow(
-        "Dublicate nonces were found: 5,5"
+        "Duplicate nonces were found: 5,5",
       );
       expect(() => mTx.asCatapultarTx()).toThrow(
-        "Dublicate nonces were found: 5,5"
+        "Duplicate nonces were found: 5,5",
       );
     });
   });
@@ -340,7 +340,7 @@ describe("Catapultar", () => {
 
       // This is our validation statement. We will be transfering the value to this address.
       expect(await publicClient.getBalance({ address: owner.address })).toBe(
-        0n
+        0n,
       );
 
       // Generate our call.
@@ -360,7 +360,7 @@ describe("Catapultar", () => {
       await waitForTransaction(executionTransaction);
 
       expect(await publicClient.getBalance({ address: owner.address })).toBe(
-        value
+        value,
       );
     });
 
@@ -377,8 +377,8 @@ describe("Catapultar", () => {
       const targets = [random(20), random(20), random(20), random(20)];
       await Promise.all(
         targets.map(async (address) =>
-          expect(await publicClient.getBalance({ address })).toBe(0n)
-        )
+          expect(await publicClient.getBalance({ address })).toBe(0n),
+        ),
       );
 
       const calls = targets.map((a) => {
@@ -404,7 +404,7 @@ describe("Catapultar", () => {
       ).sign((...args) => owner.signTypedData(...args));
 
       const executionTransaction = await executor.sendTransaction(
-        await signedTx.asCall()
+        await signedTx.asCall(),
       );
       await waitForTransaction(executionTransaction);
 
@@ -412,8 +412,8 @@ describe("Catapultar", () => {
       await new Promise((resolve) => setTimeout(resolve, 1500));
       await Promise.all(
         targets.map(async (address) =>
-          expect(await publicClient.getBalance({ address })).toBe(value / 4n)
-        )
+          expect(await publicClient.getBalance({ address })).toBe(value / 4n),
+        ),
       );
     });
 
@@ -430,7 +430,7 @@ describe("Catapultar", () => {
       // Invalidate the nonce.
       let invalidateCall = await deployedAccountV010.getSpendNoncesCalls(
         referenceNonce,
-        referenceNonce + 1n
+        referenceNonce + 1n,
       );
       // Execute the invalidation on the account.
       let calldata = await (
@@ -450,7 +450,7 @@ describe("Catapultar", () => {
 
       // Invalidate more nonces.
       invalidateCall = await deployedAccountV010.getSpendNoncesCalls(
-        ...[...Array(1001).keys()].map((i) => BigInt(i) + referenceNonce)
+        ...[...Array(1001).keys()].map((i) => BigInt(i) + referenceNonce),
       );
       calldata = await (
         await new CatapultarTx({ account: deployedAccountV010 })
