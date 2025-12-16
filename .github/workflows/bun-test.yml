@@ -35,6 +35,13 @@ jobs:
         id: install
         working-directory: typescript
 
+      - name: Install Anvil
+        uses: foundry-rs/foundry-toolchain@v1
+
+      - name: Start anvil
+        run: anvil --state anvil.state 2>&1 &
+        working-directory: typescript
+
       - name: Generate lcov
         run: bun run lcov
         id: coverage
