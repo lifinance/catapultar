@@ -4,7 +4,7 @@ Catapultar is a compact TypeScript library for managing Catapultar smart account
 
 ## Key Features
 - Lightweight TypeScript utilities for interacting with the Catapultar smart account
-- Ethers and viem compatiblity.
+- Ethers and viem compatibility.
 - Natural language transaction creation.
 - Helpers for account and factory interactions to simplify common tasks
 
@@ -84,7 +84,7 @@ const call = (await tx.addCalls(...calls).sign((v) => viemWalletClient.signTyped
 
 viemWalletClient.sendTransaction({
   account,
-  ...call // unpact call into viem. 
+  ...call // unpack call into viem. 
 });
 ```
 

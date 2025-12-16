@@ -86,6 +86,7 @@ export class CatapultarTx<
       mode: this.mode,
       nonce: this.nonce,
       signature: this.signature,
+      calls: this.calls,
     };
   }
 
@@ -158,7 +159,7 @@ export class CatapultarTx<
     return Object.values(ExecutionMode).includes(this.mode);
   }
 
-  hasValidSignature(options?: { noSignatureIsValid?: boolean }) {
+  async hasValidSignature(options?: { noSignatureIsValid?: boolean }) {
     const { noSignatureIsValid = false } = options ?? {};
     if (this.signature === undefined) return noSignatureIsValid;
     return this.isSignatureValid({
@@ -349,7 +350,8 @@ export class MetaCatapultarTx<
     outerNonce?: bigint;
     innerNonce?: bigint;
   }) {
-    const randomNonce = BigInt(random(31) + "00");
+    // Random bytes with rightmost byte empty.
+    const randomNonce = BigInt(random(31)) << 8n;
     const {
       mode,
       nonce,

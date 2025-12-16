@@ -91,7 +91,7 @@ export class CatapultarAccount<
       version = readVersion as V;
     } else {
       version = options.version;
-      if (version === `0.0.1` || !(version in Object.keys(factories))) {
+      if (version === `0.0.1` || !(Object.keys(factories).includes(version))) {
         throw new Error(`Unsupported version: ${version}`);
       }
       factory = factories[version]!;
@@ -204,7 +204,7 @@ export class CatapultarAccount<
 
   /**
    * @param nonce Starting nonce.
-   * @returns Next valid nonce that has not been spent on-chain yet.
+   * @returns Next valid nonce that has not been spent on-chain yet. If no nonce is found in the given attempts, -1 is returned.
    */
   async getNextValidNonce(
     this: CatapultarAccount<V, string>,
@@ -247,7 +247,7 @@ export class CatapultarAccount<
     const lookups: { [upper: string]: bigint } = {};
     for (const nonce of options.nonces) {
       const wordPos = nonce >> 8n;
-      const bitPos = nonce & 256n;
+      const bitPos = nonce & 255n;
       const val = lookups[wordPos.toString(16)];
       if (!val) lookups[wordPos.toString(16)] = 0n;
       if (val && val & (1n << bitPos))
