@@ -3,8 +3,8 @@ name: Forge Test & Coverage
 on:
   push:
     paths:
-      - 'solidity/**'
-      - 'foundry.toml'
+      - 'solidity/**',
+      - '.github/workflows/forge-test.yml'
   pull_request:
     paths:
       - 'solidity/**'
