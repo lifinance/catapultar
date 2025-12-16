@@ -42,7 +42,7 @@ Smart accounts are built for efficiency; To be used on Ethereum gas costs have t
 
 #### EIP-7702
 
-Catapular currently does not support EIP-7702, even though it would provide significant advantages. Using something like PREP or briefly generating a private key to initialize an account would substantially reduce account creation costs. However, this would require core changes to the codebase.
+Catapultar currently does not support EIP-7702, even though it would provide significant advantages. Using something like PREP or briefly generating a private key to initialize an account would substantially reduce account creation costs. However, this would require core changes to the codebase.
 
 In general, there are two main approaches to implementing EIP-7702 support for smart account creation:
 
