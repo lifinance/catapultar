@@ -34,7 +34,7 @@ export class CatapultarTx<
   mode?: ExecutionMode;
   /** Transaction nonce. Only 1 transaction can be executed for each nonce. */
   nonce?: bigint;
-  /** List of clalls the transaction contains. */
+  /** List of calls the transaction contains. */
   calls: Call[] = [];
 
   /**
@@ -120,7 +120,7 @@ export class CatapultarTx<
   }
 
   /**
-   * Sets a signature along with its type. If non-ecdsa signatures are being set, this provides additonal aids with encoding
+   * Sets a signature along with its type. If non-ecdsa signatures are being set, this provides additional aids with encoding
    */
   setSignature(signature: KeyedSignature<AKT>) {
     this.signature = this.parseSignature(signature)!;

@@ -1,7 +1,7 @@
 
 <h1 align="center">Catapultar</h1>
 
-Catapultar is an optimized smart account designed for reliable batch and scheduled execution. The main designs goals have been: broad chain compatibility, gas-efficient, and portable. It has been designed to extend of `ERC7821` to facilitate easy switching.
+Catapultar is an optimized smart account designed for reliable batch and scheduled execution. The main designs goals have been: broad chain compatibility, gas-efficient, and portable. It has been designed to extend from `ERC-7821` to facilitate easy switching.
 
 This repository is a mono-repo consisting of 
 - **Solidity contracts:** core account and factory implementation — see [solidity/README.md](solidity/README.md) for further details.

@@ -64,7 +64,10 @@ export class CatapultarAccount<
     this.chainId = chainId;
 
     // Validation
-    if (AccountKeyType.ECDSAOrSmartContract && Array.isArray(owner))
+    if (
+      accountKeyType === AccountKeyType.ECDSAOrSmartContract &&
+      Array.isArray(owner)
+    )
       throw new Error(
         `Only one key allowed for ECDSA or SmartContract: ${owner}`,
       );

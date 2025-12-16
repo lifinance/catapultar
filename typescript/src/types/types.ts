@@ -1,5 +1,5 @@
 /**
- * @param RaiseRevert If a call fails, raise the revert message and no not spend the nonce.
+ * @param RaiseRevert If a call fails, raise the revert message and do not spend the nonce.
  * @param SkipRevert If a call fails, skip the call, emit an event. The nonce will be spent if the transaction does not run out of gas.
  */
 export enum ExecutionMode {
