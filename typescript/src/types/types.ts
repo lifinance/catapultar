@@ -9,6 +9,8 @@ export enum ExecutionMode {
   SkipRevertMultiChain = '0x0101010000007821000100000000000000000000000000000000000000000000',
 }
 
+export type Version = `0.1.${string}` | "0.0.1";
+
 export type Executable = Call;
 // export type Signable = {
 //   domain: any,

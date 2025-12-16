@@ -5,7 +5,7 @@ pragma solidity ^0.8.30;
 // forge-lint: disable-start(erc20-unchecked-transfer)
 // forge-lint: disable-start(unchecked-call)
 
-import { Test } from "forge-std/Test.sol";
+import { Test } from "forge-std/src/Test.sol";
 
 import { ERC7821 } from "solady/src/accounts/ERC7821.sol";
 import { LibClone } from "solady/src/utils/LibClone.sol";
@@ -400,7 +400,7 @@ abstract contract CatapultarTest is Test {
         ERC7821.Call[] memory calls = new ERC7821.Call[](0);
         uint256 snapshot = vm.snapshot();
         {
-        bytes32 mode = 0x0100000000007821000100000000000000000000000000000000000000000000;
+            bytes32 mode = 0x0100000000007821000100000000000000000000000000000000000000000000;
             uint256 nonce = 1;
 
             bytes32 domainSeparator = EIP712(address(executor)).DOMAIN_SEPARATOR();
@@ -431,8 +431,9 @@ abstract contract CatapultarTest is Test {
                     address(executor)
                 )
             );
-            bytes32 msgHash =
-                keccak256(abi.encodePacked("\x19\x01", domainSeparator, this.typehash(nonce, multichainMode, calls)));
+            bytes32 msgHash = keccak256(
+                abi.encodePacked("\x19\x01", domainSeparator, this.typehash(nonce, multichainMode, calls))
+            );
             (uint8 v, bytes32 r, bytes32 s) = vm.sign(privateKey, msgHash);
             bytes memory signature = abi.encodePacked(r, s, v);
 

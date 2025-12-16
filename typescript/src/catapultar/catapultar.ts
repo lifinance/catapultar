@@ -1,16 +1,13 @@
-import {
-  encodeAbiParameters,
-  encodeFunctionData,
-  hashTypedData,
-} from "viem";
+import { encodeAbiParameters, encodeFunctionData, hashTypedData } from "viem";
 import { random, toHex } from "../utils/helpers";
 import {
   CallsTyped,
   ExecutionMode,
   type Call,
-  type Calls,
+  type Version,
 } from "../types/types";
-import { CatapultarAccount } from "./acccount";
+import { CatapultarAccount } from "./account";
+import CATAPULTAR_V0_1_0_ABI from "../abi/catapultarV0.1.0";
 
 // const abiencoder = AbiCoder.defaultAbiCoder();
 
@@ -22,7 +19,10 @@ import { CatapultarAccount } from "./acccount";
  * calls.push(new CatapultarTx(options).addCalls(...[]).asCall());
  * new CatapultarTx(options).addCalls(...calls).sign(() => ...).asParameters();
  */
-export class CatapultarTx extends CatapultarAccount {
+export class CatapultarTx<
+  V extends Version = "0.1.0",
+  RPC extends string | undefined = undefined
+> extends CatapultarAccount<V, RPC> {
   /** Signature for the transaction. */
   signature?: `0x${string}`;
 
@@ -46,9 +46,10 @@ export class CatapultarTx extends CatapultarAccount {
           chainId: number;
           owner: `0x${string}`;
           name?: string;
-          version?: string;
+          version?: V;
+          rpc?: RPC;
         }
-      | CatapultarAccount;
+      | CatapultarAccount<V, RPC>;
     mode?: ExecutionMode;
     nonce?: bigint;
     calls?: Call[];
@@ -139,41 +140,28 @@ export class CatapultarTx extends CatapultarAccount {
    * An alternative way to sign this function is to set it manually as .signature.
    */
   async sign(
-    callback: (
-      domain: {
-        name: string;
-        version: string;
-        chainId: number;
-        verifyingContract: `0x${string}`;
-      },
-      types: typeof CallsTyped,
-      value: Calls
-    ) => Promise<string>,
+    callback: (options: ReturnType<typeof this.getSignerData>) => Promise<string>,
     options?: { ignoreNoCalls?: boolean }
   ) {
     const signerData = this.getSignerData(options);
 
-    this.signature = (await callback(
-      signerData.domain,
-      signerData.types,
-      signerData.value
-    )) as `0x${string}`;
+    this.signature = (await callback(signerData)) as `0x${string}`;
     return this;
   }
 
   // --- Validation --- //
 
-  static readonly ACCOUNT_ABI = [
-    "function nonceBitmap(uint256) view external returns(uint256)",
-    "function owner() view external returns(address)",
-  ] as const;
+  hasValidMode() {
+    if (this.mode === undefined) return false;
+    return Object.values(ExecutionMode).includes(this.mode);
+  }
 
   hasValidSignature(options?: { noSignatureIsValid?: boolean }) {
     const { noSignatureIsValid = false } = options ?? {};
     if (this.signature === undefined) return noSignatureIsValid;
     return this.isSignatureValid({
       signature: this.signature,
-      typeHash: this.getTypeHash({ ignoreNoCalls: true }),
+      hash: this.getTypeHash({ ignoreNoCalls: true }),
     });
   }
 
@@ -183,17 +171,9 @@ export class CatapultarTx extends CatapultarAccount {
     return this;
   }
 
-  // private getAndCheckProvider() {
-  //   {
-  //     if (!this.provider) throw new Error(`No provider provided`);
-  //     return this.provider;
-  //   }
-  // }
-
-  async validateUsingProvider() {
-    // const provider = this.getAndCheckProvider();
-    // await this.validateNonce({ provider, nonce: this.nonce });
-    // await this.validateOwner({ provider });
+  async validateUsingProvider(this: CatapultarTx<V, string>) {
+    await this.validateNonce({ nonce: this.nonce });
+    await this.validateOwner();
 
     return this;
   }
@@ -236,23 +216,19 @@ export class CatapultarTx extends CatapultarAccount {
     return {
       domain: this.getDomainSeperator(),
       types: CallsTyped,
-      value: {
+      primaryType: "Calls",
+      message: {
         nonce: this.nonce,
         mode: this.mode,
         calls: this.calls,
       },
-    };
+    } as const;
   }
 
   getTypeHash(options?: { ignoreNoCalls?: boolean }) {
     const signerData = this.getSignerData(options);
 
-    return hashTypedData({
-      domain: signerData.domain,
-      types: signerData.types,
-      primaryType: "Calls",
-      message: signerData.value,
-    }) as `0x${string}`;
+    return hashTypedData(signerData);
   }
 
   /**
@@ -323,12 +299,12 @@ export class CatapultarTx extends CatapultarAccount {
    * @return As a call for further scheduling or manual transaction signing. If used for manual transaction.
    */
   async asCall(): Promise<Call> {
+    if (!this.hasValidMode()) throw new Error(`Mode incorrectly set: ${this.mode}`);
+    const executionData = await this.getExecutionData();
     const data = encodeFunctionData({
-      abi: [
-        "function execute(bytes32 mode, bytes calldata executionData) external",
-      ] as const,
+      abi: CATAPULTAR_V0_1_0_ABI,
       functionName: "execute",
-      args: [this.mode, await this.getExecutionData()],
+      args: [this.mode!, executionData],
     });
     return {
       to: this.address,
@@ -342,7 +318,10 @@ export class CatapultarTx extends CatapultarAccount {
  * This defines a meta transaction composed of several smaller transactions.
  * Intended usecase: Wrapping multiple transactions (that can later be retried) into a single batch.
  */
-export class MetaCatapultarTx extends CatapultarAccount {
+export class MetaCatapultarTx<
+  V extends Version = "0.1.0",
+  RPC extends string | undefined = undefined
+> extends CatapultarAccount<V, RPC> {
   mode?: ExecutionMode;
   nonce?: bigint;
   calls: { calls: Call[]; nonce?: bigint; mode?: ExecutionMode }[] = [];
@@ -357,9 +336,10 @@ export class MetaCatapultarTx extends CatapultarAccount {
           chainId: number;
           owner: `0x${string}`;
           name?: string;
-          version?: string;
+          version?: V;
+          rpc?: RPC;
         }
-      | CatapultarAccount;
+      | CatapultarAccount<V, RPC>;
     mode?: ExecutionMode;
     nonce?: bigint;
     signature?: `0x${string}`;

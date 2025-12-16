@@ -4,7 +4,7 @@ pragma solidity ^0.8.30;
 // forge-lint: disable-start(unsafe-typecast)
 // forge-lint: disable-start(unchecked-call)
 
-import { Test } from "forge-std/Test.sol";
+import { Test } from "forge-std/src/Test.sol";
 
 import { ERC7821 } from "solady/src/accounts/ERC7821.sol";
 import { LibZip } from "solady/src/utils/LibZip.sol";
@@ -141,8 +141,9 @@ contract IntegrationTest is Test {
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(key, digest);
         bytes memory signature = abi.encodePacked(r, s, v);
 
-        bytes memory callPayload =
-            abi.encodeCall(ERC7821.execute, (REVERT_MODE, abi.encode(globalCall, abi.encodePacked(nonce, signature))));
+        bytes memory callPayload = abi.encodeCall(
+            ERC7821.execute, (REVERT_MODE, abi.encode(globalCall, abi.encodePacked(nonce, signature)))
+        );
 
         // Zip the calldata for efficiency.
         bytes memory compressedCallPayload = LibZip.cdCompress(callPayload);

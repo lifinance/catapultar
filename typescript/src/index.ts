@@ -1,4 +1,4 @@
-export { CatapultarAccount } from "./catapultar/acccount";
+export { CatapultarAccount } from "./catapultar/account";
 export { CatapultarFactory } from "./catapultar/factory";
 export { CatapultarTx, MetaCatapultarTx } from "./catapultar/catapultar";
 

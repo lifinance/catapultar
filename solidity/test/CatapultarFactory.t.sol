@@ -3,7 +3,7 @@ pragma solidity ^0.8.30;
 
 // forge-lint: disable-start(unsafe-typecast)
 
-import { Test } from "forge-std/Test.sol";
+import { Test } from "forge-std/src/Test.sol";
 
 import { CatapultarFactory } from "../src/CatapultarFactory.sol";
 import { KeyedOwnable } from "../src/libs/KeyedOwnable.sol";
@@ -96,8 +96,9 @@ contract CatapultarFactoryTest is Test {
         bytes32[] memory keys = new bytes32[](1);
         keys[0] = bytes32(uint256(uint160(owner)));
 
-        address predictedDeployedTo =
-            factory.predictDeployWithDigest(KeyedOwnable.KeyType.ECDSAOrSmartContract, keys, salt, embeddedCall, false);
+        address predictedDeployedTo = factory.predictDeployWithDigest(
+            KeyedOwnable.KeyType.ECDSAOrSmartContract, keys, salt, embeddedCall, false
+        );
 
         address deployedTo =
             factory.deployWithDigest(KeyedOwnable.KeyType.ECDSAOrSmartContract, keys, salt, embeddedCall, false);

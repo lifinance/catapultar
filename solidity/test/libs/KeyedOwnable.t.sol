@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 pragma solidity ^0.8.30;
 
-import { Test } from "forge-std/Test.sol";
+import { Test } from "forge-std/src/Test.sol";
 
 import { KeyedOwnable } from "../../src/libs/KeyedOwnable.sol";
 
@@ -24,8 +24,8 @@ contract P256VerifierEtcher is Test {
         bool active
     ) internal {
         if (target == P256.RIP_PRECOMPILE) {
-            if (active && _hasNativeRIPPrecompile()) return;
-            if (!active && _hasNativeRIPPrecompile()) {
+            if (active && _hasNativeRipPrecompile()) return;
+            if (!active && _hasNativeRipPrecompile()) {
                 /// @solidity memory-safe-assembly
                 assembly {
                     return(0x00, 0x00)
@@ -37,7 +37,7 @@ contract P256VerifierEtcher is Test {
         else if (target.code.length != 0) vm.etch(target, "");
     }
 
-    function _hasNativeRIPPrecompile() internal view returns (bool) {
+    function _hasNativeRipPrecompile() internal view returns (bool) {
         return P256.hasPrecompile() && P256.RIP_PRECOMPILE.code.length == 0;
     }
 
@@ -55,7 +55,7 @@ contract P256VerifierEtcher is Test {
         _etchBytecode(target, _VERIFIER_BYTECODE, active);
     }
 
-    function _etchRIPPrecompilePassthrough(
+    function _etchRipPrecompilePassthrough(
         bool active
     ) internal {
         _etchPassthroughBytecode(P256.RIP_PRECOMPILE, active);
@@ -67,7 +67,7 @@ contract P256VerifierEtcher is Test {
         _etchPassthroughBytecode(P256.VERIFIER, active);
     }
 
-    function _etchRIPPrecompile(
+    function _etchRipPrecompile(
         bool active
     ) internal {
         _etchVerifierBytecode(P256.RIP_PRECOMPILE, active);
@@ -98,7 +98,7 @@ contract KeyedOwnableTest is P256VerifierEtcher {
     }
 
     function setUp() public {
-        _etchRIPPrecompile(true);
+        _etchRipPrecompile(true);
         _etchVerifier(true);
 
         ownable = new MockKeyedOwnable();
