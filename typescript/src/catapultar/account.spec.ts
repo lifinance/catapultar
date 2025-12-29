@@ -4,6 +4,7 @@ import { anvil } from "viem/chains";
 import { CatapultarAccount } from "./account";
 import { random, asHex } from "../utils/helpers";
 import { rpcUrl } from "../../test/setup";
+import { AccountKeyType } from "../types/types";
 
 const chainId = 31337;
 const PUBLIC_DEFAULT_ANVIL_ACCOUNT_0 =
@@ -33,6 +34,7 @@ describe("Catapultar Account 0.1.0", () => {
   beforeAll(async () => {
     const deployCall010 = await CatapultarAccount.deploy({
       chainId,
+      ownerType: AccountKeyType.ECDSAOrSmartContract,
       owner: owner.address,
       salt: `0x${asHex(0n, 20)}${random(12).replace("0x", "")}`,
       rpc: rpcUrl(),

@@ -14,7 +14,7 @@ export enum AccountKeyType {
   WebAuthnP256 = 2,
 }
 
-type P256Points = [`0x${string}`, `0x${string}`];
+export type P256Points = [`0x${string}`, `0x${string}`];
 export type AccountPublicVar<T extends AccountKeyType> =
   T extends AccountKeyType.ECDSAOrSmartContract ? `0x${string}` : P256Points;
 

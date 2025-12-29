@@ -1,9 +1,16 @@
-import { privateKeyToAccount } from "viem/accounts";
+import { privateKeyToAccount, type PrivateKeyAccount } from "viem/accounts";
 import { random, asHex } from "../utils/helpers";
 import { CatapultarTx, MetaCatapultarTx } from "./catapultar";
-import { ExecutionMode } from "../types/types";
+import { AccountKeyType, ExecutionMode, type P256Points } from "../types/types";
 import { anvil } from "viem/chains";
-import { createPublicClient, createWalletClient, http } from "viem";
+import {
+  createPublicClient,
+  createWalletClient,
+  hashTypedData,
+  http,
+} from "viem";
+import { Account } from "viem/tempo";
+import { P256 } from "ox";
 import { CatapultarAccount } from "./account";
 import { rpcUrl } from "../../test/setup";
 
@@ -292,180 +299,221 @@ describe("Catapultar", () => {
     });
   });
 
-  describe("Integration", () => {
-    const publicClient = createPublicClient({
-      chain: anvil,
-      transport: http(rpcUrl()),
+  function p256signFunction(privateKey: `0x${string}`) {
+    return async (...args: Parameters<typeof hashTypedData>) => {
+      const payload = hashTypedData(...args);
+      const signedPayload = P256.sign({ payload, privateKey });
+      const { x, y } = P256.getPublicKey({ privateKey });
+      return `0x${asHex(signedPayload.r, 32, "")}${asHex(signedPayload.s, 32, "")}`;
+    };
+  }
+
+  const integrationTest = (
+    keyType: AccountKeyType.ECDSAOrSmartContract | AccountKeyType.P256,
+  ) =>
+    describe(`Integration ${keyType}`, () => {
+      const publicClient = createPublicClient({
+        chain: anvil,
+        transport: http(rpcUrl()),
+      });
+
+      const privateKey =
+        keyType === AccountKeyType.ECDSAOrSmartContract
+          ? random(32)
+          : P256.randomPrivateKey();
+      const p256PubKey = (privateKey: `0x${string}`) => {
+        const { x, y } = P256.getPublicKey({ privateKey });
+        return [asHex(x, 32, "0x"), asHex(y, 32, "0x")] as P256Points;
+      };
+      const owner =
+        keyType === AccountKeyType.ECDSAOrSmartContract
+          ? privateKeyToAccount(privateKey)
+          : { signTypedData: p256signFunction(privateKey) };
+
+      const publicKey =
+        keyType === AccountKeyType.ECDSAOrSmartContract
+          ? (owner as PrivateKeyAccount).address
+          : p256PubKey(privateKey);
+
+      const oftenTargetAddress = random(20); // This is acting as a random address.
+
+      const a = Account.fromP256(privateKey);
+      a.signTypedData;
+
+      const wallet = privateKeyToAccount(PUBLIC_DEFAULT_ANVIL_ACCOUNT_0);
+      const executor = createWalletClient({
+        account: wallet,
+        chain: anvil,
+        transport: http(rpcUrl()),
+      });
+
+      let deployedAccountV010: CatapultarAccount<
+        "0.1.0",
+        string,
+        typeof keyType
+      >;
+
+      beforeEach(async () => {
+        const deployCall010 = await CatapultarAccount.deploy({
+          chainId,
+          ownerType: keyType,
+          owner: publicKey,
+          salt: `0x${asHex(0n, 20)}${random(12).replace("0x", "")}`,
+          rpc: rpcUrl(),
+          factory: factories["0.1.0"],
+          version: "0.1.0",
+        });
+        deployedAccountV010 = deployCall010.account;
+        const tx = await executor.sendTransaction({
+          ...deployCall010.call,
+        });
+        await waitForTransaction(tx);
+      });
+
+      it.serial("should be able to call", async () => {
+        const tx = new CatapultarTx({
+          account: deployedAccountV010,
+        });
+
+        // Send tokens to the account.
+        const value = 1000000000000000000n;
+        const transferTransaction = await executor.sendTransaction({
+          to: deployedAccountV010.address,
+          value,
+        });
+        await waitForTransaction(transferTransaction);
+
+        // This is our validation statement. We will be transferring the value to this address.
+        expect(
+          await publicClient.getBalance({ address: oftenTargetAddress }),
+        ).toBe(0n);
+
+        // Generate our call.
+        const calldata = await (
+          await tx
+            .setRandomNonce()
+            .setMode(ExecutionMode.RaiseRevert)
+            .addCall({
+              to: oftenTargetAddress,
+              value,
+              data: "0x",
+            })
+            .sign((...args) => owner.signTypedData(...args))
+        ).asCall();
+
+        const executionTransaction = await executor.sendTransaction(calldata);
+        await waitForTransaction(executionTransaction);
+
+        expect(
+          await publicClient.getBalance({ address: oftenTargetAddress }),
+        ).toBe(value);
+      });
+
+      it.serial("execute meta transaction", async () => {
+        // Send tokens to the account.
+        const value = 1000000000000000000n;
+        const transferTransaction = await executor.sendTransaction({
+          to: deployedAccountV010.address,
+          value,
+        });
+        await waitForTransaction(transferTransaction);
+
+        // Lets make 4 transactions that we will batch.
+        const targets = [random(20), random(20), random(20), random(20)];
+        await Promise.all(
+          targets.map(async (address) =>
+            expect(await publicClient.getBalance({ address })).toBe(0n),
+          ),
+        );
+
+        const calls = targets.map((a) => {
+          return {
+            calls: [
+              {
+                to: a,
+                value: value / 4n,
+                data: random(32),
+              },
+            ],
+          };
+        });
+        const metaTx = new MetaCatapultarTx({
+          account: deployedAccountV010,
+        });
+
+        const signedTx = await (
+          await metaTx
+            .setMode(ExecutionMode.SkipRevert)
+            .addCalls(...calls)
+            .asCatapultarTx()
+        ).sign((...args) => owner.signTypedData(...args));
+
+        const executionTransaction = await executor.sendTransaction(
+          await signedTx.asCall(),
+        );
+        await waitForTransaction(executionTransaction);
+
+        // just wait for a second.
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+        await Promise.all(
+          targets.map(async (address) =>
+            expect(await publicClient.getBalance({ address })).toBe(value / 4n),
+          ),
+        );
+      });
+
+      // --- Catapultar Account --- //
+
+      it.serial("get next valid nonce", async () => {
+        // Because we are running the above functions with some randomness, we need to use a reference as a random nonce...
+        const referenceNonce = BigInt(random(32));
+        let nextNonce = await deployedAccountV010.getNextValidNonce({
+          nonce: referenceNonce,
+        });
+        expect(nextNonce).toBe(referenceNonce);
+
+        // Invalidate the nonce.
+        let invalidateCall = await deployedAccountV010.getSpendNoncesCalls(
+          referenceNonce,
+          referenceNonce + 1n,
+        );
+        // Execute the invalidation on the account.
+        let calldata = await (
+          await new CatapultarTx({ account: deployedAccountV010 })
+            .setRandomNonce()
+            .setMode(ExecutionMode.RaiseRevert)
+            .addCall(...invalidateCall)
+            .sign((...args) => owner.signTypedData(...args))
+        ).asCall();
+        let executionTransaction = await executor.sendTransaction(calldata);
+        await waitForTransaction(executionTransaction);
+
+        nextNonce = await deployedAccountV010.getNextValidNonce({
+          nonce: referenceNonce,
+        });
+        expect(nextNonce).toBe(referenceNonce + 2n);
+
+        // Invalidate more nonces.
+        invalidateCall = await deployedAccountV010.getSpendNoncesCalls(
+          ...[...Array(1001).keys()].map((i) => BigInt(i) + referenceNonce),
+        );
+        calldata = await (
+          await new CatapultarTx({ account: deployedAccountV010 })
+            .setRandomNonce()
+            .setMode(ExecutionMode.RaiseRevert)
+            .addCall(...invalidateCall)
+            .sign((...args) => owner.signTypedData(...args))
+        ).asCall();
+        executionTransaction = await executor.sendTransaction(calldata);
+        await waitForTransaction(executionTransaction);
+
+        nextNonce = await deployedAccountV010.getNextValidNonce({
+          nonce: referenceNonce,
+        });
+        expect(nextNonce).toBe(referenceNonce + 1001n);
+      });
     });
 
-    const owner = privateKeyToAccount(random(32));
-
-    const wallet = privateKeyToAccount(PUBLIC_DEFAULT_ANVIL_ACCOUNT_0);
-    const executor = createWalletClient({
-      account: wallet,
-      chain: anvil,
-      transport: http(rpcUrl()),
-    });
-
-    let deployedAccountV010: CatapultarAccount<"0.1.0", string>;
-
-    beforeEach(async () => {
-      const deployCall010 = await CatapultarAccount.deploy({
-        chainId,
-        owner: owner.address,
-        salt: `0x${asHex(0n, 20)}${random(12).replace("0x", "")}`,
-        rpc: rpcUrl(),
-        factory: factories["0.1.0"],
-        version: "0.1.0",
-      });
-      deployedAccountV010 = deployCall010.account;
-      const tx = await executor.sendTransaction({
-        ...deployCall010.call,
-      });
-      await waitForTransaction(tx);
-    });
-
-    it.serial("should be able to call", async () => {
-      const tx = new CatapultarTx({
-        account: deployedAccountV010,
-      });
-
-      // Send tokens to the account.
-      const value = 1000000000000000000n;
-      const transferTransaction = await executor.sendTransaction({
-        to: deployedAccountV010.address,
-        value,
-      });
-      await waitForTransaction(transferTransaction);
-
-      // This is our validation statement. We will be transferring the value to this address.
-      expect(await publicClient.getBalance({ address: owner.address })).toBe(
-        0n,
-      );
-
-      // Generate our call.
-      const calldata = await (
-        await tx
-          .setRandomNonce()
-          .setMode(ExecutionMode.RaiseRevert)
-          .addCall({
-            to: owner.address,
-            value,
-            data: "0x",
-          })
-          .sign((...args) => owner.signTypedData(...args))
-      ).asCall();
-
-      const executionTransaction = await executor.sendTransaction(calldata);
-      await waitForTransaction(executionTransaction);
-
-      expect(await publicClient.getBalance({ address: owner.address })).toBe(
-        value,
-      );
-    });
-
-    it.serial("execute meta transaction", async () => {
-      // Send tokens to the account.
-      const value = 1000000000000000000n;
-      const transferTransaction = await executor.sendTransaction({
-        to: deployedAccountV010.address,
-        value,
-      });
-      await waitForTransaction(transferTransaction);
-
-      // Lets make 4 transactions that we will batch.
-      const targets = [random(20), random(20), random(20), random(20)];
-      await Promise.all(
-        targets.map(async (address) =>
-          expect(await publicClient.getBalance({ address })).toBe(0n),
-        ),
-      );
-
-      const calls = targets.map((a) => {
-        return {
-          calls: [
-            {
-              to: a,
-              value: value / 4n,
-              data: random(32),
-            },
-          ],
-        };
-      });
-      const metaTx = new MetaCatapultarTx({
-        account: deployedAccountV010,
-      });
-
-      const signedTx = await (
-        await metaTx
-          .setMode(ExecutionMode.SkipRevert)
-          .addCalls(...calls)
-          .asCatapultarTx()
-      ).sign((...args) => owner.signTypedData(...args));
-
-      const executionTransaction = await executor.sendTransaction(
-        await signedTx.asCall(),
-      );
-      await waitForTransaction(executionTransaction);
-
-      // just wait for a second.
-      await new Promise((resolve) => setTimeout(resolve, 1500));
-      await Promise.all(
-        targets.map(async (address) =>
-          expect(await publicClient.getBalance({ address })).toBe(value / 4n),
-        ),
-      );
-    });
-
-    // --- Catapultar Account --- //
-
-    it.serial("get next valid nonce", async () => {
-      // Because we are running the above functions with some randomness, we need to use a reference as a random nonce...
-      const referenceNonce = BigInt(random(32));
-      let nextNonce = await deployedAccountV010.getNextValidNonce({
-        nonce: referenceNonce,
-      });
-      expect(nextNonce).toBe(referenceNonce);
-
-      // Invalidate the nonce.
-      let invalidateCall = await deployedAccountV010.getSpendNoncesCalls(
-        referenceNonce,
-        referenceNonce + 1n,
-      );
-      // Execute the invalidation on the account.
-      let calldata = await (
-        await new CatapultarTx({ account: deployedAccountV010 })
-          .setRandomNonce()
-          .setMode(ExecutionMode.RaiseRevert)
-          .addCall(...invalidateCall)
-          .sign((...args) => owner.signTypedData(...args))
-      ).asCall();
-      let executionTransaction = await executor.sendTransaction(calldata);
-      await waitForTransaction(executionTransaction);
-
-      nextNonce = await deployedAccountV010.getNextValidNonce({
-        nonce: referenceNonce,
-      });
-      expect(nextNonce).toBe(referenceNonce + 2n);
-
-      // Invalidate more nonces.
-      invalidateCall = await deployedAccountV010.getSpendNoncesCalls(
-        ...[...Array(1001).keys()].map((i) => BigInt(i) + referenceNonce),
-      );
-      calldata = await (
-        await new CatapultarTx({ account: deployedAccountV010 })
-          .setRandomNonce()
-          .setMode(ExecutionMode.RaiseRevert)
-          .addCall(...invalidateCall)
-          .sign((...args) => owner.signTypedData(...args))
-      ).asCall();
-      executionTransaction = await executor.sendTransaction(calldata);
-      await waitForTransaction(executionTransaction);
-
-      nextNonce = await deployedAccountV010.getNextValidNonce({
-        nonce: referenceNonce,
-      });
-      expect(nextNonce).toBe(referenceNonce + 1001n);
-    });
-  });
+  integrationTest(AccountKeyType.ECDSAOrSmartContract);
+  integrationTest(AccountKeyType.P256);
 });

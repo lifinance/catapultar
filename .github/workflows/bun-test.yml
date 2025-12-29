@@ -39,7 +39,7 @@ jobs:
         uses: foundry-rs/foundry-toolchain@v1
 
       - name: Generate lcov
-        run: bun run lcov
+        run: bun run coverage:lcov
         id: coverage
         working-directory: typescript
 

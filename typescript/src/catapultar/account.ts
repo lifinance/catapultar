@@ -20,7 +20,8 @@ import CATAPULTAR_V0_1_0_ABI from "../abi/catapultarV0.1.0";
 import CATAPULTAR_FACTORY_V0_1_0_ABI from "../abi/catapultarFactoryV0.1.0";
 import { padEven, asHex } from "../utils/helpers";
 // import { CATAPULTAR_V0_0_1_ABI } from "../abi/catapultarV0.0.1";
-import { PublicKey, WebAuthnP256, WebCryptoP256 } from "ox";
+import { P256, PublicKey, WebAuthnP256 } from "ox";
+import { fromCompactSignature } from "../utils/signature";
 
 const factories: Record<string, `0x${string}`> = {
   "0.1.0": "0x",
@@ -90,15 +91,16 @@ export class CatapultarAccount<
     this.version = version;
   }
 
-  static async deploy<V extends Version>(
+  static async deploy<V extends Version, AKT extends AccountKeyType>(
     options: {
       chainId: number;
-      owner: `0x${string}`;
       salt: `0x${string}` | bigint;
       rpc: string;
+      ownerType: AKT;
+      owner: AccountPublicVar<AKT>;
     } & ({ version: V } | { factory: `0x${string}` }),
-  ): Promise<{ call: Call; account: CatapultarAccount<V, string> }> {
-    const { rpc, chainId, owner } = options;
+  ): Promise<{ call: Call; account: CatapultarAccount<V, string, AKT> }> {
+    const { rpc, chainId } = options;
     let factory: `0x${string}`;
     let version: V;
     const viemChain = getViemChainId(chainId);
@@ -121,9 +123,40 @@ export class CatapultarAccount<
       }
       factory = factories[version]!;
     }
-    const ownerArray = [
-      `0x${padEven(owner.replace("0x", ""), 64)}`,
-    ] as `0x${string}`[];
+
+    let ownerArray: `0x${string}`[];
+    // Create owner array.
+    if (options.ownerType === AccountKeyType.ECDSAOrSmartContract) {
+      if (typeof options.owner !== "string")
+        throw new Error(`Ownertype not expected ${typeof options.owner}`);
+      // Check owner is formatted correctly. Either 20 bytes or 32 bytes with first 12 bytes empty.
+      const ownerAddress = options.owner.replace("0x", "");
+      if (
+        !(
+          ownerAddress.length === 20 * 2 ||
+          (ownerAddress.length === 32 * 2 &&
+            ownerAddress.slice(0, 12 * 2) === "000000000000000000000000")
+        )
+      )
+        throw new Error(`Owner address incorrectly formatted: ${ownerAddress}`);
+
+      // Validate that owner is `0x${string}`
+      ownerArray = [`0x${padEven(ownerAddress, 64)}`];
+    } else if (
+      options.ownerType === AccountKeyType.P256 ||
+      options.ownerType === AccountKeyType.WebAuthnP256
+    ) {
+      if (options.owner.length !== 2)
+        throw new Error(
+          `Invalid owner array ${options.owner}, length ${options.owner.length} !== 2`,
+        );
+      ownerArray = options.owner as AccountPublicVar<
+        AccountKeyType.P256 | AccountKeyType.WebAuthnP256
+      >;
+    } else {
+      throw new Error(`Ownertype not supported ${options.ownerType}`);
+    }
+
     let salt = options.salt;
     if (typeof salt === "bigint") {
       salt = asHex(salt, 32, "0x");
@@ -134,7 +167,7 @@ export class CatapultarAccount<
       address: factory,
       abi: CATAPULTAR_FACTORY_V0_1_0_ABI,
       functionName: "predictDeploy",
-      args: [0, ownerArray, salt],
+      args: [options.ownerType as AccountKeyType, ownerArray, salt],
     });
 
     const call = {
@@ -142,7 +175,7 @@ export class CatapultarAccount<
       data: encodeFunctionData({
         abi: CATAPULTAR_FACTORY_V0_1_0_ABI,
         functionName: "deploy",
-        args: [0, ownerArray, salt],
+        args: [options.ownerType, ownerArray, salt],
       }),
       value: 0n,
     };
@@ -151,8 +184,9 @@ export class CatapultarAccount<
       call,
       account: new CatapultarAccount({
         address: expectedAddress,
+        accountKeyType: options.ownerType,
         chainId,
-        owner,
+        owner: options.owner,
         name: "Catapultar",
         version: version,
         rpc,
@@ -208,9 +242,9 @@ export class CatapultarAccount<
         signature as KeyedSignature<AccountKeyType.P256>
       ).replace("0x", "");
       // If the signature is 64 bytes long (default) or 65 (mistake?)
-      // then add 0001 to the signature. This indicate an additional SHA256 hash.
+      // then add 0000 to the signature. This indicate an additional SHA256 hash.
       if ([64 * 2, 65 * 2].includes(rawSignature.length)) {
-        rawSignature = `${padEven(rawSignature, 65)}${"01"}`;
+        rawSignature = `${padEven(rawSignature, 65)}${"00"}`;
       }
       return `0x${rawSignature}`;
     }
@@ -397,7 +431,10 @@ export class CatapultarAccount<
       if (signature && signature.length > 2) {
         signer = (await recoverAddress({
           hash: hash,
-          signature,
+          signature:
+            signature.length === 64 * 2 + 2
+              ? fromCompactSignature(signature)
+              : signature,
         })) as `0x${string}`;
       }
       if (this.owner === signer) return true;
@@ -422,20 +459,15 @@ export class CatapultarAccount<
     if ([64 * 2, 65 * 2].includes(signature.length)) {
       return false;
     }
-    // Get last byte.
-    const lastByte = signature.slice(signature.length - 2);
-    if (lastByte != "00")
-      throw new Error(`Library cannot validate non-sha256'ed hash`);
-
     const owner = this.owner as [`0x${string}`, `0x${string}`];
     const publicKey = PublicKey.from({
       x: BigInt(owner[0]),
       y: BigInt(owner[1]),
     });
     if (this.hasP256Key()) {
-      const r = BigInt(signature.replace("0x", "").slice(0, 64));
-      const s = BigInt(signature.replace("0x", "").slice(64, 128));
-      return await WebCryptoP256.verify({
+      const r = BigInt("0x" + signature.replace("0x", "").slice(0, 64));
+      const s = BigInt("0x" + signature.replace("0x", "").slice(64, 128));
+      return await P256.verify({
         payload: hash,
         publicKey,
         signature: { r, s },

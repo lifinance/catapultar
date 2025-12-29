@@ -11,6 +11,7 @@ import {
 } from "../types/types";
 import { CatapultarAccount } from "./account";
 import CATAPULTAR_V0_1_0_ABI from "../abi/catapultarV0.1.0";
+import { toCompactSignature } from "../utils/signature";
 
 // const abiencoder = AbiCoder.defaultAbiCoder();
 
@@ -149,7 +150,9 @@ export class CatapultarTx<
   ) {
     const signerData = this.getSignerData(options);
 
-    this.signature = (await callback(signerData)) as `0x${string}`;
+    this.signature = this.asCompatibleSignature(
+      (await callback(signerData)) as `0x${string}`,
+    );
     return this;
   }
 
@@ -242,22 +245,40 @@ export class CatapultarTx<
   /**
    * Returns the signature as a compact signature of 64 bytes instead of 65 bytes.
    *
-   * @param signature Signature. If already compact, returns as is.
+   * @param Signature If provided, will act on the provided signature instead.
    */
-  asCompactSignature(): `0x${string}` {
-    if (!this.signature) throw new Error("A signature has to be provided");
-    if (this.signature.replace("0x", "").length === 64 * 2)
-      return this.signature;
+  asCompactSignature(signature?: `0x${string}`): `0x${string}` {
+    const sig = signature ?? this.signature;
+    if (!sig) throw new Error("A signature has to be provided");
+    if (sig.replace("0x", "").length === 64 * 2) return sig;
     // If this is not an ECDSA sig, lets not touch it.
-    if (this.signature.replace("0x", "").length !== 65 * 2)
-      return this.signature;
+    if (sig.replace("0x", "").length !== 65 * 2) return sig;
 
-    const r = BigInt(`0x${this.signature.slice(2, 2 + 64)}`);
-    const s = BigInt(`0x${this.signature.slice(2 + 64, 2 + 64 + 64)}`);
-    const v = BigInt(`0x${this.signature.slice(2 + 64 + 64, 2 + 64 + 64 + 2)}`);
-    const normV = v >= 27 ? v - 27n : v;
-    const vAndS = (normV << 255n) | s;
-    return `0x${asHex(r, 32)}${asHex(vAndS, 32)}`;
+    return toCompactSignature(sig);
+  }
+
+  /**
+   * Returns the signature as a on-chain compatible signature with an indicator byte.
+   * For ECDSA / Smart contracts returns as is.
+   * For P256, pads to 65. Then adds 01.
+   *
+   * @param Signature If provided, will act on the provided signature instead.
+   */
+  asCompatibleSignature(signature?: `0x${string}`): `0x${string}` {
+    const sig = signature ?? this.signature;
+    if (!sig) throw new Error("A signature has to be provided");
+    if (this.accountKeyType === AccountKeyType.ECDSAOrSmartContract) return sig;
+
+    if (
+      this.accountKeyType === AccountKeyType.P256 ||
+      this.accountKeyType === AccountKeyType.WebAuthnP256
+    ) {
+      // If length >= 66, return as is.
+      if (sig.replace("0x", "").length >= 66 * 2) return sig;
+      // Pad end to 65. Then add 00.
+      return `0x${sig.replace("0x", "").padEnd(65 * 2, "0")}00`;
+    }
+    throw new Error(`Unknown key scheme ${this.accountKeyType}`);
   }
 
   /**
@@ -273,10 +294,14 @@ export class CatapultarTx<
       );
     if (!this.nonce) throw new Error("No nonce has been set");
     const { compactSignature = true } = options ?? {};
+    if (this.signature) {
+      this.signature = compactSignature
+        ? this.asCompactSignature()
+        : this.signature;
+    }
     await this.validateSignature({ noSignatureIsValid: true });
     if (this.signature) {
-      const sig = compactSignature ? this.asCompactSignature() : this.signature;
-      return `0x${asHex(this.nonce, 32)}${sig.replace("0x", "")}`;
+      return `0x${asHex(this.nonce, 32)}${this.signature.replace("0x", "")}`;
     } else {
       return asHex(this.nonce, 32, "0x");
     }
