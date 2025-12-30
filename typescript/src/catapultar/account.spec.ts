@@ -61,4 +61,70 @@ describe("Catapultar Account 0.1.0", () => {
     expect(publicClientOwner).toBe(expectedOwner);
     expect(onChainOwner).toBe(expectedOwner);
   });
+
+  it.serial("should deploy with digest call", async () => {
+    const digest = random(32);
+
+    const deployCall = await CatapultarAccount.deploy({
+      chainId,
+      ownerType: AccountKeyType.ECDSAOrSmartContract,
+      owner: owner.address,
+      salt: `0x${asHex(0n, 20)}${random(12).replace("0x", "")}`,
+      rpc: rpcUrl(),
+      factory: factories["0.1.0"],
+      version: "0.1.0",
+      callDigest: digest,
+      isSignature: false,
+    });
+    const tx = await executor.sendTransaction({
+      ...deployCall.call,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    // We need to wait for the transaction to be finalised.
+    await publicClient.getTransactionReceipt({ hash: tx });
+
+    const smartAccount = deployCall.account;
+
+    const approvalStatus = await publicClient.readContract({
+      address: smartAccount.address,
+      abi: smartAccount.abi(),
+      functionName: "approvedDigest",
+      args: [digest],
+    });
+
+    expect(approvalStatus).toBe(1);
+  });
+
+  it.serial("should deploy with digest signature", async () => {
+    const digest = random(32);
+
+    const deployCall = await CatapultarAccount.deploy({
+      chainId,
+      ownerType: AccountKeyType.ECDSAOrSmartContract,
+      owner: owner.address,
+      salt: `0x${asHex(0n, 20)}${random(12).replace("0x", "")}`,
+      rpc: rpcUrl(),
+      factory: factories["0.1.0"],
+      version: "0.1.0",
+      callDigest: digest,
+      isSignature: true,
+    });
+    const tx = await executor.sendTransaction({
+      ...deployCall.call,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    // We need to wait for the transaction to be finalised.
+    await publicClient.getTransactionReceipt({ hash: tx });
+
+    const smartAccount = deployCall.account;
+
+    const approvalStatus = await publicClient.readContract({
+      address: smartAccount.address,
+      abi: smartAccount.abi(),
+      functionName: "approvedDigest",
+      args: [digest],
+    });
+
+    expect(approvalStatus).toBe(2);
+  });
 });

@@ -98,7 +98,14 @@ export class CatapultarAccount<
       rpc: string;
       ownerType: AKT;
       owner: AccountPublicVar<AKT>;
-    } & ({ version: V } | { factory: `0x${string}` }),
+    } & ({ version: V } | { factory: `0x${string}` }) &
+      (
+        | {}
+        | {
+            callDigest: `0x${string}`;
+            isSignature: boolean;
+          }
+      ),
   ): Promise<{ call: Call; account: CatapultarAccount<V, string, AKT> }> {
     const { rpc, chainId } = options;
     let factory: `0x${string}`;
@@ -162,21 +169,51 @@ export class CatapultarAccount<
       salt = asHex(salt, 32, "0x");
     }
 
-    // TODO: derive statically
-    const expectedAddress = await publicClient.readContract({
-      address: factory,
-      abi: CATAPULTAR_FACTORY_V0_1_0_ABI,
-      functionName: "predictDeploy",
-      args: [options.ownerType as AccountKeyType, ownerArray, salt],
-    });
+    let callDigest: `0x${string}` | undefined = undefined;
+    let isSignature: boolean | undefined = undefined;
+    if ("callDigest" in options) {
+      callDigest = options.callDigest;
+      isSignature = options.isSignature;
+    }
 
+    const expectedAddress = callDigest
+      ? await publicClient.readContract({
+          address: factory,
+          abi: CATAPULTAR_FACTORY_V0_1_0_ABI,
+          functionName: "predictDeployWithDigest",
+          args: [
+            options.ownerType as AccountKeyType,
+            ownerArray,
+            salt,
+            callDigest,
+            isSignature as boolean,
+          ],
+        })
+      : await publicClient.readContract({
+          address: factory,
+          abi: CATAPULTAR_FACTORY_V0_1_0_ABI,
+          functionName: "predictDeploy",
+          args: [options.ownerType as AccountKeyType, ownerArray, salt],
+        });
     const call = {
       to: factory,
-      data: encodeFunctionData({
-        abi: CATAPULTAR_FACTORY_V0_1_0_ABI,
-        functionName: "deploy",
-        args: [options.ownerType, ownerArray, salt],
-      }),
+      data: callDigest
+        ? encodeFunctionData({
+            abi: CATAPULTAR_FACTORY_V0_1_0_ABI,
+            functionName: "deployWithDigest",
+            args: [
+              options.ownerType,
+              ownerArray,
+              salt,
+              callDigest,
+              isSignature as boolean,
+            ],
+          })
+        : encodeFunctionData({
+            abi: CATAPULTAR_FACTORY_V0_1_0_ABI,
+            functionName: "deploy",
+            args: [options.ownerType, ownerArray, salt],
+          }),
       value: 0n,
     };
 
