@@ -1,18 +1,28 @@
 import { privateKeyToAccount, type PrivateKeyAccount } from "viem/accounts";
 import { random, asHex } from "../utils/helpers";
 import { CatapultarTx, MetaCatapultarTx } from "./catapultar";
-import { AccountKeyType, ExecutionMode, type P256Points } from "../types/types";
+import {
+  AccountKeyType,
+  ExecutionMode,
+  type P256Points,
+  type WebAuthnSignature,
+} from "../types/types";
 import { anvil } from "viem/chains";
 import {
   createPublicClient,
   createWalletClient,
+  encodeAbiParameters,
   hashTypedData,
   http,
+  sha256,
+  stringToBytes,
+  toHex,
 } from "viem";
 import { Account } from "viem/tempo";
-import { P256 } from "ox";
+import { Base64, P256 } from "ox";
 import { CatapultarAccount } from "./account";
 import { rpcUrl } from "../../test/setup";
+import { sha } from "bun";
 
 const chainId = 31337;
 const PUBLIC_DEFAULT_ANVIL_ACCOUNT_0 =
@@ -303,13 +313,50 @@ describe("Catapultar", () => {
     return async (...args: Parameters<typeof hashTypedData>) => {
       const payload = hashTypedData(...args);
       const signedPayload = P256.sign({ payload, privateKey });
-      const { x, y } = P256.getPublicKey({ privateKey });
-      return `0x${asHex(signedPayload.r, 32, "")}${asHex(signedPayload.s, 32, "")}`;
+      return `0x${asHex(signedPayload.r, 32, "")}${asHex(signedPayload.s, 32, "")}` as `0x${string}`;
+    };
+  }
+
+  function webAuthnSignFunction(privateKey: `0x${string}`) {
+    return async (...args: Parameters<typeof hashTypedData>) => {
+      const payload = hashTypedData(...args); // ABI.encoded hash of typedData.
+      const clientDataJson = {
+        type: "webauthn.get",
+        challenge: Base64.fromHex(payload, { url: true, pad: false }),
+        origin: "http://localhost:3000",
+      };
+      const clientDataJsonString = JSON.stringify(clientDataJson);
+      const typeIndex = clientDataJsonString.indexOf('"type":');
+      const challengeIndex = clientDataJsonString.indexOf('"challenge":');
+
+      const rpIdHash = sha256(stringToBytes("localhost"));
+      const flags = "01"; // UUP ‑ user present
+      const counter = "00000001";
+      const authenticatorData = (rpIdHash + flags + counter) as `0x${string}`;
+
+      const clientHash = sha256(stringToBytes(clientDataJsonString));
+      const messageHash = sha256(
+        (authenticatorData + clientHash.replace("0x", "")) as `0x${string}`,
+      );
+
+      const signedMessage = P256.sign({ payload: messageHash, privateKey });
+
+      const webAuthnSignature: WebAuthnSignature = {
+        authenticatorData,
+        clientDataJSON: clientDataJsonString,
+        challengeIndex,
+        typeIndex,
+        ...signedMessage,
+      };
+      return webAuthnSignature;
     };
   }
 
   const integrationTest = (
-    keyType: AccountKeyType.ECDSAOrSmartContract | AccountKeyType.P256,
+    keyType:
+      | AccountKeyType.ECDSAOrSmartContract
+      | AccountKeyType.P256
+      | AccountKeyType.WebAuthnP256,
   ) =>
     describe(`Integration ${keyType}`, () => {
       const publicClient = createPublicClient({
@@ -328,7 +375,9 @@ describe("Catapultar", () => {
       const owner =
         keyType === AccountKeyType.ECDSAOrSmartContract
           ? privateKeyToAccount(privateKey)
-          : { signTypedData: p256signFunction(privateKey) };
+          : keyType === AccountKeyType.P256
+            ? { signTypedData: p256signFunction(privateKey) }
+            : { signTypedData: webAuthnSignFunction(privateKey) };
 
       const publicKey =
         keyType === AccountKeyType.ECDSAOrSmartContract
@@ -377,11 +426,11 @@ describe("Catapultar", () => {
 
         // Send tokens to the account.
         const value = 1000000000000000000n;
-        const transferTransaction = await executor.sendTransaction({
+        await executor.sendTransaction({
           to: deployedAccountV010.address,
           value,
         });
-        await waitForTransaction(transferTransaction);
+        // await waitForTransaction(transferTransaction);
 
         // This is our validation statement. We will be transferring the value to this address.
         expect(
@@ -401,8 +450,8 @@ describe("Catapultar", () => {
             .sign((...args) => owner.signTypedData(...args))
         ).asCall();
 
-        const executionTransaction = await executor.sendTransaction(calldata);
-        await waitForTransaction(executionTransaction);
+        await executor.sendTransaction(calldata);
+        // await waitForTransaction(executionTransaction);
 
         expect(
           await publicClient.getBalance({ address: oftenTargetAddress }),
@@ -412,11 +461,11 @@ describe("Catapultar", () => {
       it.serial("execute meta transaction", async () => {
         // Send tokens to the account.
         const value = 1000000000000000000n;
-        const transferTransaction = await executor.sendTransaction({
+        await executor.sendTransaction({
           to: deployedAccountV010.address,
           value,
         });
-        await waitForTransaction(transferTransaction);
+        // await waitForTransaction(transferTransaction);
 
         // Lets make 4 transactions that we will batch.
         const targets = [random(20), random(20), random(20), random(20)];
@@ -448,13 +497,9 @@ describe("Catapultar", () => {
             .asCatapultarTx()
         ).sign((...args) => owner.signTypedData(...args));
 
-        const executionTransaction = await executor.sendTransaction(
-          await signedTx.asCall(),
-        );
-        await waitForTransaction(executionTransaction);
+        await executor.sendTransaction(await signedTx.asCall());
+        // await waitForTransaction(executionTransaction);
 
-        // just wait for a second.
-        await new Promise((resolve) => setTimeout(resolve, 1500));
         await Promise.all(
           targets.map(async (address) =>
             expect(await publicClient.getBalance({ address })).toBe(value / 4n),
@@ -516,4 +561,5 @@ describe("Catapultar", () => {
 
   integrationTest(AccountKeyType.ECDSAOrSmartContract);
   integrationTest(AccountKeyType.P256);
+  integrationTest(AccountKeyType.WebAuthnP256);
 });

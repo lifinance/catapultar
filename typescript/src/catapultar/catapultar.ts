@@ -145,14 +145,12 @@ export class CatapultarTx<
   async sign(
     callback: (
       options: ReturnType<typeof this.getSignerData>,
-    ) => Promise<string>,
+    ) => Promise<KeyedSignature<AKT>>,
     options?: { ignoreNoCalls?: boolean },
   ) {
     const signerData = this.getSignerData(options);
 
-    this.signature = this.asCompatibleSignature(
-      (await callback(signerData)) as `0x${string}`,
-    );
+    this.signature = this.parseSignature(await callback(signerData));
     return this;
   }
 

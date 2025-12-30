@@ -243,8 +243,8 @@ export class CatapultarAccount<
       ).replace("0x", "");
       // If the signature is 64 bytes long (default) or 65 (mistake?)
       // then add 0000 to the signature. This indicate an additional SHA256 hash.
-      if ([64 * 2, 65 * 2].includes(rawSignature.length)) {
-        rawSignature = `${padEven(rawSignature, 65)}${"00"}`;
+      if (rawSignature.length <= 65 * 2) {
+        rawSignature = `${rawSignature.padEnd(65 * 2, "0")}${"00"}`;
       }
       return `0x${rawSignature}`;
     }
@@ -264,7 +264,7 @@ export class CatapultarAccount<
           },
         ],
       );
-      return `${encodedParams}01`; // Use SHA256 hash.
+      return `${encodedParams}00`; // Use SHA256 hash.
     }
   }
 
