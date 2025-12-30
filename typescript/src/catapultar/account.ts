@@ -456,7 +456,7 @@ export class CatapultarAccount<
     if (this.version === "0.0.1") return false;
 
     // Lets run P256 and Webauth. First, lets check the formatting of the signature.
-    if ([64 * 2, 65 * 2].includes(signature.length)) {
+    if (signature.replace("0x", "").length <= 65 * 2) {
       return false;
     }
     const owner = this.owner as [`0x${string}`, `0x${string}`];

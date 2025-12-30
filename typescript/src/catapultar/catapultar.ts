@@ -258,7 +258,7 @@ export class CatapultarTx<
   /**
    * Returns the signature as a on-chain compatible signature with an indicator byte.
    * For ECDSA / Smart contracts returns as is.
-   * For P256, pads to 65. Then adds 01.
+   * For P256, pads to 65. Then adds 00.
    *
    * @param Signature If provided, will act on the provided signature instead.
    */
