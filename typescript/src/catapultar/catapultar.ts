@@ -51,7 +51,7 @@ export class CatapultarTx<
     signature?: `0x${string}`;
     // provider?: Provider;
   }) {
-    super(options.account);
+    super(options.account as AccountConstructorParams<V, RPC, AKT>);
     const { mode, nonce, calls = [], signature } = options;
 
     // Transaction Definition
@@ -380,7 +380,7 @@ export class MetaCatapultarTx<
       outerNonce = randomNonce,
       innerNonce = randomNonce + 1n,
     } = options;
-    super(options.account);
+    super(options.account as AccountConstructorParams<V, RPC, AKT>);
 
     // Transaction Definition
     this.mode = mode;

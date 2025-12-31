@@ -47,12 +47,18 @@ export type Executable = Call;
 export type AccountConstructorParams<V, RPC, AKT extends AccountKeyType> = {
   address: `0x${string}`;
   accountKeyType?: AKT;
-  chainId: number;
   owner: AccountPublicVar<AKT>;
   name?: string;
   version?: V;
-  rpc?: RPC;
-};
+} & (undefined extends RPC
+  ? {
+      rpc?: RPC;
+      chainId?: number;
+    }
+  : {
+      rpc: RPC;
+      chainId: number;
+    });
 
 export type Call = {
   to: `0x${string}`;

@@ -36,7 +36,7 @@ export class CatapultarAccount<
   /** This is not the owner of the account, this is the smart account itself. */
   readonly address: `0x${string}`;
   /** ChainId of the account. */
-  readonly chainId: number;
+  readonly chainId: undefined extends RPC ? number | undefined : number;
 
   /** Name of the account. Used for the domainSeparator. */
   readonly name: string;
@@ -62,7 +62,9 @@ export class CatapultarAccount<
 
     // Account definition
     this.address = address;
-    this.chainId = chainId;
+    this.chainId = chainId as undefined extends RPC
+      ? number | undefined
+      : number;
 
     // Validation
     if (
@@ -435,6 +437,8 @@ export class CatapultarAccount<
   getDomainSeparator(options: { chain: boolean } = { chain: true }) {
     const { chain } = options;
     if (chain) {
+      if (!this.chainId)
+        throw new Error(`Chain is not provided, but signing single chain.`);
       return {
         name: this.name,
         version: this.version,
