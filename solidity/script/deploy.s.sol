@@ -42,10 +42,10 @@ contract deploy is multichain {
 
         bytes32 salt = bytes32(bytes20(owner));
         address expectedAccountAddress =
-            factory.predictDeploy(KeyedOwnable.KeyType.ECDSAOrSmartContract, ownerArray, salt);
+            factory.predictDeploy(KeyedOwnable.PublicKeyType.ECDSAOrSmartContract, ownerArray, salt);
 
         if (expectedAccountAddress.code.length == 0) {
-            acc = factory.deploy(KeyedOwnable.KeyType.ECDSAOrSmartContract, ownerArray, salt);
+            acc = factory.deploy(KeyedOwnable.PublicKeyType.ECDSAOrSmartContract, ownerArray, salt);
             if (acc != expectedAccountAddress) revert NotExpectedAddress(expectedAccountAddress, acc);
         }
         return expectedAccountAddress;

@@ -1,7 +1,7 @@
-import { encodeAbiParameters, encodeFunctionData, hashTypedData } from "viem";
-import { random, asHex } from "../utils/helpers";
+import { encodeFunctionData, hashTypedData } from "viem";
+import { random } from "../utils/helpers";
 import {
-  AccountKeyType,
+  AccountPublicKeyType,
   CallsTyped,
   ExecutionMode,
   type AccountConstructorParams,
@@ -11,9 +11,7 @@ import {
 } from "../types/types";
 import { CatapultarAccount } from "./account";
 import CATAPULTAR_V0_1_0_ABI from "../abi/catapultarV0.1.0";
-import { toCompactSignature } from "../utils/signature";
-
-// const abiencoder = AbiCoder.defaultAbiCoder();
+import { BaseTransaction } from "../transaction/transaction";
 
 /**
  * A Catapultar transaction wrapper. Is intended to be used to convert a list of calls into a single Catapultar batch.
@@ -24,19 +22,11 @@ import { toCompactSignature } from "../utils/signature";
  * new CatapultarTx(options).addCalls(...calls).sign(() => ...).asParameters();
  */
 export class CatapultarTx<
-  V extends Version = "0.1.0",
+  V extends Version,
   RPC extends string | undefined = undefined,
-  AKT extends AccountKeyType = AccountKeyType.ECDSAOrSmartContract,
-> extends CatapultarAccount<V, RPC, AKT> {
-  /** Signature for the transaction. */
-  signature?: `0x${string}`;
-
-  /** Transaction ExecutionMode, defines transaction behavior for call reverts. */
-  mode?: ExecutionMode;
-  /** Transaction nonce. Only 1 transaction can be executed for each nonce. */
-  nonce?: bigint;
-  /** List of calls the transaction contains. */
-  calls: Call[] = [];
+  AKT extends AccountPublicKeyType = AccountPublicKeyType.ECDSAOrSmartContract,
+> extends BaseTransaction {
+  account: CatapultarAccount<V, RPC, AKT>;
 
   /**
    * Create a new Catapultar transaction batch.
@@ -51,17 +41,11 @@ export class CatapultarTx<
     signature?: `0x${string}`;
     // provider?: Provider;
   }) {
-    super(options.account as AccountConstructorParams<V, RPC, AKT>);
-    const { mode, nonce, calls = [], signature } = options;
-
-    // Transaction Definition
-    this.mode = mode;
-    this.nonce = nonce;
-    this.calls = calls;
-
-    this.signature = signature;
-
-    // this.provider = provider;
+    super(options);
+    // TODO: If given an object, assign object instead of recreating account.
+    this.account = new CatapultarAccount<V, RPC, AKT>(
+      options.account as AccountConstructorParams<V, RPC, AKT>,
+    );
   }
 
   // --- Export the transaction for saving --- //
@@ -72,11 +56,11 @@ export class CatapultarTx<
   export(): ConstructorParameters<typeof CatapultarTx>[0] {
     return {
       account: {
-        address: this.address,
-        chainId: this.chainId,
-        owner: this.owner,
-        name: this.name,
-        version: this.version,
+        address: this.account.address,
+        chainId: this.account.chainId,
+        pubkey: this.account.pubkey,
+        name: this.account.name,
+        version: this.account.version,
       },
       mode: this.mode,
       nonce: this.nonce,
@@ -85,56 +69,11 @@ export class CatapultarTx<
     };
   }
 
-  // --- Modify the existing transaction. This allows you to change how it has been defined --- //
-
-  /**
-   * Set the transaction nonce for the Catapultar transaction. Only 1 transaction can ever be executed for each nonce.
-   */
-  setNonce(nonce: bigint) {
-    if (nonce === 0n)
-      throw new Error(
-        `Nonce 0 is not allowed. It cannot be differentiated from an invalid nonce.`,
-      );
-    this.nonce = nonce;
-    return this;
-  }
-
-  /**
-   * Generates a random uint256 nonce and sets it.
-   */
-  setRandomNonce() {
-    return this.setNonce(BigInt(random(32)));
-  }
-
-  /**
-   * Sets the Catapultar transaction mode.
-   */
-  setMode(mode: ExecutionMode) {
-    if (
-      this.version === "0.0.1" &&
-      (mode === ExecutionMode.RaiseRevertMultiChain ||
-        mode === ExecutionMode.SkipRevertMultiChain)
-    )
-      throw new Error(`Version 0.0.1 does not support multichain execution`);
-    this.mode = mode;
-    return this;
-  }
-
   /**
    * Sets a signature along with its type. If non-ecdsa signatures are being set, this provides additional aids with encoding
    */
   setSignature(signature: KeyedSignature<AKT>) {
-    this.signature = this.parseSignature(signature)!;
-  }
-
-  /**
-   * Adds list of calls to the Catapultar transaction. The calls will be executed with the configured mode.
-   */
-  addCall(...calls: Call[]) {
-    for (const call of calls) {
-      this.calls.push(call);
-    }
-    return this;
+    this.signature = this.account.parseSignature(signature)!;
   }
 
   /**
@@ -150,35 +89,20 @@ export class CatapultarTx<
   ) {
     const signerData = this.getSignerData(options);
 
-    this.signature = this.parseSignature(await callback(signerData));
+    this.signature = this.account.parseSignature(await callback(signerData));
     return this;
   }
 
   // --- Validation --- //
-
-  hasValidMode() {
-    if (this.mode === undefined) return false;
-    return Object.values(ExecutionMode).includes(this.mode);
-  }
-
-  /**
-   * @returns Whether the a multichain execution mode is set.
-   */
-  hasMultichainMode(): boolean {
-    return (
-      this.mode === ExecutionMode.RaiseRevertMultiChain ||
-      this.mode === ExecutionMode.SkipRevertMultiChain
-    );
-  }
 
   async hasValidSignature(options?: {
     noSignatureIsValid?: boolean;
   }): Promise<boolean> {
     const { noSignatureIsValid = false } = options ?? {};
     if (this.signature === undefined) return noSignatureIsValid;
-    return this.isSignatureValid({
+    return this.account.isSignatureValid({
       signature: this.signature,
-      hash: this.getTypeHash({ ignoreNoCalls: true }),
+      hash: this.getTypeHashDigest({ ignoreNoCalls: true }),
     });
   }
 
@@ -189,19 +113,10 @@ export class CatapultarTx<
   }
 
   async validateUsingProvider(this: CatapultarTx<V, string>) {
-    await this.validateNonce({ nonce: this.nonce });
-    await this.validateOwner();
+    await this.account.validateNonce({ nonce: this.nonce });
+    await this.account.validateOwner();
 
     return this;
-  }
-
-  // --- Read objects relating to its construction --- ///
-
-  /**
-   * @returns Total value of all contained calls.
-   */
-  getTotalValue(): bigint {
-    return this.calls.map((c) => c.value).reduce((a, b) => a + b, 0n);
   }
 
   // --- Order Creation --- //
@@ -223,7 +138,9 @@ export class CatapultarTx<
       throw new Error("Calls have not been set");
 
     return {
-      domain: this.getDomainSeparator({ chain: !this.hasMultichainMode() }),
+      domain: this.account.getDomainSeparator({
+        chain: !this.hasMultichainMode(),
+      }),
       types: CallsTyped,
       primaryType: "Calls",
       message: {
@@ -234,25 +151,10 @@ export class CatapultarTx<
     } as const;
   }
 
-  getTypeHash(options?: { ignoreNoCalls?: boolean }) {
+  getTypeHashDigest(options?: { ignoreNoCalls?: boolean }) {
     const signerData = this.getSignerData(options);
 
     return hashTypedData(signerData);
-  }
-
-  /**
-   * Returns the signature as a compact signature of 64 bytes instead of 65 bytes.
-   *
-   * @param Signature If provided, will act on the provided signature instead.
-   */
-  asCompactSignature(signature?: `0x${string}`): `0x${string}` {
-    const sig = signature ?? this.signature;
-    if (!sig) throw new Error("A signature has to be provided");
-    if (sig.replace("0x", "").length === 64 * 2) return sig;
-    // If this is not an ECDSA sig, lets not touch it.
-    if (sig.replace("0x", "").length !== 65 * 2) return sig;
-
-    return toCompactSignature(sig);
   }
 
   /**
@@ -265,66 +167,25 @@ export class CatapultarTx<
   asCompatibleSignature(signature?: `0x${string}`): `0x${string}` {
     const sig = signature ?? this.signature;
     if (!sig) throw new Error("A signature has to be provided");
-    if (this.accountKeyType === AccountKeyType.ECDSAOrSmartContract) return sig;
+    if (
+      this.account.accountPublicKeyType ===
+      AccountPublicKeyType.ECDSAOrSmartContract
+    )
+      return sig;
 
     if (
-      this.accountKeyType === AccountKeyType.P256 ||
-      this.accountKeyType === AccountKeyType.WebAuthnP256
+      this.account.accountPublicKeyType === AccountPublicKeyType.P256 ||
+      this.account.accountPublicKeyType === AccountPublicKeyType.WebAuthnP256
     ) {
       // If length >= 66, return as is.
       if (sig.replace("0x", "").length >= 66 * 2) return sig;
       // Pad end to 65. Then add 00.
       return `0x${sig.replace("0x", "").padEnd(65 * 2, "0")}00`;
     }
-    throw new Error(`Unknown key scheme ${this.accountKeyType}`);
-  }
-
-  /**
-   * @dev Opdata is nonce + signature packed.
-   * If no signature has been provided to the object, it will create the transaction without a signatures. This can be used to sub-batch the transaction.
-   */
-  async getOpData(options?: {
-    compactSignature: boolean;
-  }): Promise<`0x${string}`> {
-    if (this.nonce === 0n)
-      throw new Error(
-        "Nonce 0 is not allowed. It cannot be differentiated from an invalid nonce.",
-      );
-    if (!this.nonce) throw new Error("No nonce has been set");
-    const { compactSignature = true } = options ?? {};
-    if (this.signature) {
-      this.signature = compactSignature
-        ? this.asCompactSignature()
-        : this.signature;
-    }
-    await this.validateSignature({ noSignatureIsValid: true });
-    if (this.signature) {
-      return `0x${asHex(this.nonce, 32)}${this.signature.replace("0x", "")}`;
-    } else {
-      return asHex(this.nonce, 32, "0x");
-    }
-  }
-
-  async getExecutionData() {
-    return encodeAbiParameters(
-      [{ type: "tuple[]", components: CallsTyped.Call }, { type: "bytes" }],
-      [this.calls, await this.getOpData()],
-    );
+    throw new Error(`Unknown key scheme ${this.account.accountPublicKeyType}`);
   }
 
   // --- Convert the transaction object into actionable items --- //
-
-  /** @return As parameters for an execute call. */
-  async asParameters() {
-    return {
-      mode: this.mode,
-      executionData: await this.getExecutionData(),
-      metadata: {
-        value: this.getTotalValue(),
-        signature: this.signature,
-      },
-    };
-  }
 
   /**
    * @return As a call for further scheduling or manual transaction signing. If used for manual transaction.
@@ -339,7 +200,7 @@ export class CatapultarTx<
       args: [this.mode!, executionData],
     });
     return {
-      to: this.address,
+      to: this.account.address,
       value: 0n,
       data,
     };
@@ -351,16 +212,18 @@ export class CatapultarTx<
  * Intended usecase: Wrapping multiple transactions (that can later be retried) into a single batch.
  */
 export class MetaCatapultarTx<
-  V extends Version = "0.1.0",
+  V extends Version,
   RPC extends string | undefined = undefined,
-  AKT extends AccountKeyType = AccountKeyType.ECDSAOrSmartContract,
-> extends CatapultarAccount<V, RPC, AKT> {
+  AKT extends AccountPublicKeyType = AccountPublicKeyType.ECDSAOrSmartContract,
+> {
   mode?: ExecutionMode;
   nonce?: bigint;
   calls: { calls: Call[]; nonce?: bigint; mode?: ExecutionMode }[] = [];
 
   outerNonce: bigint;
   innerNonce: bigint;
+
+  account: CatapultarAccount<V, RPC, AKT>;
 
   constructor(options: {
     account:
@@ -372,6 +235,10 @@ export class MetaCatapultarTx<
     outerNonce?: bigint;
     innerNonce?: bigint;
   }) {
+    // TODO: If given an object, assign object instead of recreating account.
+    this.account = new CatapultarAccount<V, RPC, AKT>(
+      options.account as AccountConstructorParams<V, RPC, AKT>,
+    );
     // Random bytes with rightmost byte empty.
     const randomNonce = BigInt(random(31)) << 8n;
     const {
@@ -380,7 +247,6 @@ export class MetaCatapultarTx<
       outerNonce = randomNonce,
       innerNonce = randomNonce + 1n,
     } = options;
-    super(options.account as AccountConstructorParams<V, RPC, AKT>);
 
     // Transaction Definition
     this.mode = mode;
@@ -414,7 +280,7 @@ export class MetaCatapultarTx<
   getCallsAsTxs() {
     return this.calls.map((c, i) => {
       return new CatapultarTx({
-        account: this,
+        account: this.account,
       })
         .setMode(c.mode ? c.mode : ExecutionMode.RaiseRevert)
         .setNonce(c.nonce ? c.nonce : this.innerNonce + BigInt(i))
@@ -425,7 +291,7 @@ export class MetaCatapultarTx<
   async asCatapultarTx() {
     this.checkNonces();
     return new CatapultarTx({
-      account: this,
+      account: this.account,
     })
       .setNonce(this.outerNonce)
       .setMode(this.mode ?? ExecutionMode.SkipRevert)

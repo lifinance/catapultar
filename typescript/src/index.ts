@@ -3,7 +3,7 @@ export { CatapultarTx, MetaCatapultarTx } from "./catapultar/catapultar";
 
 export type {
   ExecutionMode,
-  AccountKeyType,
+  AccountPublicKeyType,
   Call,
   Calls,
   WebAuthnSignature,

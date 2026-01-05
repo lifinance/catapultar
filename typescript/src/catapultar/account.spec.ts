@@ -4,7 +4,7 @@ import { anvil } from "viem/chains";
 import { CatapultarAccount } from "./account";
 import { random, asHex } from "../utils/helpers";
 import { rpcUrl } from "../../test/setup";
-import { AccountKeyType } from "../types/types";
+import { AccountPublicKeyType } from "../types/types";
 
 const chainId = 31337;
 const PUBLIC_DEFAULT_ANVIL_ACCOUNT_0 =
@@ -15,7 +15,7 @@ const factories = {
 } as const;
 
 describe("Catapultar Account 0.1.0", () => {
-  const owner = privateKeyToAccount(random(32));
+  const pubkey = privateKeyToAccount(random(32));
 
   const wallet = privateKeyToAccount(PUBLIC_DEFAULT_ANVIL_ACCOUNT_0);
   const executor = createWalletClient({
@@ -34,8 +34,8 @@ describe("Catapultar Account 0.1.0", () => {
   beforeAll(async () => {
     const deployCall010 = await CatapultarAccount.deploy({
       chainId,
-      ownerType: AccountKeyType.ECDSAOrSmartContract,
-      owner: owner.address,
+      keyType: AccountPublicKeyType.ECDSAOrSmartContract,
+      pubkey: pubkey.address,
       salt: `0x${asHex(0n, 20)}${random(12).replace("0x", "")}`,
       rpc: rpcUrl(),
       factory: factories["0.1.0"],
@@ -50,14 +50,14 @@ describe("Catapultar Account 0.1.0", () => {
     await publicClient.getTransactionReceipt({ hash: tx });
   });
 
-  it.serial("should deploy with set owner", async () => {
+  it.serial("should deploy with set pubkey", async () => {
     const publicClientOwner = await publicClient.readContract({
       address: deployedAccountV010.address,
       abi: deployedAccountV010.abi(),
       functionName: "owner",
     });
     const onChainOwner = await deployedAccountV010.getAccountOwner();
-    const expectedOwner = owner.address;
+    const expectedOwner = pubkey.address;
     expect(publicClientOwner).toBe(expectedOwner);
     expect(onChainOwner).toBe(expectedOwner);
   });
@@ -67,8 +67,8 @@ describe("Catapultar Account 0.1.0", () => {
 
     const deployCall = await CatapultarAccount.deploy({
       chainId,
-      ownerType: AccountKeyType.ECDSAOrSmartContract,
-      owner: owner.address,
+      keyType: AccountPublicKeyType.ECDSAOrSmartContract,
+      pubkey: pubkey.address,
       salt: `0x${asHex(0n, 20)}${random(12).replace("0x", "")}`,
       rpc: rpcUrl(),
       factory: factories["0.1.0"],
@@ -100,8 +100,8 @@ describe("Catapultar Account 0.1.0", () => {
 
     const deployCall = await CatapultarAccount.deploy({
       chainId,
-      ownerType: AccountKeyType.ECDSAOrSmartContract,
-      owner: owner.address,
+      keyType: AccountPublicKeyType.ECDSAOrSmartContract,
+      pubkey: pubkey.address,
       salt: `0x${asHex(0n, 20)}${random(12).replace("0x", "")}`,
       rpc: rpcUrl(),
       factory: factories["0.1.0"],

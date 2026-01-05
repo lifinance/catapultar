@@ -107,13 +107,13 @@ const CATAPULTAR_V0_1_0_ABI = [
   },
   {
     type: "function",
-    name: "getOwnerKey",
+    name: "getPublicKey",
     inputs: [],
     outputs: [
       {
         name: "keyType",
         type: "uint8",
-        internalType: "enum KeyedOwnable.KeyType",
+        internalType: "enum KeyedOwnable.PublicKeyType",
       },
       {
         name: "key",
@@ -130,7 +130,7 @@ const CATAPULTAR_V0_1_0_ABI = [
       {
         name: "ktp",
         type: "uint8",
-        internalType: "enum KeyedOwnable.KeyType",
+        internalType: "enum KeyedOwnable.PublicKeyType",
       },
       {
         name: "owner",
@@ -217,13 +217,13 @@ const CATAPULTAR_V0_1_0_ABI = [
   },
   {
     type: "function",
-    name: "ownerKeyType",
+    name: "publicKeyType",
     inputs: [],
     outputs: [
       {
         name: "",
         type: "uint8",
-        internalType: "enum KeyedOwnable.KeyType",
+        internalType: "enum KeyedOwnable.PublicKeyType",
       },
     ],
     stateMutability: "view",
@@ -285,7 +285,7 @@ const CATAPULTAR_V0_1_0_ABI = [
       {
         name: "ktp",
         type: "uint8",
-        internalType: "enum KeyedOwnable.KeyType",
+        internalType: "enum KeyedOwnable.PublicKeyType",
       },
       {
         name: "nextKey",
@@ -380,7 +380,7 @@ const CATAPULTAR_V0_1_0_ABI = [
         name: "newKey",
         type: "uint8",
         indexed: false,
-        internalType: "enum KeyedOwnable.KeyType",
+        internalType: "enum KeyedOwnable.PublicKeyType",
       },
       {
         name: "newOwner",

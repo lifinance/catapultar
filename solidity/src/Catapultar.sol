@@ -93,7 +93,7 @@ contract Catapultar is ERC7821LIFI, EIP712, BitmapNonce, KeyedOwnable, Initializ
     }
 
     function init(
-        KeyType ktp,
+        PublicKeyType ktp,
         bytes32[] calldata owner
     ) external payable initializer {
         _transferOwnership(ktp, owner);

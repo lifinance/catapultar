@@ -37,7 +37,7 @@ const CATAPULTAR_FACTORY_V0_1_0_ABI = [
       {
         name: "ktp",
         type: "uint8",
-        internalType: "enum KeyedOwnable.KeyType",
+        internalType: "enum KeyedOwnable.PublicKeyType",
       },
       {
         name: "owner",
@@ -66,7 +66,7 @@ const CATAPULTAR_FACTORY_V0_1_0_ABI = [
       {
         name: "ktp",
         type: "uint8",
-        internalType: "enum KeyedOwnable.KeyType",
+        internalType: "enum KeyedOwnable.PublicKeyType",
       },
       {
         name: "owner",
@@ -95,7 +95,7 @@ const CATAPULTAR_FACTORY_V0_1_0_ABI = [
       {
         name: "ktp",
         type: "uint8",
-        internalType: "enum KeyedOwnable.KeyType",
+        internalType: "enum KeyedOwnable.PublicKeyType",
       },
       {
         name: "owner",
@@ -134,7 +134,7 @@ const CATAPULTAR_FACTORY_V0_1_0_ABI = [
       {
         name: "ktp",
         type: "uint8",
-        internalType: "enum KeyedOwnable.KeyType",
+        internalType: "enum KeyedOwnable.PublicKeyType",
       },
       {
         name: "owner",
@@ -163,7 +163,7 @@ const CATAPULTAR_FACTORY_V0_1_0_ABI = [
       {
         name: "ktp",
         type: "uint8",
-        internalType: "enum KeyedOwnable.KeyType",
+        internalType: "enum KeyedOwnable.PublicKeyType",
       },
       {
         name: "owner",
@@ -192,7 +192,7 @@ const CATAPULTAR_FACTORY_V0_1_0_ABI = [
       {
         name: "ktp",
         type: "uint8",
-        internalType: "enum KeyedOwnable.KeyType",
+        internalType: "enum KeyedOwnable.PublicKeyType",
       },
       {
         name: "owner",

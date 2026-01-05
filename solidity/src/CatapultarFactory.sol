@@ -31,20 +31,20 @@ import { KeyedOwnable } from "./libs/KeyedOwnable.sol";
  * The owner of a deployed proxy may not be the same as the owner it was deployed with.
  */
 contract CatapultarFactory {
-    address public immutable EXECUTOR;
+    address payable public immutable EXECUTOR;
 
     constructor() {
-        EXECUTOR = address(new Catapultar());
+        EXECUTOR = payable(new Catapultar());
     }
 
     function VERSION() external view returns (string memory) {
-        (,, string memory version,,,,) = Catapultar(payable(EXECUTOR)).eip712Domain();
+        (,, string memory version,,,,) = Catapultar(EXECUTOR).eip712Domain();
         return version;
     }
 
     /// @param salt The first 20 bytes of salt has to be the owner or 0.
     function deploy(
-        KeyedOwnable.KeyType ktp,
+        KeyedOwnable.PublicKeyType ktp,
         bytes32[] calldata owner,
         bytes32 salt
     ) external payable ownerInSalt(salt, ktp, owner) returns (address proxy) {
@@ -57,7 +57,7 @@ contract CatapultarFactory {
     /// handed over.
     /// @param salt The first 20 bytes of salt has to be the owner or 0.
     function predictDeploy(
-        KeyedOwnable.KeyType ktp,
+        KeyedOwnable.PublicKeyType ktp,
         bytes32[] calldata owner,
         bytes32 salt
     ) external view ownerInSalt(salt, ktp, owner) returns (address proxy) {
@@ -66,7 +66,7 @@ contract CatapultarFactory {
 
     /// @param salt The first 20 bytes of salt has to be the owner or 0.
     function deployWithDigest(
-        KeyedOwnable.KeyType ktp,
+        KeyedOwnable.PublicKeyType ktp,
         bytes32[] calldata owner,
         bytes32 salt,
         bytes32 digest,
@@ -92,7 +92,7 @@ contract CatapultarFactory {
     /// handed over.
     /// @param salt The first 20 bytes of salt has to be the owner or 0.
     function predictDeployWithDigest(
-        KeyedOwnable.KeyType ktp,
+        KeyedOwnable.PublicKeyType ktp,
         bytes32[] calldata owner,
         bytes32 salt,
         bytes32 digest,
@@ -111,7 +111,7 @@ contract CatapultarFactory {
 
     /// @param salt The first 20 bytes of salt has to be the owner or 0.
     function deployUpgradeable(
-        KeyedOwnable.KeyType ktp,
+        KeyedOwnable.PublicKeyType ktp,
         bytes32[] calldata owner,
         bytes32 salt
     ) external payable ownerInSalt(salt, ktp, owner) returns (address proxy) {
@@ -126,7 +126,7 @@ contract CatapultarFactory {
     /// Catapultar in general. The contract implementation is upgradeable.
     /// @param salt The first 20 bytes of salt has to be the owner or 0.
     function predictDeployUpgradeable(
-        KeyedOwnable.KeyType ktp,
+        KeyedOwnable.PublicKeyType ktp,
         bytes32[] calldata owner,
         bytes32 salt
     ) external view ownerInSalt(salt, ktp, owner) returns (address proxy) {
@@ -146,7 +146,7 @@ contract CatapultarFactory {
      */
     modifier ownerInSalt(
         bytes32 salt,
-        KeyedOwnable.KeyType ktp,
+        KeyedOwnable.PublicKeyType ktp,
         bytes32[] calldata owner
     ) {
         LibClone.checkStartsWith(salt, _saltPrefix(ktp, owner));
@@ -154,10 +154,10 @@ contract CatapultarFactory {
     }
 
     function _saltPrefix(
-        KeyedOwnable.KeyType ktp,
+        KeyedOwnable.PublicKeyType ktp,
         bytes32[] calldata owner
     ) internal pure returns (address) {
-        if (ktp == KeyedOwnable.KeyType.ECDSAOrSmartContract && owner.length == 1) {
+        if (ktp == KeyedOwnable.PublicKeyType.ECDSAOrSmartContract && owner.length == 1) {
             return address(uint160(uint256(owner[0])));
         } else {
             return address(bytes20(EfficientHashLib.hash(bytes32(uint256(uint8(ktp))), EfficientHashLib.hash(owner))));

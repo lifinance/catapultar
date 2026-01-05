@@ -3,37 +3,38 @@ import {
   decodeAbiParameters,
   encodeAbiParameters,
   encodeFunctionData,
+  encodePacked,
+  getCreate2Address,
   http,
+  keccak256,
   parseAbiParameters,
   recoverAddress,
 } from "viem";
 import {
   type Version,
   type Call,
-  AccountKeyType,
+  AccountPublicKeyType,
   type AccountPublicVar,
   type AccountConstructorParams,
   type KeyedSignature,
+  type EmbeddedCall,
+  type Factory,
+  type Pubkey,
 } from "../types/types";
 import { getViemChainId } from "../utils/viem";
 import CATAPULTAR_V0_1_0_ABI from "../abi/catapultarV0.1.0";
 import CATAPULTAR_FACTORY_V0_1_0_ABI from "../abi/catapultarFactoryV0.1.0";
-import { padEven, asHex } from "../utils/helpers";
+import { asHex, pubkeyAsArray } from "../utils/helpers";
 // import { CATAPULTAR_V0_0_1_ABI } from "../abi/catapultarV0.0.1";
 import { P256, PublicKey, WebAuthnP256 } from "ox";
 import { fromCompactSignature } from "../utils/signature";
 
-const factories: Record<string, `0x${string}`> = {
-  "0.1.0": "0x",
-  "0.0.1": "0x",
-} as const;
-
 export class CatapultarAccount<
-  V extends Version = "0.1.0",
+  V extends Version,
   RPC extends string | undefined = undefined,
-  AKT extends AccountKeyType = AccountKeyType.ECDSAOrSmartContract,
+  AKT extends AccountPublicKeyType = AccountPublicKeyType.ECDSAOrSmartContract,
 > {
-  /** This is not the owner of the account, this is the smart account itself. */
+  /** This is not the pubkey of the account, this is the smart account itself. */
   readonly address: `0x${string}`;
   /** ChainId of the account. */
   readonly chainId: undefined extends RPC ? number | undefined : number;
@@ -46,15 +47,15 @@ export class CatapultarAccount<
   rpc: RPC | undefined;
 
   /** Account to validate account signatures against. */
-  owner: AccountPublicVar<AKT>;
-  accountKeyType: AKT;
+  pubkey: AccountPublicVar<AKT>;
+  accountPublicKeyType: AKT;
 
   constructor(options: AccountConstructorParams<V, RPC, AKT>) {
     const {
       address,
-      accountKeyType = AccountKeyType.ECDSAOrSmartContract as AKT,
+      accountPublicKeyType = AccountPublicKeyType.ECDSAOrSmartContract as AKT,
       chainId,
-      owner,
+      pubkey,
       name = "Catapultar",
       version = "0.1.0" as V,
       rpc,
@@ -68,23 +69,23 @@ export class CatapultarAccount<
 
     // Validation
     if (
-      accountKeyType === AccountKeyType.ECDSAOrSmartContract &&
-      Array.isArray(owner)
+      accountPublicKeyType === AccountPublicKeyType.ECDSAOrSmartContract &&
+      Array.isArray(pubkey)
     )
       throw new Error(
-        `Only one key allowed for ECDSA or SmartContract: ${owner}`,
+        `Only one key allowed for ECDSA or SmartContract: ${pubkey}`,
       );
     if (
-      [AccountKeyType.P256, AccountKeyType.WebAuthnP256].includes(
-        accountKeyType,
+      [AccountPublicKeyType.P256, AccountPublicKeyType.WebAuthnP256].includes(
+        accountPublicKeyType,
       ) &&
-      !Array.isArray(owner)
+      !Array.isArray(pubkey)
     )
       throw new Error(
-        `P256 signatures requires the owner as exactly 2 points: ${owner}`,
+        `P256 signatures requires the pubkey as exactly 2 points: ${pubkey}`,
       );
-    this.owner = owner;
-    this.accountKeyType = accountKeyType;
+    this.pubkey = pubkey;
+    this.accountPublicKeyType = accountPublicKeyType;
 
     this.rpc = rpc;
 
@@ -93,78 +94,31 @@ export class CatapultarAccount<
     this.version = version;
   }
 
-  static async deploy<V extends Version, AKT extends AccountKeyType>(
+  static async deploy<V extends Version, AKT extends AccountPublicKeyType>(
     options: {
       chainId: number;
       salt: `0x${string}` | bigint;
       rpc: string;
-      ownerType: AKT;
-      owner: AccountPublicVar<AKT>;
-    } & ({ version: V } | { factory: `0x${string}` }) &
-      (
-        | {}
-        | {
-            callDigest: `0x${string}`;
-            isSignature: boolean;
-          }
-      ),
+    } & Pubkey<AKT> &
+      Omit<Factory, "template"> &
+      ({} | EmbeddedCall),
   ): Promise<{ call: Call; account: CatapultarAccount<V, string, AKT> }> {
     const { rpc, chainId } = options;
     let factory: `0x${string}`;
-    let version: V;
     const viemChain = getViemChainId(chainId);
     const publicClient = createPublicClient({
       chain: viemChain,
       transport: http(rpc),
     });
-    if ("factory" in options) {
-      factory = options.factory;
-      const readVersion = await publicClient.readContract({
-        address: factory,
-        abi: CATAPULTAR_FACTORY_V0_1_0_ABI,
-        functionName: "VERSION",
-      });
-      version = readVersion as V;
-    } else {
-      version = options.version;
-      if (version === `0.0.1` || !Object.keys(factories).includes(version)) {
-        throw new Error(`Unsupported version: ${version}`);
-      }
-      factory = factories[version]!;
-    }
+    factory = options.factory;
+    const readVersion = await publicClient.readContract({
+      address: factory,
+      abi: CATAPULTAR_FACTORY_V0_1_0_ABI,
+      functionName: "VERSION",
+    });
+    const version = readVersion as V;
 
-    let ownerArray: `0x${string}`[];
-    // Create owner array.
-    if (options.ownerType === AccountKeyType.ECDSAOrSmartContract) {
-      if (typeof options.owner !== "string")
-        throw new Error(`Ownertype not expected ${typeof options.owner}`);
-      // Check owner is formatted correctly. Either 20 bytes or 32 bytes with first 12 bytes empty.
-      const ownerAddress = options.owner.replace("0x", "");
-      if (
-        !(
-          ownerAddress.length === 20 * 2 ||
-          (ownerAddress.length === 32 * 2 &&
-            ownerAddress.slice(0, 12 * 2) === "000000000000000000000000")
-        )
-      )
-        throw new Error(`Owner address incorrectly formatted: ${ownerAddress}`);
-
-      // Validate that owner is `0x${string}`
-      ownerArray = [`0x${padEven(ownerAddress, 64)}`];
-    } else if (
-      options.ownerType === AccountKeyType.P256 ||
-      options.ownerType === AccountKeyType.WebAuthnP256
-    ) {
-      if (options.owner.length !== 2)
-        throw new Error(
-          `Invalid owner array ${options.owner}, length ${options.owner.length} !== 2`,
-        );
-      ownerArray = options.owner as AccountPublicVar<
-        AccountKeyType.P256 | AccountKeyType.WebAuthnP256
-      >;
-    } else {
-      throw new Error(`Ownertype not supported ${options.ownerType}`);
-    }
+    const ownerArray = pubkeyAsArray(options);
 
     let salt = options.salt;
     if (typeof salt === "bigint") {
@@ -184,7 +138,7 @@ export class CatapultarAccount<
           abi: CATAPULTAR_FACTORY_V0_1_0_ABI,
           functionName: "predictDeployWithDigest",
           args: [
-            options.ownerType as AccountKeyType,
+            options.keyType as AccountPublicKeyType,
             ownerArray,
             salt,
             callDigest,
@@ -195,7 +149,7 @@ export class CatapultarAccount<
           address: factory,
           abi: CATAPULTAR_FACTORY_V0_1_0_ABI,
           functionName: "predictDeploy",
-          args: [options.ownerType as AccountKeyType, ownerArray, salt],
+          args: [options.keyType as AccountPublicKeyType, ownerArray, salt],
         });
     const call = {
       to: factory,
@@ -204,7 +158,7 @@ export class CatapultarAccount<
             abi: CATAPULTAR_FACTORY_V0_1_0_ABI,
             functionName: "deployWithDigest",
             args: [
-              options.ownerType,
+              options.keyType,
               ownerArray,
               salt,
               callDigest,
@@ -214,7 +168,7 @@ export class CatapultarAccount<
         : encodeFunctionData({
             abi: CATAPULTAR_FACTORY_V0_1_0_ABI,
             functionName: "deploy",
-            args: [options.ownerType, ownerArray, salt],
+            args: [options.keyType, ownerArray, salt],
           }),
       value: 0n,
     };
@@ -223,14 +177,71 @@ export class CatapultarAccount<
       call,
       account: new CatapultarAccount({
         address: expectedAddress,
-        accountKeyType: options.ownerType,
+        accountPublicKeyType: options.keyType,
         chainId,
-        owner: options.owner,
+        pubkey: options.pubkey,
         name: "Catapultar",
         version: version,
         rpc,
       }),
     };
+  }
+
+  private static deriveCloneAddress(
+    executor: `0x${string}`,
+    salt: `0x${string}`,
+    factory: `0x${string}`,
+  ) {
+    // https://github.com/Vectorized/solady/blob/90db92ce173856605d24a554969f2c67cadbc7e9/src/utils/LibClone.sol#L366-L368
+    const initCode = ("0x602d5f8160095f39f35f5f365f5f37365f73" +
+      executor.replace("0x", "") +
+      "5af43d5f5f3e6029573d5ffd5b3d5ff3") as `0x${string}`;
+    const initCodeHash = keccak256(initCode);
+    return getCreate2Address({
+      bytecodeHash: initCodeHash,
+      salt,
+      from: factory,
+    });
+  }
+
+  private static ownerInSalt<AKT extends AccountPublicKeyType>(
+    opt: {
+      salt: `0x${string}`;
+    } & Pubkey<AKT>,
+  ) {
+    const pubkeyArray = pubkeyAsArray(opt);
+    const saltPrefix =
+      opt.keyType === AccountPublicKeyType.ECDSAOrSmartContract &&
+      this.ownerInSalt.length === 1
+        ? opt.pubkey[0]!
+        : keccak256(encodePacked(["bytes32[]"], [pubkeyArray]));
+
+    const saltSlice = opt.salt.slice(0, 20 * 2 + 2);
+    return BigInt(saltSlice) === 0n || saltSlice === saltPrefix;
+  }
+
+  static predict<AKT extends AccountPublicKeyType>(
+    opt: {
+      salt: `0x${string}`;
+    } & Pubkey<AKT> &
+      ({} | EmbeddedCall),
+  ) {
+    if (!CatapultarAccount.ownerInSalt(opt))
+      throw new Error(`Pubkey not in salt`);
+    let { salt } = opt;
+    // If a digest is used, rehash the hash.
+    if ("digest" in opt && "isSignature" in opt) {
+      const { callDigest, isSignature } = opt;
+      salt = keccak256(
+        encodePacked(
+          ["bytes32", "bytes32", "uint256"],
+          [salt, callDigest, isSignature ? 2n : 1n],
+        ),
+      );
+    }
+    const executor: `0x${string}` = "0x";
+    const factory: `0x${string}` = "0x";
+    return CatapultarAccount.deriveCloneAddress(executor, salt, factory);
   }
 
   publicClient(this: CatapultarAccount<any, string, any>) {
@@ -256,29 +267,31 @@ export class CatapultarAccount<
   hasECDSAOrSmartContractKey(): this is CatapultarAccount<
     any,
     any,
-    AccountKeyType.ECDSAOrSmartContract
+    AccountPublicKeyType.ECDSAOrSmartContract
   > {
-    return this.accountKeyType === AccountKeyType.ECDSAOrSmartContract;
+    return (
+      this.accountPublicKeyType === AccountPublicKeyType.ECDSAOrSmartContract
+    );
   }
 
-  hasP256Key(): this is CatapultarAccount<any, any, AccountKeyType.P256> {
-    return this.accountKeyType === AccountKeyType.P256;
+  hasP256Key(): this is CatapultarAccount<any, any, AccountPublicKeyType.P256> {
+    return this.accountPublicKeyType === AccountPublicKeyType.P256;
   }
 
   hasWebAuthnP256Key(): this is CatapultarAccount<
     any,
     any,
-    AccountKeyType.WebAuthnP256
+    AccountPublicKeyType.WebAuthnP256
   > {
-    return this.accountKeyType === AccountKeyType.WebAuthnP256;
+    return this.accountPublicKeyType === AccountPublicKeyType.WebAuthnP256;
   }
 
   parseSignature(signature: KeyedSignature<AKT>): `0x${string}` | undefined {
     if (this.hasECDSAOrSmartContractKey())
-      return signature as KeyedSignature<AccountKeyType.ECDSAOrSmartContract>;
+      return signature as KeyedSignature<AccountPublicKeyType.ECDSAOrSmartContract>;
     if (this.hasP256Key()) {
       let rawSignature = (
-        signature as KeyedSignature<AccountKeyType.P256>
+        signature as KeyedSignature<AccountPublicKeyType.P256>
       ).replace("0x", "");
       // If the signature is 64 bytes long (default) or 65 (mistake?)
       // then add 0000 to the signature. This indicate an additional SHA256 hash.
@@ -288,7 +301,8 @@ export class CatapultarAccount<
       return `0x${rawSignature}`;
     }
     if (this.hasWebAuthnP256Key()) {
-      const sig = signature as KeyedSignature<AccountKeyType.WebAuthnP256>;
+      const sig =
+        signature as KeyedSignature<AccountPublicKeyType.WebAuthnP256>;
       // const abiencode the directory.
       const encodedParams = encodeAbiParameters(
         parseAbiParameters([
@@ -478,12 +492,12 @@ export class CatapultarAccount<
               : signature,
         })) as `0x${string}`;
       }
-      if (this.owner === signer) return true;
+      if (this.pubkey === signer) return true;
       if (!this.hasRpc()) return false;
       const publicClient = this.publicClient();
 
       const result1271 = await publicClient.readContract({
-        address: this.owner,
+        address: this.pubkey,
         abi: this.abi(),
         functionName: "isValidSignature",
         args: [hash, signature],
@@ -500,10 +514,10 @@ export class CatapultarAccount<
     if (signature.replace("0x", "").length <= 65 * 2) {
       return false;
     }
-    const owner = this.owner as [`0x${string}`, `0x${string}`];
+    const pubkey = this.pubkey as [`0x${string}`, `0x${string}`];
     const publicKey = PublicKey.from({
-      x: BigInt(owner[0]),
-      y: BigInt(owner[1]),
+      x: BigInt(pubkey[0]),
+      y: BigInt(pubkey[1]),
     });
     if (this.hasP256Key()) {
       const r = BigInt("0x" + signature.replace("0x", "").slice(0, 64));
@@ -542,9 +556,9 @@ export class CatapultarAccount<
 
   async validateOwner(this: CatapultarAccount<any, string, any>) {
     const actualAccountOwner = await this.getAccountOwner();
-    if (this.owner !== actualAccountOwner)
+    if (this.pubkey !== actualAccountOwner)
       throw new Error(
-        `Expected owner: ${actualAccountOwner}, Provided owner: ${this.owner}`,
+        `Expected pubkey: ${actualAccountOwner}, Provided pubkey: ${this.pubkey}`,
       );
     return this;
   }

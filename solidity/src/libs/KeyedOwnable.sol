@@ -17,9 +17,9 @@ contract KeyedOwnable {
     error InvalidKey();
     error Unauthorized();
 
-    event OwnershipTransferred(KeyType newKey, bytes32[] newOwner);
+    event OwnershipTransferred(PublicKeyType newKey, bytes32[] newOwner);
 
-    enum KeyType {
+    enum PublicKeyType {
         ECDSAOrSmartContract,
         P256,
         WebAuthnP256
@@ -32,13 +32,13 @@ contract KeyedOwnable {
     /// used is ECDSAOrSmartContract, there is a chance that the account is still in control of someone.
     bytes32 internal constant _OWNER_SLOT = 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffff74873927;
 
-    KeyType public ownerKeyType;
+    PublicKeyType public publicKeyType;
 
     /**
      * @notice Sets a slice of a key.
-     * @dev This function does not implement bounds check based on ownerKeyType.
+     * @dev This function does not implement bounds check based on publicKeyType.
      */
-    function _setOwnerKeySlice(
+    function _setPublicKeySlice(
         uint256 index,
         bytes32 val
     ) private {
@@ -49,11 +49,11 @@ contract KeyedOwnable {
     }
 
     /**
-     * @notice Returns a slice of the owner's key.
-     * @dev This function does not implement bounds check based on ownerKeyType. If a larger key has been set
+     * @notice Returns a slice of the owner's public key.
+     * @dev This function does not implement bounds check based on publicKeyType. If a larger key has been set
      * previously, it will return a dirty word.
      */
-    function _getOwnerKeySlice(
+    function _getPublicKeySlice(
         uint256 index
     ) internal view returns (bytes32 val) {
         assembly ("memory-safe") {
@@ -62,27 +62,28 @@ contract KeyedOwnable {
         }
     }
 
-    function getOwnerKey() public view returns (KeyType keyType, bytes32[] memory key) {
-        keyType = ownerKeyType;
+    function getPublicKey() public view returns (PublicKeyType keyType, bytes32[] memory key) {
+        keyType = publicKeyType;
         uint256 length = _keyTypeLength(keyType);
         key = new bytes32[](length);
         for (uint256 i; i < length; ++i) {
-            key[i] = _getOwnerKeySlice(i);
+            key[i] = _getPublicKeySlice(i);
         }
     }
 
     /**
      * @notice Returns the number of words that a key should occupy.
      * Should return:
-     * KeyType.ECDSAOrSmartContract = 1
-     * KeyType.P256 = 2
-     * KeyType.WebAuthnP256 = 2
+     * PublicKeyType.ECDSAOrSmartContract = 1
+     * PublicKeyType.P256 = 2
+     * PublicKeyType.WebAuthnP256 = 2
      */
     function _keyTypeLength(
-        KeyType keyType
+        PublicKeyType keyType
     ) internal pure returns (uint256 len) {
         assembly ("memory-safe") {
-            len := add( // 0: 1, 1: 2, 2: 2
+            len := add(
+                // 0: 1, 1: 2, 2: 2
                 keyType,
                 lt(keyType, 2) // 0: 1, 1: 1 otherwise 0
             )
@@ -90,14 +91,15 @@ contract KeyedOwnable {
     }
 
     function owner() external view returns (address) {
-        return _asAddressNotDirty(_getOwnerKeySlice(0));
+        return _asAddressNotDirty(_getPublicKeySlice(0));
     }
 
     modifier onlyOwnerOrSelf() {
         assembly ("memory-safe") {
             if iszero(eq(caller(), address())) {
                 // If the caller is not the stored owner, revert.
-                // If _OWNER_SLOT has higher bits set (not KeyType.ECDSAOrSmartContract) then this will never be true.
+                // If _OWNER_SLOT has higher bits set (not PublicKeyType.ECDSAOrSmartContract) then this will never be
+                // true.
                 if iszero(eq(caller(), sload(_OWNER_SLOT))) {
                     mstore(0x00, 0x82b42900) // `Unauthorized()`.
                     revert(0x1c, 0x04)
@@ -114,14 +116,15 @@ contract KeyedOwnable {
         assembly ("memory-safe") {
             v := eq(caller(), address())
             if iszero(v) {
-                // If _OWNER_SLOT has higher bits set (not KeyType.ECDSAOrSmartContract) then this will never be true.
+                // If _OWNER_SLOT has higher bits set (not PublicKeyType.ECDSAOrSmartContract) then this will never be
+                // true.
                 v := eq(caller(), sload(_OWNER_SLOT))
             }
         }
     }
 
     function _isValidKey(
-        KeyType keyType,
+        PublicKeyType keyType,
         bytes32[] calldata key
     ) internal pure returns (bool valid) {
         uint256 expectedKeyLength = _keyTypeLength(keyType);
@@ -178,16 +181,16 @@ contract KeyedOwnable {
      * @param nextKey Bytes of the provided key. Keys chunks are encoded based on the key type provided.
      */
     function _transferOwnership(
-        KeyType ktp,
+        PublicKeyType ktp,
         bytes32[] calldata nextKey
     ) internal {
         if (!_isValidKey(ktp, nextKey)) revert InvalidKey();
 
         uint256 nextKeyLength = nextKey.length;
         for (uint256 i; i < nextKeyLength; ++i) {
-            _setOwnerKeySlice(i, nextKey[i]);
+            _setPublicKeySlice(i, nextKey[i]);
         }
-        ownerKeyType = ktp;
+        publicKeyType = ktp;
         emit OwnershipTransferred(ktp, nextKey);
     }
 
@@ -197,7 +200,7 @@ contract KeyedOwnable {
      * @param nextKey Bytes of the provided key. Keys chunks are encoded based on the key type provided.
      */
     function transferOwnership(
-        KeyType ktp,
+        PublicKeyType ktp,
         bytes32[] calldata nextKey
     ) public payable onlyOwnerOrSelf {
         _transferOwnership(ktp, nextKey);
@@ -212,13 +215,13 @@ contract KeyedOwnable {
         address newOwner
     ) public payable onlyOwnerOrSelf {
         // We set the keytype as smart contract
-        ownerKeyType = KeyType.ECDSAOrSmartContract;
-        _setOwnerKeySlice(0, bytes32(uint256(uint160(newOwner))));
+        publicKeyType = PublicKeyType.ECDSAOrSmartContract;
+        _setPublicKeySlice(0, bytes32(uint256(uint160(newOwner))));
 
         bytes32[] memory nextKeys = new bytes32[](1);
         nextKeys[0] = bytes32(uint256(uint160(newOwner)));
 
-        emit OwnershipTransferred(KeyType.ECDSAOrSmartContract, nextKeys);
+        emit OwnershipTransferred(PublicKeyType.ECDSAOrSmartContract, nextKeys);
     }
 
     /**
@@ -235,7 +238,7 @@ contract KeyedOwnable {
     ) internal view returns (bool) {
         // If the signature's length is 64 or 65, treat the signature like a "Ethereum" signature.
         if (LibBit.or(signature.length == 64, signature.length == 65)) {
-            address account = _asAddressNotDirty(_getOwnerKeySlice(0));
+            address account = _asAddressNotDirty(_getPublicKeySlice(0));
             return SignatureCheckerLib.isValidSignatureNowCalldata(account, digest, signature);
         }
 
@@ -250,17 +253,17 @@ contract KeyedOwnable {
             }
         }
 
-        if (ownerKeyType == KeyType.P256) {
+        if (publicKeyType == PublicKeyType.P256) {
             // The try decode functions returns `(0,0)` if the bytes is too short,
             // which will make the signature check fail.
             (bytes32 r, bytes32 s) = P256.tryDecodePointCalldata(signature);
-            bytes32 x = _getOwnerKeySlice(0);
-            bytes32 y = _getOwnerKeySlice(1);
+            bytes32 x = _getPublicKeySlice(0);
+            bytes32 y = _getPublicKeySlice(1);
             return P256.verifySignature(digest, r, s, x, y);
         }
-        if (ownerKeyType == KeyType.WebAuthnP256) {
-            bytes32 x = _getOwnerKeySlice(0);
-            bytes32 y = _getOwnerKeySlice(1);
+        if (publicKeyType == PublicKeyType.WebAuthnP256) {
+            bytes32 x = _getPublicKeySlice(0);
+            bytes32 y = _getPublicKeySlice(1);
             return WebAuthn.verify(
                 abi.encode(digest), // Challenge.
                 false, // Require user verification optional.
@@ -270,8 +273,8 @@ contract KeyedOwnable {
                 y
             );
         }
-        if (ownerKeyType == KeyType.ECDSAOrSmartContract) {
-            address account = _asAddressNotDirty(_getOwnerKeySlice(0));
+        if (publicKeyType == PublicKeyType.ECDSAOrSmartContract) {
+            address account = _asAddressNotDirty(_getPublicKeySlice(0));
             return SignatureCheckerLib.isValidSignatureNowCalldata(account, digest, signature);
         }
         return false;

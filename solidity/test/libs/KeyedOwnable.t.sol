@@ -106,30 +106,30 @@ contract KeyedOwnableTest is P256VerifierEtcher {
 
         bytes32[] memory owner = new bytes32[](1);
         owner[0] = bytes32(uint256(uint160(initialOwner)));
-        ownable.setOwnership(KeyedOwnable.KeyType.ECDSAOrSmartContract, owner);
+        ownable.setOwnership(KeyedOwnable.PublicKeyType.ECDSAOrSmartContract, owner);
     }
 
     function test_transferOwnership() external {
         // Validate that owner slot 1 is clean
-        bytes32 cleanSlot = ownable.getOwnerKeySlice(1);
+        bytes32 cleanSlot = ownable.getPublicKeySlice(1);
         assertEq(cleanSlot, 0);
 
-        (KeyedOwnable.KeyType ktp, bytes32[] memory key) = ownable.getOwnerKey();
+        (KeyedOwnable.PublicKeyType ktp, bytes32[] memory key) = ownable.getPublicKey();
 
         bytes32[] memory expectedKey = new bytes32[](1);
         expectedKey[0] = bytes32(uint256(uint160(initialOwner)));
-        assertEq(uint8(ktp), uint8(KeyedOwnable.KeyType.ECDSAOrSmartContract));
+        assertEq(uint8(ktp), uint8(KeyedOwnable.PublicKeyType.ECDSAOrSmartContract));
         assertEq(key, expectedKey);
 
         expectedKey[0] = bytes32(uint256(uint160(makeAddr("newOwner"))));
         // New ECDSA owner.
         vm.prank(ownable.owner());
         vm.expectEmit();
-        emit KeyedOwnable.OwnershipTransferred(KeyedOwnable.KeyType.ECDSAOrSmartContract, expectedKey);
+        emit KeyedOwnable.OwnershipTransferred(KeyedOwnable.PublicKeyType.ECDSAOrSmartContract, expectedKey);
         ownable.transferOwnership(makeAddr("newOwner"));
 
-        (ktp, key) = ownable.getOwnerKey();
-        assertEq(uint8(ktp), uint8(KeyedOwnable.KeyType.ECDSAOrSmartContract));
+        (ktp, key) = ownable.getPublicKey();
+        assertEq(uint8(ktp), uint8(KeyedOwnable.PublicKeyType.ECDSAOrSmartContract));
         assertEq(key, expectedKey);
 
         // New P256 owner
@@ -137,22 +137,22 @@ contract KeyedOwnableTest is P256VerifierEtcher {
 
         vm.prank(ownable.owner());
         vm.expectEmit();
-        emit KeyedOwnable.OwnershipTransferred(KeyedOwnable.KeyType.P256, publickeyP256);
-        ownable.transferOwnership(KeyedOwnable.KeyType.P256, publickeyP256);
+        emit KeyedOwnable.OwnershipTransferred(KeyedOwnable.PublicKeyType.P256, publickeyP256);
+        ownable.transferOwnership(KeyedOwnable.PublicKeyType.P256, publickeyP256);
 
-        (ktp, key) = ownable.getOwnerKey();
-        assertEq(uint8(ktp), uint8(KeyedOwnable.KeyType.P256));
+        (ktp, key) = ownable.getPublicKey();
+        assertEq(uint8(ktp), uint8(KeyedOwnable.PublicKeyType.P256));
         assertEq(key, publickeyP256);
 
         (, publickeyP256) = makeP256("WebAuthnP256Owner");
 
         vm.prank(address(ownable));
         vm.expectEmit();
-        emit KeyedOwnable.OwnershipTransferred(KeyedOwnable.KeyType.WebAuthnP256, publickeyP256);
-        ownable.transferOwnership(KeyedOwnable.KeyType.WebAuthnP256, publickeyP256);
+        emit KeyedOwnable.OwnershipTransferred(KeyedOwnable.PublicKeyType.WebAuthnP256, publickeyP256);
+        ownable.transferOwnership(KeyedOwnable.PublicKeyType.WebAuthnP256, publickeyP256);
 
-        (ktp, key) = ownable.getOwnerKey();
-        assertEq(uint8(ktp), uint8(KeyedOwnable.KeyType.WebAuthnP256));
+        (ktp, key) = ownable.getPublicKey();
+        assertEq(uint8(ktp), uint8(KeyedOwnable.PublicKeyType.WebAuthnP256));
         assertEq(key, publickeyP256);
 
         vm.expectRevert(abi.encodeWithSelector(KeyedOwnable.DirtyEthereumAddress.selector, (publickeyP256[0])));
@@ -164,15 +164,15 @@ contract KeyedOwnableTest is P256VerifierEtcher {
         // New ECDSA owner.
         vm.prank(address(ownable));
         vm.expectEmit();
-        emit KeyedOwnable.OwnershipTransferred(KeyedOwnable.KeyType.ECDSAOrSmartContract, expectedKey);
+        emit KeyedOwnable.OwnershipTransferred(KeyedOwnable.PublicKeyType.ECDSAOrSmartContract, expectedKey);
         ownable.transferOwnership(makeAddr("newOwner"));
 
-        (ktp, key) = ownable.getOwnerKey();
-        assertEq(uint8(ktp), uint8(KeyedOwnable.KeyType.ECDSAOrSmartContract));
+        (ktp, key) = ownable.getPublicKey();
+        assertEq(uint8(ktp), uint8(KeyedOwnable.PublicKeyType.ECDSAOrSmartContract));
         assertEq(key, expectedKey);
 
         // Notice that we have a dirty slot now.
-        bytes32 dirtySlot = ownable.getOwnerKeySlice(1);
+        bytes32 dirtySlot = ownable.getPublicKeySlice(1);
         assertNotEq(dirtySlot, 0);
     }
 
@@ -184,92 +184,92 @@ contract KeyedOwnableTest is P256VerifierEtcher {
 
         // 0
         vm.expectRevert(KeyedOwnable.InvalidKey.selector);
-        ownable.transferOwnership(KeyedOwnable.KeyType.ECDSAOrSmartContract, owner);
+        ownable.transferOwnership(KeyedOwnable.PublicKeyType.ECDSAOrSmartContract, owner);
 
         // dirty Ethereum address.
         owner[0] = keccak256(bytes("newOwner"));
         vm.expectRevert(KeyedOwnable.InvalidKey.selector);
-        ownable.transferOwnership(KeyedOwnable.KeyType.ECDSAOrSmartContract, owner);
+        ownable.transferOwnership(KeyedOwnable.PublicKeyType.ECDSAOrSmartContract, owner);
 
         // 0
         owner[0] = bytes32(0);
         vm.expectRevert(KeyedOwnable.InvalidKey.selector);
-        ownable.transferOwnership(KeyedOwnable.KeyType.ECDSAOrSmartContract, owner);
+        ownable.transferOwnership(KeyedOwnable.PublicKeyType.ECDSAOrSmartContract, owner);
 
         owner = new bytes32[](1);
         // dirty Ethereum address.
         owner[0] = keccak256(bytes("newOwner"));
         vm.expectRevert(KeyedOwnable.InvalidKey.selector);
-        ownable.transferOwnership(KeyedOwnable.KeyType.ECDSAOrSmartContract, owner);
+        ownable.transferOwnership(KeyedOwnable.PublicKeyType.ECDSAOrSmartContract, owner);
 
         // Too long
         owner = new bytes32[](2);
         owner[0] = bytes32(uint256(uint160(makeAddr("newOwner"))));
         vm.expectRevert(KeyedOwnable.InvalidKey.selector);
-        ownable.transferOwnership(KeyedOwnable.KeyType.ECDSAOrSmartContract, owner);
+        ownable.transferOwnership(KeyedOwnable.PublicKeyType.ECDSAOrSmartContract, owner);
 
         // Too short
         owner = new bytes32[](0);
         vm.expectRevert(KeyedOwnable.InvalidKey.selector);
-        ownable.transferOwnership(KeyedOwnable.KeyType.ECDSAOrSmartContract, owner);
+        ownable.transferOwnership(KeyedOwnable.PublicKeyType.ECDSAOrSmartContract, owner);
 
         // P256
 
         // too short
         owner = new bytes32[](0);
         vm.expectRevert(KeyedOwnable.InvalidKey.selector);
-        ownable.transferOwnership(KeyedOwnable.KeyType.P256, owner);
+        ownable.transferOwnership(KeyedOwnable.PublicKeyType.P256, owner);
         owner = new bytes32[](1);
         owner[0] = keccak256(bytes("x"));
         vm.expectRevert(KeyedOwnable.InvalidKey.selector);
-        ownable.transferOwnership(KeyedOwnable.KeyType.P256, owner);
+        ownable.transferOwnership(KeyedOwnable.PublicKeyType.P256, owner);
 
         // 0
         owner = new bytes32[](2);
         owner[0] = keccak256(bytes("x"));
         owner[1] = bytes32(0);
         vm.expectRevert(KeyedOwnable.InvalidKey.selector);
-        ownable.transferOwnership(KeyedOwnable.KeyType.P256, owner);
+        ownable.transferOwnership(KeyedOwnable.PublicKeyType.P256, owner);
         owner[1] = keccak256(bytes("y"));
         owner[0] = bytes32(0);
         vm.expectRevert(KeyedOwnable.InvalidKey.selector);
-        ownable.transferOwnership(KeyedOwnable.KeyType.P256, owner);
+        ownable.transferOwnership(KeyedOwnable.PublicKeyType.P256, owner);
 
         // too long
         owner = new bytes32[](3);
         owner[0] = keccak256(bytes("x"));
         owner[1] = keccak256(bytes("y"));
         vm.expectRevert(KeyedOwnable.InvalidKey.selector);
-        ownable.transferOwnership(KeyedOwnable.KeyType.P256, owner);
+        ownable.transferOwnership(KeyedOwnable.PublicKeyType.P256, owner);
 
         // P256 WebAuthnP256
 
         // too short
         owner = new bytes32[](0);
         vm.expectRevert(KeyedOwnable.InvalidKey.selector);
-        ownable.transferOwnership(KeyedOwnable.KeyType.WebAuthnP256, owner);
+        ownable.transferOwnership(KeyedOwnable.PublicKeyType.WebAuthnP256, owner);
         owner = new bytes32[](1);
         owner[0] = keccak256(bytes("x"));
         vm.expectRevert(KeyedOwnable.InvalidKey.selector);
-        ownable.transferOwnership(KeyedOwnable.KeyType.WebAuthnP256, owner);
+        ownable.transferOwnership(KeyedOwnable.PublicKeyType.WebAuthnP256, owner);
 
         // 0
         owner = new bytes32[](2);
         owner[0] = keccak256(bytes("x"));
         owner[1] = bytes32(0);
         vm.expectRevert(KeyedOwnable.InvalidKey.selector);
-        ownable.transferOwnership(KeyedOwnable.KeyType.WebAuthnP256, owner);
+        ownable.transferOwnership(KeyedOwnable.PublicKeyType.WebAuthnP256, owner);
         owner[1] = keccak256(bytes("y"));
         owner[0] = bytes32(0);
         vm.expectRevert(KeyedOwnable.InvalidKey.selector);
-        ownable.transferOwnership(KeyedOwnable.KeyType.WebAuthnP256, owner);
+        ownable.transferOwnership(KeyedOwnable.PublicKeyType.WebAuthnP256, owner);
 
         // too long
         owner = new bytes32[](3);
         owner[0] = keccak256(bytes("x"));
         owner[1] = keccak256(bytes("y"));
         vm.expectRevert(KeyedOwnable.InvalidKey.selector);
-        ownable.transferOwnership(KeyedOwnable.KeyType.WebAuthnP256, owner);
+        ownable.transferOwnership(KeyedOwnable.PublicKeyType.WebAuthnP256, owner);
     }
 
     function test_validateSignature_ECDSA() external view {
@@ -305,7 +305,7 @@ contract KeyedOwnableTest is P256VerifierEtcher {
 
         bytes32[] memory owner = new bytes32[](1);
         owner[0] = bytes32(uint256(uint160(smartAccountOwner)));
-        ownable.setOwnership(KeyedOwnable.KeyType.ECDSAOrSmartContract, owner);
+        ownable.setOwnership(KeyedOwnable.PublicKeyType.ECDSAOrSmartContract, owner);
 
         uint8 v;
         bytes32 r;
@@ -329,7 +329,7 @@ contract KeyedOwnableTest is P256VerifierEtcher {
         // We need to switch the account to a P256 owner.
         (uint256 privatekeyP256, bytes32[] memory publickeyP256) = makeP256("WebAuthnP256Owner");
         vm.prank(address(ownable));
-        ownable.transferOwnership(KeyedOwnable.KeyType.P256, publickeyP256);
+        ownable.transferOwnership(KeyedOwnable.PublicKeyType.P256, publickeyP256);
 
         bytes32 randomDigest = keccak256(bytes("randomDigest"));
 
@@ -382,7 +382,7 @@ contract KeyedOwnableTest is P256VerifierEtcher {
         // We need to switch the account to a P256 owner.
         (uint256 privatekeyP256, bytes32[] memory publickeyP256) = makeP256("WebAuthnP256Owner");
         vm.prank(address(ownable));
-        ownable.transferOwnership(KeyedOwnable.KeyType.WebAuthnP256, publickeyP256);
+        ownable.transferOwnership(KeyedOwnable.PublicKeyType.WebAuthnP256, publickeyP256);
 
         bytes32 randomDigest = keccak256(bytes("randomDigest"));
         WebAuthn.WebAuthnAuth memory auth = _signedWebAuthnAuth(randomDigest, privatekeyP256);

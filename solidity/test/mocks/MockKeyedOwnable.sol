@@ -9,16 +9,16 @@ import { KeyedOwnable } from "../../src/libs/KeyedOwnable.sol";
 /// Do NOT copy anything here into production code unless you really know what you are doing.
 contract MockKeyedOwnable is KeyedOwnable, Brutalizer {
     function setOwnership(
-        KeyType ktp,
+        PublicKeyType ktp,
         bytes32[] calldata nextKey
     ) public payable {
         _transferOwnership(ktp, nextKey);
     }
 
-    function getOwnerKeySlice(
+    function getPublicKeySlice(
         uint256 index
     ) public view returns (bytes32) {
-        return _getOwnerKeySlice(index);
+        return _getPublicKeySlice(index);
     }
 
     function validateSignature(
