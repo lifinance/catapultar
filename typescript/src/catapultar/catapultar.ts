@@ -1,4 +1,4 @@
-import { encodeFunctionData, hashTypedData } from "viem";
+import { hashTypedData } from "viem";
 import { random } from "../utils/helpers";
 import {
   AccountPublicKeyType,
@@ -10,7 +10,6 @@ import {
   type Version,
 } from "../types/types";
 import { CatapultarAccount } from "./account";
-import CATAPULTAR_V0_1_0_ABI from "../abi/catapultarV0.1.0";
 import { BaseTransaction } from "../transaction/transaction";
 
 /**
@@ -191,18 +190,10 @@ export class CatapultarTx<
    * @return As a call for further scheduling or manual transaction signing. If used for manual transaction.
    */
   async asCall(): Promise<Call> {
-    if (!this.hasValidMode())
-      throw new Error(`Mode incorrectly set: ${this.mode}`);
-    const executionData = await this.getExecutionData();
-    const data = encodeFunctionData({
-      abi: CATAPULTAR_V0_1_0_ABI,
-      functionName: "execute",
-      args: [this.mode!, executionData],
-    });
+    // TODO: validation
     return {
+      ...(await this.asCallData()),
       to: this.account.address,
-      value: 0n,
-      data,
     };
   }
 }

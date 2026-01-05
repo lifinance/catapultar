@@ -21,11 +21,13 @@ import { Account } from "viem/tempo";
 import { Base64, P256 } from "ox";
 import { CatapultarAccount } from "./account";
 import { rpcUrl } from "../../test/setup";
-import { factories, templates } from "../../test/config";
+import {
+  factories,
+  PUBLIC_DEFAULT_ANVIL_ACCOUNT_0,
+  templates,
+} from "../../test/config";
 
 const chainId = 31337;
-const PUBLIC_DEFAULT_ANVIL_ACCOUNT_0 =
-  "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
 
 async function waitForTransaction(hash: `0x${string}`) {
   await new Promise((resolve) => setTimeout(resolve, 50));

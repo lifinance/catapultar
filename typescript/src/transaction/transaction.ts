@@ -11,6 +11,7 @@ import { asHex, pubkeyAsArray, random } from "../utils/helpers";
 import { toCompactSignature } from "../utils/signature";
 import { CatapultarAccount } from "../catapultar/account";
 import CATAPULTAR_FACTORY_V0_1_0_ABI from "../abi/catapultarFactoryV0.1.0";
+import CATAPULTAR_V0_1_0_ABI from "../abi/catapultarV0.1.0";
 
 export class BaseTransaction {
   /** Transaction ExecutionMode, defines transaction behavior for call reverts. */
@@ -119,9 +120,7 @@ export class BaseTransaction {
    * @dev Opdata is nonce + signature packed.
    * If no signature has been provided to the object, it will create the transaction without a signatures. This can be used to sub-batch the transaction.
    */
-  async getOpData(options?: {
-    compactSignature: boolean;
-  }): Promise<`0x${string}`> {
+  getOpData(options?: { compactSignature: boolean }): `0x${string}` {
     if (this.nonce === 0n)
       throw new Error(
         "Nonce 0 is not allowed. It cannot be differentiated from an invalid nonce.",
@@ -140,24 +139,42 @@ export class BaseTransaction {
     }
   }
 
-  async getExecutionData() {
+  getExecutionData() {
     return encodeAbiParameters(
       [{ type: "tuple[]", components: CallsTyped.Call }, { type: "bytes" }],
-      [this.calls, await this.getOpData()],
+      [this.calls, this.getOpData()],
     );
   }
 
   // --- Convert the transaction object into actionable items --- //
 
   /** @return As parameters for an execute call. */
-  async asParameters() {
+  asParameters() {
     return {
       mode: this.mode,
-      executionData: await this.getExecutionData(),
+      executionData: this.getExecutionData(),
       metadata: {
         value: this.getTotalValue(),
         signature: this.signature,
       },
+    };
+  }
+
+  /**
+   * @return As a call for further scheduling or manual transaction signing. If used for manual transaction.
+   */
+  asCallData(): Omit<Call, "to"> {
+    if (!this.hasValidMode())
+      throw new Error(`Mode incorrectly set: ${this.mode}`);
+    const executionData = this.getExecutionData();
+    const data = encodeFunctionData({
+      abi: CATAPULTAR_V0_1_0_ABI,
+      functionName: "execute",
+      args: [this.mode!, executionData],
+    });
+    return {
+      value: 0n,
+      data,
     };
   }
 
@@ -186,14 +203,14 @@ export class BaseTransaction {
       Factory,
   ) {
     const callDigest = this.asDigest();
-    const predictedAddress = CatapultarAccount.predict({
+    const address = CatapultarAccount.predict({
       ...options,
       callDigest,
       isSignature: false,
     });
 
     const pubkeyArray = pubkeyAsArray(options);
-    const call = {
+    const deployCall = {
       to: options.factory,
       data: encodeFunctionData({
         abi: CATAPULTAR_FACTORY_V0_1_0_ABI,
@@ -202,11 +219,13 @@ export class BaseTransaction {
       }),
       value: 0n,
     };
+    const actionCall = { ...this.asCallData(), to: address };
 
     return {
-      call,
+      deployCall,
+      actionCall,
       callDigest,
-      predictedAddress,
+      address,
     };
   }
 }
