@@ -1,14 +1,16 @@
-import { encodeAbiParameters, hashStruct } from "viem";
+import { encodeAbiParameters, encodeFunctionData, hashStruct } from "viem";
 import {
   AccountPublicKeyType,
   CallsTyped,
   ExecutionMode,
   type Call,
+  type Factory,
   type Pubkey,
 } from "../types/types";
-import { asHex, random } from "../utils/helpers";
+import { asHex, pubkeyAsArray, random } from "../utils/helpers";
 import { toCompactSignature } from "../utils/signature";
 import { CatapultarAccount } from "../catapultar/account";
+import CATAPULTAR_FACTORY_V0_1_0_ABI from "../abi/catapultarFactoryV0.1.0";
 
 export class BaseTransaction {
   /** Transaction ExecutionMode, defines transaction behavior for call reverts. */
@@ -20,13 +22,13 @@ export class BaseTransaction {
 
   signature?: `0x${string}`;
 
-  constructor(opt: {
+  constructor(opt?: {
     mode?: ExecutionMode;
     nonce?: bigint;
     calls?: Call[];
     signature?: `0x${string}`;
   }) {
-    const { mode, nonce, calls = [], signature } = opt;
+    const { mode, nonce, calls = [], signature } = opt ?? {};
     this.mode = mode;
     this.nonce = nonce;
     this.calls = calls;
@@ -178,22 +180,31 @@ export class BaseTransaction {
 
   /** Generate an account with this action embedded. */
   asAccount<AKT extends AccountPublicKeyType>(
-    opt: {
+    options: {
       salt: `0x${string}`;
-    } & Pubkey<AKT>,
+    } & Pubkey<AKT> &
+      Factory,
   ) {
     const callDigest = this.asDigest();
     const predictedAddress = CatapultarAccount.predict({
-      salt: opt.salt,
+      ...options,
       callDigest,
       isSignature: false,
-      keyType: opt.keyType,
-      pubkey: opt.pubkey,
     });
 
-    // TODO: Generate deploy call.
+    const pubkeyArray = pubkeyAsArray(options);
+    const call = {
+      to: options.factory,
+      data: encodeFunctionData({
+        abi: CATAPULTAR_FACTORY_V0_1_0_ABI,
+        functionName: "deployWithDigest",
+        args: [options.keyType, pubkeyArray, options.salt, callDigest, false],
+      }),
+      value: 0n,
+    };
 
     return {
+      call,
       callDigest,
       predictedAddress,
     };
