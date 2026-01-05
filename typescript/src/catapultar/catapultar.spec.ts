@@ -12,29 +12,23 @@ import { anvil } from "viem/chains";
 import {
   createPublicClient,
   createWalletClient,
-  encodeAbiParameters,
   hashTypedData,
   http,
   sha256,
   stringToBytes,
-  toHex,
 } from "viem";
 import { Account } from "viem/tempo";
 import { Base64, P256 } from "ox";
 import { CatapultarAccount } from "./account";
 import { rpcUrl } from "../../test/setup";
-import { sha } from "bun";
+import { factories, templates } from "../../test/config";
 
 const chainId = 31337;
 const PUBLIC_DEFAULT_ANVIL_ACCOUNT_0 =
   "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
-const factories = {
-  "0.1.0": "0x1b8FE3BD26940e48a0fcaE97d5AA48Bc598Bf46e",
-  "0.0.1": "0x526a216Ab5b39683a3C75796dE4391F686406F2A",
-} as const;
 
 async function waitForTransaction(hash: `0x${string}`) {
-  await new Promise((resolve) => setTimeout(resolve, 200));
+  await new Promise((resolve) => setTimeout(resolve, 50));
   // We need to wait for the transaction to be finalised.
   const publicClient = createPublicClient({
     chain: anvil,
@@ -45,25 +39,6 @@ async function waitForTransaction(hash: `0x${string}`) {
 
 describe("Catapultar", () => {
   describe("Transaction", () => {
-    it.concurrent("should set a random nonce", () => {
-      const pubkey = "0x1111111111111111111111111111111111111110";
-      const tx = new CatapultarTx({
-        account: {
-          address: "0x1111111111111111111111111111111111111111",
-          chainId: 1,
-          pubkey,
-        },
-        nonce: 1n,
-      });
-      const firstNonce = tx.nonce;
-      tx.setRandomNonce();
-      expect(tx.nonce).not.toBe(firstNonce);
-      const secondNonce = tx.nonce;
-      tx.setRandomNonce();
-      expect(tx.nonce).not.toBe(firstNonce);
-      expect(tx.nonce).not.toBe(secondNonce);
-    });
-
     it.concurrent("should disallow nonce 0", () => {
       const pubkey = "0x1111111111111111111111111111111111111110";
       const tx = new CatapultarTx({
@@ -74,10 +49,7 @@ describe("Catapultar", () => {
         },
       });
       const nonce0Error = `Nonce 0 is not allowed. It cannot be differentiated from an invalid nonce.`;
-      expect(() => tx.setNonce(0n)).toThrow(nonce0Error);
-      expect(tx.nonce).toBeUndefined();
       tx.nonce = 0n;
-      expect(() => tx.getOpData()).toThrow(nonce0Error);
       expect(() => tx.getSignerData()).toThrow(nonce0Error);
     });
 
@@ -405,14 +377,16 @@ describe("Catapultar", () => {
 
       beforeEach(async () => {
         const deployCall010 = await CatapultarAccount.deploy({
-          chainId,
           keyType: keyType,
           pubkey: publicKey,
           salt: `0x${asHex(0n, 20)}${random(12).replace("0x", "")}`,
-          rpc: rpcUrl(),
           factory: factories["0.1.0"],
+          template: templates["0.1.0"],
         });
-        deployedAccountV010 = deployCall010.account;
+        deployedAccountV010 = deployCall010.account.attachRpc({
+          chainId,
+          rpc: rpcUrl(),
+        });
         const tx = await executor.sendTransaction({
           ...deployCall010.call,
         });

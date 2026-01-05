@@ -24,20 +24,20 @@ import {
 import { getViemChainId } from "../utils/viem";
 import CATAPULTAR_V0_1_0_ABI from "../abi/catapultarV0.1.0";
 import CATAPULTAR_FACTORY_V0_1_0_ABI from "../abi/catapultarFactoryV0.1.0";
-import { asHex, pubkeyAsArray } from "../utils/helpers";
+import { pubkeyAsArray } from "../utils/helpers";
 // import { CATAPULTAR_V0_0_1_ABI } from "../abi/catapultarV0.0.1";
 import { P256, PublicKey, WebAuthnP256 } from "ox";
 import { fromCompactSignature } from "../utils/signature";
 
 export class CatapultarAccount<
-  V extends Version,
+  V extends Version = "0.1.0",
   RPC extends string | undefined = undefined,
   AKT extends AccountPublicKeyType = AccountPublicKeyType.ECDSAOrSmartContract,
 > {
   /** This is not the pubkey of the account, this is the smart account itself. */
   readonly address: `0x${string}`;
   /** ChainId of the account. */
-  readonly chainId: undefined extends RPC ? number | undefined : number;
+  chainId: undefined extends RPC ? number | undefined : number;
 
   /** Name of the account. Used for the domainSeparator. */
   readonly name: string;
@@ -57,7 +57,7 @@ export class CatapultarAccount<
       chainId,
       pubkey,
       name = "Catapultar",
-      version = "0.1.0" as V,
+      version = "0.1.0",
       rpc,
     } = options;
 
@@ -91,76 +91,46 @@ export class CatapultarAccount<
 
     // Custom domainSeparator
     this.name = name;
-    this.version = version;
+    this.version = version as V;
   }
 
-  static async deploy<V extends Version, AKT extends AccountPublicKeyType>(
+  static deploy<V extends Version, AKT extends AccountPublicKeyType>(
     options: {
-      chainId: number;
-      salt: `0x${string}` | bigint;
-      rpc: string;
+      salt: `0x${string}`;
     } & Pubkey<AKT> &
-      Omit<Factory, "template"> &
+      Factory &
       ({} | EmbeddedCall),
-  ): Promise<{ call: Call; account: CatapultarAccount<V, string, AKT> }> {
-    const { rpc, chainId } = options;
-    let factory: `0x${string}`;
-    const viemChain = getViemChainId(chainId);
-    const publicClient = createPublicClient({
-      chain: viemChain,
-      transport: http(rpc),
-    });
-    factory = options.factory;
-    const readVersion = await publicClient.readContract({
-      address: factory,
-      abi: CATAPULTAR_FACTORY_V0_1_0_ABI,
-      functionName: "VERSION",
-    });
-    const version = readVersion as V;
-
-    const ownerArray = pubkeyAsArray(options);
-
-    let salt = options.salt;
-    if (typeof salt === "bigint") {
-      salt = asHex(salt, 32, "0x");
-    }
-
+  ): { call: Call; account: CatapultarAccount<V, undefined, AKT> } {
     let callDigest: `0x${string}` | undefined = undefined;
     let isSignature: boolean | undefined = undefined;
-    if ("callDigest" in options) {
+
+    let derivedAddress: `0x${string}`;
+    if ("callDigest" in options && "isSignature" in options) {
       callDigest = options.callDigest;
       isSignature = options.isSignature;
+
+      derivedAddress = CatapultarAccount.predict({
+        ...options,
+        callDigest: callDigest,
+        isSignature: isSignature,
+      });
+    } else {
+      derivedAddress = CatapultarAccount.predict({
+        ...options,
+      });
     }
 
-    const expectedAddress = callDigest
-      ? await publicClient.readContract({
-          address: factory,
-          abi: CATAPULTAR_FACTORY_V0_1_0_ABI,
-          functionName: "predictDeployWithDigest",
-          args: [
-            options.keyType as AccountPublicKeyType,
-            ownerArray,
-            salt,
-            callDigest,
-            isSignature as boolean,
-          ],
-        })
-      : await publicClient.readContract({
-          address: factory,
-          abi: CATAPULTAR_FACTORY_V0_1_0_ABI,
-          functionName: "predictDeploy",
-          args: [options.keyType as AccountPublicKeyType, ownerArray, salt],
-        });
+    const pubkeyArray = pubkeyAsArray(options);
     const call = {
-      to: factory,
+      to: options.factory,
       data: callDigest
         ? encodeFunctionData({
             abi: CATAPULTAR_FACTORY_V0_1_0_ABI,
             functionName: "deployWithDigest",
             args: [
               options.keyType,
-              ownerArray,
-              salt,
+              pubkeyArray,
+              options.salt,
               callDigest,
               isSignature as boolean,
             ],
@@ -168,7 +138,7 @@ export class CatapultarAccount<
         : encodeFunctionData({
             abi: CATAPULTAR_FACTORY_V0_1_0_ABI,
             functionName: "deploy",
-            args: [options.keyType, ownerArray, salt],
+            args: [options.keyType, pubkeyArray, options.salt],
           }),
       value: 0n,
     };
@@ -176,13 +146,9 @@ export class CatapultarAccount<
     return {
       call,
       account: new CatapultarAccount({
-        address: expectedAddress,
+        address: derivedAddress,
         accountPublicKeyType: options.keyType,
-        chainId,
         pubkey: options.pubkey,
-        name: "Catapultar",
-        version: version,
-        rpc,
       }),
     };
   }
@@ -211,9 +177,8 @@ export class CatapultarAccount<
   ) {
     const pubkeyArray = pubkeyAsArray(opt);
     const saltPrefix =
-      opt.keyType === AccountPublicKeyType.ECDSAOrSmartContract &&
-      this.ownerInSalt.length === 1
-        ? opt.pubkey[0]!
+      opt.keyType === AccountPublicKeyType.ECDSAOrSmartContract
+        ? opt.pubkey
         : keccak256(encodePacked(["bytes32[]"], [pubkeyArray]));
 
     const saltSlice = opt.salt.slice(0, 20 * 2 + 2);
@@ -224,13 +189,14 @@ export class CatapultarAccount<
     opt: {
       salt: `0x${string}`;
     } & Pubkey<AKT> &
+      Factory &
       ({} | EmbeddedCall),
   ) {
     if (!CatapultarAccount.ownerInSalt(opt))
-      throw new Error(`Pubkey not in salt`);
-    let { salt } = opt;
+      throw new Error(`Pubkey: ${opt.pubkey} not in salt: ${opt.salt}`);
+    let { salt, template, factory } = opt;
     // If a digest is used, rehash the hash.
-    if ("digest" in opt && "isSignature" in opt) {
+    if ("callDigest" in opt && "isSignature" in opt) {
       const { callDigest, isSignature } = opt;
       salt = keccak256(
         encodePacked(
@@ -239,9 +205,7 @@ export class CatapultarAccount<
         ),
       );
     }
-    const executor: `0x${string}` = "0x";
-    const factory: `0x${string}` = "0x";
-    return CatapultarAccount.deriveCloneAddress(executor, salt, factory);
+    return CatapultarAccount.deriveCloneAddress(template, salt, factory);
   }
 
   publicClient(this: CatapultarAccount<any, string, any>) {
@@ -253,11 +217,7 @@ export class CatapultarAccount<
   }
 
   abi(this: CatapultarAccount<V, any, any>): typeof CATAPULTAR_V0_1_0_ABI {
-    if (this.version.startsWith("0.1")) {
-      return CATAPULTAR_V0_1_0_ABI;
-    } else {
-      throw new Error(`Unsupported version: ${this.version}`);
-    }
+    return CATAPULTAR_V0_1_0_ABI;
   }
 
   hasRpc(): this is CatapultarAccount<any, string, any> {
@@ -284,6 +244,15 @@ export class CatapultarAccount<
     AccountPublicKeyType.WebAuthnP256
   > {
     return this.accountPublicKeyType === AccountPublicKeyType.WebAuthnP256;
+  }
+
+  attachRpc(opt: {
+    rpc: string;
+    chainId: number;
+  }): CatapultarAccount<V, string, AKT> {
+    this.rpc = opt.rpc as RPC;
+    this.chainId = opt.chainId;
+    return this as this & CatapultarAccount<V, string, AKT>;
   }
 
   parseSignature(signature: KeyedSignature<AKT>): `0x${string}` | undefined {
