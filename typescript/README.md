@@ -3,10 +3,23 @@
 Catapultar is a compact TypeScript library for managing Catapultar smart accounts. It provides a reliable and portable wrapper around account and transaction flows to build, sign, and execute account-level operations reliably.
 
 ## Key Features
-- Lightweight TypeScript utilities for interacting with the Catapultar smart account
+- Utilities for interacting with the Catapultar smart account
 - Ethers and viem compatibility.
 - Natural language transaction creation.
 - Helpers for account and factory interactions to simplify common tasks
+
+### Library Structure
+
+4 Main classes are exported:
+- **BaseTransaction** — Minimal transaction interface without validation.
+- **CatapultarAccount** — Catapultar Smart Account management.
+- **CatapultarTx** — Creating transaction for existing smart accounts.
+- **MetaCatapultarTx** — High level batch transactions.
+
+Depending on your use case, you may prefer either a high level or low level transaction creation.
+
+- **CatapultarTx** depends on **BaseTransaction** and **CatapultarAccount**.
+- **MetaCatapultarTx** depends on **CatapultarTx**
 
 ## Installation
 This repository uses Bun. From the project root, install dependencies with:
@@ -88,11 +101,35 @@ viemWalletClient.sendTransaction({
 });
 ```
 
+### Embed
+
+In some cases, you may want to execute an action on behalf of another user — they are the primary custodian but a pre-approved call has been configured.
+Catapultar can be configured for this use case by embedded a call (or signature) digest.
+
+To create embedded accounts, use **BaseTransaction**.
+
+```typescript
+const embeddedCalls: {to: `0x${string}`, data: `0x${string}`, value: bigint}[];
+
+const tx = new BaseTransaction();
+
+tx.setRandomNonce();
+tx.setMode(ExecutionMode.RaiseRevert);
+tx.addCalls(...embeddedCalls);
 
 
+const context = tx.asAccount();
+// {
+//   deployCall // Call to deploy the account. Save, if lost account may not be recoverable.
+//   actionCall, // Call to call on the account.
+//   callDigest, // Digest of the embedded call. Can be ignored.
+//   address, // Address of the contract once deployed.
+// }
+```
 
 ## Project Layout
 - `src/catapultar/` — core account and factory logic
+- `src/transaction/` — low level transaction logic
 - `src/abi/` — Contract ABIs
 - `src/types/` — shared TypeScript types
 - `src/utils/` — helper utilities

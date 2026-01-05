@@ -8,3 +8,5 @@ export type {
   Calls,
   WebAuthnSignature,
 } from "./types/types";
+
+export type { BaseTransaction } from "./transaction/transaction";
