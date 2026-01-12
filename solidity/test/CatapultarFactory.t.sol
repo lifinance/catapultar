@@ -35,6 +35,10 @@ contract CatapultarFactoryTest is Test {
         factory.deploy(KeyedOwnable.PublicKeyType.ECDSAOrSmartContract, keys, salt);
     }
 
+    function test_version() external view {
+        assertEq(factory.VERSION(), "0.1.0");
+    }
+
     /// forge-config: default.isolate = true
     function test_deployWithDigest() external {
         address owner = makeAddr("owner");
