@@ -484,19 +484,16 @@ abstract contract CatapultarTest is Test {
         bytes4 result = executor.isValidSignature(msgHash, hex"");
         assertEq(bytes32(result), bytes32(IS_NOT_VALID_SIGNATURE));
 
-        bytes32 toSign = keccak256(
-            abi.encode(keccak256(bytes("Replay(address account,bytes32 payload)")), address(executor), msgHash)
-        );
         // Set the signature (as call).
         vm.prank(address(executor));
-        executor.setSignature(toSign, Catapultar.DigestApproval.Call);
+        executor.setSignature(msgHash, Catapultar.DigestApproval.Call);
 
         result = executor.isValidSignature(msgHash, hex"");
         assertEq(bytes32(result), bytes32(IS_NOT_VALID_SIGNATURE));
 
         // Set the signature (as signature).
         vm.prank(address(executor));
-        executor.setSignature(toSign, Catapultar.DigestApproval.Signature);
+        executor.setSignature(msgHash, Catapultar.DigestApproval.Signature);
 
         result = executor.isValidSignature(msgHash, hex"");
         assertEq(bytes32(result), bytes32(SUCCESS_IS_VALID_SIGNATURE));

@@ -132,12 +132,12 @@ contract Catapultar is ERC7821LIFI, EIP712, BitmapNonce, KeyedOwnable, Initializ
         bytes32 hash,
         bytes calldata signature
     ) public view virtual returns (bytes4 result) {
+        if (signature.length == 0 && approvedDigest[hash] == DigestApproval.Signature) return bytes4(0x1626ba7e);
         bytes32 digest = EfficientHashLib.hash(
             REPLAY_PROTECTION, // Offset hash to ensure no standard payload replicates this structure.
             asUnsafeBytes32(address(this)),
             hash
         );
-        if (signature.length == 0 && approvedDigest[digest] == DigestApproval.Signature) return bytes4(0x1626ba7e);
         bool isValid = _validateSignature(digest, signature);
         assembly ("memory-safe") {
             // `success ? bytes4(keccak256("isValidSignature(bytes32,bytes)")) : 0xffffffff`.

@@ -44,11 +44,19 @@ contract CATValidatorMock is CATValidator {
         return _call(target, payload);
     }
 
-    function handleOutputs(
+    function recordOutputs(
         address account,
         Output[] calldata outputs
-    ) external {
-        return _handleOutputs(account, outputs);
+    ) external view returns (uint256[] memory balances) {
+        return _recordOutputs(account, outputs);
+    }
+
+    function compareOutputs(
+        address account,
+        Output[] calldata outputs,
+        uint256[] calldata balances
+    ) external view {
+        return _compareOutputs(account, outputs, balances);
     }
 }
 
@@ -110,7 +118,7 @@ contract CATValidatorTest is LibExecutionConstraintTest {
         validator.validateApproval(signer, nonce, inputs, outputs, hex"");
     }
 
-    function test_handleInputs(
+    function test_fuzz_handleInputs(
         uint256[] calldata amounts
     ) external {
         address destination = makeAddr("destination");
@@ -281,11 +289,10 @@ contract CATValidatorTest is LibExecutionConstraintTest {
     function test_call_transfer() external {
         address account = makeAddr("account");
         address target = makeAddr("target");
-        address proxy = address(validator.callProxy());
+        address proxy = validator.CALL_PROXY();
         uint256 amount = uint256(keccak256(bytes("amount")));
 
-        // set allowance to validator. This can "technically" be claimed if we could execute transferFrom from the
-        // validator.
+        // set allowance to the proxy. This is bad, since anyone can call from the proxy.
         address token = address(new MockERC20("Test Token", "TT", 18));
         MockERC20(token).mint(account, amount);
         vm.prank(account);
@@ -298,5 +305,82 @@ contract CATValidatorTest is LibExecutionConstraintTest {
         validator.call(token, cd);
     }
 
-    function test_handleOutputs() external { }
+    struct AmountAndDestination {
+        address destination;
+        uint128 amount;
+    }
+
+    function test_fuzz_recordOutputs(
+        AmountAndDestination[] calldata ad
+    ) external {
+        address account = makeAddr("account");
+
+        Output[] memory outputs = new Output[](ad.length);
+        for (uint256 i; i < outputs.length; ++i) {
+            address dest = ad[i].destination == address(0) ? account : ad[i].destination;
+            if (i == 2) {
+                vm.deal(dest, ad[i].amount);
+                outputs[i] = Output({ amount: ad[i].amount, destination: ad[i].destination, token: address(0) });
+                continue;
+            }
+            string memory vv = string(abi.encode(keccak256(abi.encode(i))));
+            address token = address(new MockERC20(vv, vv, 18));
+            MockERC20(token).mint(dest, ad[i].amount);
+            outputs[i] = Output({ amount: ad[i].amount, destination: ad[i].destination, token: token });
+        }
+
+        uint256[] memory balances = validator.recordOutputs(account, outputs);
+
+        assertEq(balances.length, outputs.length);
+        for (uint256 i; i < outputs.length; ++i) {
+            assertEq(balances[i], outputs[i].amount);
+        }
+    }
+
+    function test_fuzz_compareOutputs(
+        AmountAndDestination[] calldata ad
+    ) external {
+        address account = makeAddr("account");
+        vm.assume(ad.length > 0);
+        vm.assume(ad[0].amount != 0);
+
+        Output[] memory outputs = new Output[](ad.length);
+        for (uint256 i; i < outputs.length; ++i) {
+            address dest = ad[i].destination == address(0) ? account : ad[i].destination;
+            if (i == 2) {
+                vm.deal(dest, ad[i].amount);
+                outputs[i] = Output({ amount: ad[i].amount, destination: ad[i].destination, token: address(0) });
+                continue;
+            }
+            string memory vv = string(abi.encode(keccak256(abi.encode(i))));
+            address token = address(new MockERC20(vv, vv, 18));
+            MockERC20(token).mint(dest, ad[i].amount);
+            outputs[i] = Output({ amount: ad[i].amount, destination: ad[i].destination, token: token });
+        }
+
+        uint256[] memory balances = validator.recordOutputs(account, outputs);
+
+        // If we run compare outputs it should fail immediately on the first entry.
+        vm.expectRevert(abi.encodeWithSelector(CATValidator.InvalidTokenAmount.selector, ad[0].amount, 0));
+        validator.compareOutputs(account, outputs, balances);
+
+        // However, if we give a 0 array, then it should pass.
+        uint256[] memory zeroBalances = new uint256[](outputs.length);
+        validator.compareOutputs(account, outputs, zeroBalances);
+
+        // Lets send another batch so the amounts will be 2x ad[i].amount.
+        for (uint256 i; i < outputs.length; ++i) {
+            address dest = ad[i].destination == address(0) ? account : ad[i].destination;
+            if (i == 2) {
+                vm.deal(dest, uint256(ad[i].amount) * 2);
+
+                continue;
+            }
+            MockERC20(outputs[i].token).mint(dest, ad[i].amount);
+        }
+
+        // Neither reverts.
+        validator.compareOutputs(account, outputs, balances);
+        validator.compareOutputs(account, outputs, zeroBalances);
+    }
 }

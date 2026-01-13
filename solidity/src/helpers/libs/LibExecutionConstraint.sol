@@ -12,7 +12,7 @@ struct InputTarget {
     address token;
     uint256 allocated;
     uint256 spend; // 0 means balanceOf. Note that if allocated != 0, then this may fail since balanceOf may be larger
-    // than allocted.
+    // than allocated.
 }
 
 struct Output {

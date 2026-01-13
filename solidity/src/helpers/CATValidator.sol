@@ -15,17 +15,17 @@ import { InputTarget, LibExecutionConstraint, Output } from "./libs/LibExecution
  * @notice Validation of a pre-approved asset allowance
  */
 contract CATValidator is EIP712 {
-    error InvalidTokenAmount(uint256 expected, uint256 recevied);
+    error InvalidTokenAmount(uint256 expected, uint256 received);
     error AllocationTooSmall(uint256 allocated, uint256 spend);
     error NonceAlreadySpent();
     error BadSignature();
 
-    CallProxy public callProxy;
+    address public immutable CALL_PROXY;
 
     mapping(address => mapping(uint256 => bool)) public spentNonces;
 
     constructor() {
-        callProxy = new CallProxy();
+        CALL_PROXY = address(new CallProxy());
     }
 
     function _domainNameAndVersion() internal pure override returns (string memory name, string memory version) {
@@ -42,23 +42,25 @@ contract CATValidator is EIP712 {
      *
      */
     function entry(
-        address executor,
-        bytes calldata exec,
+        address execTarget,
+        bytes calldata execPayload,
         address account,
         uint256 nonce,
         InputTarget[] calldata inputs,
-        Output[] calldata deliveries,
+        Output[] calldata outputs,
         bytes calldata signature
     ) external {
         if (nonce != 0) _checkNonce(account, nonce);
 
-        _validateApproval(account, nonce, inputs, deliveries, signature);
+        _validateApproval(account, nonce, inputs, outputs, signature);
 
-        _handleInputs(executor, account, inputs);
+        uint256[] memory recordedBalances = _recordOutputs(account, outputs);
 
-        _call(executor, exec);
+        _handleInputs(execTarget, account, inputs);
 
-        _handleOutputs(account, deliveries);
+        _call(execTarget, execPayload);
+
+        _compareOutputs(account, outputs, recordedBalances);
     }
 
     function _checkNonce(
@@ -86,6 +88,38 @@ contract CATValidator is EIP712 {
         if (!SignatureCheckerLib.isValidSignatureNowCalldata(account, digest, signature)) revert BadSignature();
     }
 
+    function _balanceOf(
+        address account,
+        Output calldata output
+    ) internal view returns (uint256 bal) {
+        address destination = output.destination == address(0) ? account : output.destination;
+        bal = output.token == address(0) ? destination.balance : SafeTransferLib.balanceOf(output.token, destination);
+    }
+
+    function _recordOutputs(
+        address account,
+        Output[] calldata outputs
+    ) internal view returns (uint256[] memory balances) {
+        balances = new uint256[](outputs.length);
+        for (uint256 i; i < outputs.length; ++i) {
+            Output calldata output = outputs[i];
+            balances[i] = _balanceOf(account, output);
+        }
+    }
+
+    function _compareOutputs(
+        address account,
+        Output[] calldata outputs,
+        uint256[] memory recordedBalances
+    ) internal view {
+        for (uint256 i; i < outputs.length; ++i) {
+            Output calldata output = outputs[i];
+            uint256 newBalance = _balanceOf(account, output);
+            uint256 diff = newBalance - recordedBalances[i];
+            if (diff < output.amount) revert InvalidTokenAmount(output.amount, diff);
+        }
+    }
+
     function _handleInputs(
         address destination,
         address source,
@@ -105,49 +139,24 @@ contract CATValidator is EIP712 {
      * @notice Makes an arbitrary external call through the call proxy.
      */
     function _call(
-        address target,
-        bytes calldata payload
+        address execTarget,
+        bytes calldata execPayload
     ) internal {
+        address callProxy = CALL_PROXY;
         assembly ("memory-safe") {
             // get the free memory pointer.
             let m := mload(0x40)
 
             // Copy call into memory
-            mstore(m, target)
-            calldatacopy(add(m, 32), payload.offset, payload.length)
+            mstore(m, execTarget)
+            calldatacopy(add(m, 32), execPayload.offset, execPayload.length)
 
-            let success :=
-                call(gas(), sload(callProxy.slot), selfbalance(), m, add(payload.length, 32), codesize(), 0x00)
+            let success := call(gas(), callProxy, selfbalance(), m, add(execPayload.length, 32), codesize(), 0x00)
 
             if iszero(success) {
                 returndatacopy(0x00, 0x00, returndatasize())
                 if iszero(success) { revert(0x00, returndatasize()) }
             }
-        }
-    }
-
-    function _handleOutputs(
-        address account,
-        Output[] calldata outputs
-    ) internal {
-        for (uint256 i; i < outputs.length; ++i) {
-            Output calldata output = outputs[i];
-            if (output.token == address(0)) {
-                uint256 ethBalance = address(this).balance;
-                if (output.amount < ethBalance) revert InvalidTokenAmount(output.amount, ethBalance);
-
-                SafeTransferLib.safeTransferETH(
-                    output.destination == address(0) ? account : output.destination, ethBalance
-                );
-                continue; // Makes it cheaper for the ERC20 token path.
-            }
-
-            uint256 tokenBalance = SafeTransferLib.balanceOf(output.token, address(this));
-            if (output.amount < tokenBalance) revert InvalidTokenAmount(output.amount, tokenBalance);
-
-            SafeTransferLib.safeTransfer(
-                output.token, output.destination == address(0) ? account : output.destination, tokenBalance
-            );
         }
     }
 }
