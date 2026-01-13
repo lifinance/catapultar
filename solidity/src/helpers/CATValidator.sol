@@ -12,7 +12,22 @@ import { InputTarget, LibExecutionConstraint, Output } from "./libs/LibExecution
  * @title Constrained Asset Transaction Validator – C.A.T Validator
  * @author Alexander @ LIFI (https://li.fi)
  * @custom:version 0.1.0
- * @notice Validation of a pre-approved asset allowance
+ * @notice Validation of a pre-approved asset allowance to execute a transaction that should result in a specific asset
+ * outcome.
+ * The intended usecase is in combination with Catapultar with an embedded action. A Catapultar account with an batch
+ * transaction of setSignature and approve, allows the configured executor to find calldata to complete the provided
+ * description: inputs for outputs.
+ *
+ * This contract should never hold assets:
+ * - Inputs are collected from the signer and delivered to an executor specified destination.
+ * - Outputs are expected to be delivered directly to the destination specified in the output. Initial balances are
+ * recorded before input transfers and after the external call.
+ *
+ * This contract uses a call proxy for arbitrary call execution. This makes it safe to set approvals to the contract.
+ * This contract does not have a fixed callback function. The call proxy address is ::CALL_PROXY().
+ *
+ * Each approval can only be accessed once, invalidating other approvals by nonce. Except nonce 0 which can be used for
+ * long lived approvals like DCAs.
  */
 contract CATValidator is EIP712 {
     error InvalidTokenAmount(uint256 expected, uint256 received);
