@@ -5,7 +5,7 @@ import { CatapultarAccount } from "./account";
 import { random, asHex, pubkeyAsArray } from "../utils/helpers";
 import { rpcUrl } from "../../test/setup";
 import { AccountPublicKeyType, type Version } from "../types/types";
-import { factories, templates } from "../../test/config";
+import { factories, templates } from "../config";
 import CATAPULTAR_FACTORY_V0_1_0_ABI from "../abi/catapultarFactoryV0.1.0";
 
 const chainId = 31337;

@@ -80,7 +80,7 @@ contract CATValidator is EIP712, ReentrancyGuard {
 
         _handleAllowances(execTarget, account, allowances);
 
-        _call(execTarget, execPayload);
+        if (execPayload.length != 0) _call(execTarget, execPayload);
 
         _compareOutcomes(account, outcomes, recordedBalances);
     }

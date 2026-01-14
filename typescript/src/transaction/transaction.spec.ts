@@ -8,7 +8,7 @@ import {
   factories,
   PUBLIC_DEFAULT_ANVIL_ACCOUNT_0,
   templates,
-} from "../../test/config";
+} from "../config";
 import { privateKeyToAccount } from "viem/accounts";
 import CATAPULTAR_V0_1_0_ABI from "../abi/catapultarV0.1.0";
 

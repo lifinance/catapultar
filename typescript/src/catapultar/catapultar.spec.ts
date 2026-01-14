@@ -25,7 +25,7 @@ import {
   factories,
   PUBLIC_DEFAULT_ANVIL_ACCOUNT_0,
   templates,
-} from "../../test/config";
+} from "../config";
 
 const chainId = 31337;
 
@@ -36,7 +36,7 @@ async function waitForTransaction(hash: `0x${string}`) {
     chain: anvil,
     transport: http(rpcUrl()),
   });
-  await publicClient.getTransactionReceipt({ hash });
+  return await publicClient.getTransactionReceipt({ hash });
 }
 
 describe("Catapultar", () => {
@@ -426,8 +426,8 @@ describe("Catapultar", () => {
             .sign((...args) => pubkey.signTypedData(...args))
         ).asCall();
 
-        await executor.sendTransaction(calldata);
-        // await waitForTransaction(executionTransaction);
+        const executionTransaction = await executor.sendTransaction(calldata);
+        await waitForTransaction(executionTransaction);
 
         expect(
           await publicClient.getBalance({ address: oftenTargetAddress }),

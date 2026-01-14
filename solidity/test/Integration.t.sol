@@ -15,7 +15,6 @@ import {
     Allowance,
     AllowanceSpend,
     ExecutionConstraint,
-    LibExecutionConstraint,
     Outcome
 } from "../src/helpers/libs/LibExecutionConstraint.sol";
 
