@@ -3,27 +3,26 @@ pragma solidity ^0.8.30;
 
 import { EfficientHashLib } from "solady/src/utils/EfficientHashLib.sol";
 
-struct Input {
+struct Allowance {
     address token;
     uint256 amount;
 }
 
-struct InputTarget {
+struct AllowanceSpend {
     address token;
     uint256 allocated;
-    uint256 spend; // 0 means balanceOf. Note that if allocated != 0, then this may fail since balanceOf may be larger
-    // than allocated.
+    uint256 spend; // 0 means balanceOf.
 }
 
-struct Output {
+struct Outcome {
     address token;
     uint256 amount;
     address destination;
 }
 
 struct ExecutionConstraint {
-    Input[] inputs;
-    Output[] outputs;
+    Allowance[] allowances;
+    Outcome[] outcomes;
     address executor;
     uint256 nonce;
 }
@@ -36,38 +35,39 @@ library LibExecutionConstraint {
 
     bytes32 constant EXECUTION_CONSTRAINT_TYPE_HASH = keccak256(
         bytes(
-            "ExecutionConstraint(Input[] inputs,Output[] outputs,address executor,uint256 nonce)Input(address token,uint256 amount)Output(address token,uint256 amount,address destination)"
+            "ExecutionConstraint(Allowance[] allowances,Outcome[] outcomes,address executor,uint256 nonce)Allowance(address token,uint256 amount)Outcome(address token,uint256 amount,address destination)"
         )
     );
 
-    bytes32 constant INPUT_TYPE_HASH = keccak256(bytes("Input(address token,uint256 amount)"));
+    bytes32 constant ALLOWANCE_TYPE_HASH = keccak256(bytes("Allowance(address token,uint256 amount)"));
 
-    bytes32 constant OUTPUT_TYPE_HASH = keccak256(bytes("Output(address token,uint256 amount,address destination)"));
+    bytes32 constant OUTPUT_TYPE_HASH = keccak256(bytes("Outcome(address token,uint256 amount,address destination)"));
 
-    function inputsHash(
-        InputTarget[] calldata inputs
+    function allowancesHash(
+        AllowanceSpend[] calldata allowances
     ) internal pure returns (bytes32 h) {
-        uint256 numInputs = inputs.length;
-        bytes32[] memory buffer = numInputs.malloc();
-        for (uint256 i; i < numInputs; ++i) {
-            InputTarget calldata input = inputs[i];
-            buffer[i] = INPUT_TYPE_HASH.hash(bytes32(uint256(uint160(input.token))), bytes32(input.allocated));
+        uint256 numAllowances = allowances.length;
+        bytes32[] memory buffer = numAllowances.malloc();
+        for (uint256 i; i < numAllowances; ++i) {
+            AllowanceSpend calldata allowance = allowances[i];
+            buffer[i] =
+                ALLOWANCE_TYPE_HASH.hash(bytes32(uint256(uint160(allowance.token))), bytes32(allowance.allocated));
         }
         h = buffer.hash();
         buffer.free();
     }
 
-    function outputsHash(
-        Output[] calldata outputs
+    function outcomesHash(
+        Outcome[] calldata outcomes
     ) internal pure returns (bytes32 h) {
-        uint256 numOutputs = outputs.length;
-        bytes32[] memory buffer = numOutputs.malloc();
-        for (uint256 i; i < numOutputs; ++i) {
-            Output calldata output = outputs[i];
+        uint256 numOutcomes = outcomes.length;
+        bytes32[] memory buffer = numOutcomes.malloc();
+        for (uint256 i; i < numOutcomes; ++i) {
+            Outcome calldata outcome = outcomes[i];
             buffer[i] = OUTPUT_TYPE_HASH.hash(
-                bytes32(uint256(uint160(output.token))),
-                bytes32(output.amount),
-                bytes32(uint256(uint160(output.destination)))
+                bytes32(uint256(uint160(outcome.token))),
+                bytes32(outcome.amount),
+                bytes32(uint256(uint160(outcome.destination)))
             );
         }
         h = buffer.hash();
@@ -75,13 +75,13 @@ library LibExecutionConstraint {
     }
 
     function typehash(
-        InputTarget[] calldata inputs,
-        Output[] calldata outputs,
+        AllowanceSpend[] calldata allowances,
+        Outcome[] calldata outcomes,
         address executor,
         uint256 nonce
     ) internal pure returns (bytes32 messageHash) {
         messageHash = EXECUTION_CONSTRAINT_TYPE_HASH.hash(
-            inputsHash(inputs), outputsHash(outputs), bytes32(uint256(uint160(executor))), bytes32(nonce)
+            allowancesHash(allowances), outcomesHash(outcomes), bytes32(uint256(uint160(executor))), bytes32(nonce)
         );
     }
 }
