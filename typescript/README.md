@@ -118,7 +118,7 @@ tx.setMode(ExecutionMode.RaiseRevert);
 tx.addCalls(...embeddedCalls);
 
 
-const context = tx.asAccount();
+const context = tx.asAccount(...);
 // {
 //   deployCall // Call to deploy the account. Save, if lost account may not be recoverable.
 //   actionCall, // Call to call on the account.
@@ -126,6 +126,31 @@ const context = tx.asAccount();
 //   address, // Address of the contract once deployed.
 // }
 ```
+
+### Constrained Asset Transaction (CAT)
+
+CATs are transactions that can be executed using an account's assets given a certain output. In an intent factory use case, you may want to generate an account with a CAT embedded to later execute arbitrary data against it.
+
+To create a CAT use **ConstrainedAssetTransaction**. You can then convert it to a **BaseTransaction** to get the embedded account.
+
+```typescript
+const executor: `0x${string}`;
+const allowances: { token: `0x${string}`; amount: bigint; }[];
+const outcomes: { token: `0x${string}`; amount: bigint; destination: `0x${string}` }[];
+
+const cat = new ConstrainedAssetTransaction({executor});
+cat.addAllowances(...allowances);
+cat.addOutcomes(...outcomes);
+
+const tx = tx.asCatapultarAllowanceTransaction();
+const context = tx.asAccount(...);
+
+const entryCall = tx.asExecuteCall({address: context.address, ...})
+
+// then you need to execute [context.deployCall, context.actionCall, entryCall]
+```
+
+See `src/transaction/constrainedtransaction.spec.ts::create account and execute contained constraints` for an example.
 
 ## Project Layout
 - `src/catapultar/` — core account and factory logic

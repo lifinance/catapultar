@@ -11,7 +11,7 @@ struct Allowance {
 struct AllowanceSpend {
     address token;
     uint256 allocated;
-    uint256 spend; // 0 means balanceOf.
+    uint256 spend;
 }
 
 struct Outcome {

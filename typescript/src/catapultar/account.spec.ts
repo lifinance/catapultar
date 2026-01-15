@@ -138,8 +138,6 @@ describe("Catapultar Account", () => {
         keyType: AccountPublicKeyType.ECDSAOrSmartContract,
         pubkey: pubkey.address,
         salt: `0x${asHex(0n, 20)}${random(12).replace("0x", "")}`,
-        factory: factories["0.1.0"],
-        template: templates["0.1.0"],
         callDigest: digest,
         isSignature: false,
       });

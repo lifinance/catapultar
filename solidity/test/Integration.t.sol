@@ -8,15 +8,10 @@ import { ERC7821 } from "solady/src/accounts/ERC7821.sol";
 import { LibZip } from "solady/src/utils/LibZip.sol";
 import { MockERC20 } from "solady/test/utils/mocks/MockERC20.sol";
 
-import { LibExecutionConstraintTest } from "./helpers/libs/LibExecutionConstraint.t.sol";
+import { LibExecutionConstraintTest } from "./libs/LibExecutionConstraint.t.sol";
 
-import { CATValidator } from "../src/helpers/CATValidator.sol";
-import {
-    Allowance,
-    AllowanceSpend,
-    ExecutionConstraint,
-    Outcome
-} from "../src/helpers/libs/LibExecutionConstraint.sol";
+import { CATValidator } from "../src/CATValidator.sol";
+import { Allowance, AllowanceSpend, ExecutionConstraint, Outcome } from "../src/libs/LibExecutionConstraint.sol";
 
 import { Catapultar } from "../src/Catapultar.sol";
 import { CatapultarFactory } from "../src/CatapultarFactory.sol";

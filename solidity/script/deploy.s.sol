@@ -3,6 +3,7 @@ pragma solidity ^0.8.30;
 
 import { multichain } from "./multichain.s.sol";
 
+import { CATValidator } from "../src/CATValidator.sol";
 import { CatapultarFactory } from "../src/CatapultarFactory.sol";
 import { KeyedOwnable } from "../src/libs/KeyedOwnable.sol";
 
@@ -11,8 +12,9 @@ contract deploy is multichain {
 
     function run(
         string[] calldata chains
-    ) public iterChains(chains) broadcast returns (CatapultarFactory factory) {
-        return deployFactory();
+    ) public iterChains(chains) broadcast returns (CatapultarFactory factory, CATValidator validator) {
+        factory = deployFactory();
+        validator = deployCATValidator();
     }
 
     function deployFactory() internal returns (CatapultarFactory factory) {
@@ -28,6 +30,17 @@ contract deploy is multichain {
             }
         }
         return CatapultarFactory(expectedFactoryAddress);
+    }
+
+    function deployCATValidator() internal returns (CATValidator validator) {
+        address expectedAddress = getExpectedCreate2Address(bytes32(0), type(CATValidator).creationCode, hex"");
+        if (expectedAddress.code.length == 0) {
+            validator = new CATValidator{ salt: bytes32(0) }();
+            if (expectedAddress == address(validator)) {
+                revert NotExpectedAddress(expectedAddress, address(validator));
+            }
+        }
+        return CATValidator(expectedAddress);
     }
 
     function account(

@@ -5,7 +5,7 @@ import { MockERC20 } from "solady/test/utils/mocks/MockERC20.sol";
 
 import { LibExecutionConstraintTest } from "./libs/LibExecutionConstraint.t.sol";
 
-import { AllowanceSpend, CATValidator, Outcome } from "../../src/helpers/CATValidator.sol";
+import { AllowanceSpend, CATValidator, Outcome } from "../src/CATValidator.sol";
 
 interface EIP712 {
     function DOMAIN_SEPARATOR() external view returns (bytes32);
@@ -222,7 +222,11 @@ contract CATValidatorTest is LibExecutionConstraintTest {
         MockERC20(token).approve(address(validator), amount);
 
         AllowanceSpend[] memory targets = new AllowanceSpend[](1);
-        targets[0] = AllowanceSpend({ token: token, allocated: 1 << 255, spend: 0 });
+        targets[0] = AllowanceSpend({
+            token: token,
+            allocated: 1 << 255,
+            spend: 57896044618658097711785492504343953926634992332820282019728792003956564819968
+        });
 
         vm.expectCall(token, abi.encodeCall(MockERC20.transferFrom, (account, destination, amount)));
         validator.handleAllowances(destination, account, targets);
@@ -242,7 +246,11 @@ contract CATValidatorTest is LibExecutionConstraintTest {
         MockERC20(token).approve(address(validator), amount + 1);
 
         AllowanceSpend[] memory targets = new AllowanceSpend[](1);
-        targets[0] = AllowanceSpend({ token: token, allocated: amount, spend: 0 });
+        targets[0] = AllowanceSpend({
+            token: token,
+            allocated: amount,
+            spend: 57896044618658097711785492504343953926634992332820282019728792003956564819968
+        });
 
         vm.expectRevert(abi.encodeWithSelector(CATValidator.AllocationTooSmall.selector, amount, amount + 1));
         validator.handleAllowances(destination, account, targets);

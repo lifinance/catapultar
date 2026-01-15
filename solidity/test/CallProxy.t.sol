@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 pragma solidity ^0.8.30;
 
-import { CallProxy } from "../../src/helpers/CallProxy.sol";
 import { Test } from "forge-std/src/Test.sol";
+
+import { CallProxy } from "../src/CallProxy.sol";
 
 contract MockMocker {
     error CustomError(bytes);

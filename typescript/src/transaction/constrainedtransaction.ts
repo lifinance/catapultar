@@ -162,9 +162,7 @@ export class ConstrainedAssetTransaction {
    * The call for execution the validation on the account.
    */
   asExecuteCall(
-    opt: {
-      salt: `0x${string}`;
-    } & { address: `0x${string}` } & {
+    opt: { address: `0x${string}` } & {
       executionTarget: `0x${string}`;
       executionPayload: `0x${string}`;
       spends: bigint[];
@@ -210,9 +208,7 @@ export class ConstrainedAssetTransaction {
   }
 
   asRefundCall(
-    opt: {
-      salt: `0x${string}`;
-    } & { address: `0x${string}` } & {
+    opt: { address: `0x${string}` } & {
       refund: `0x${string}`;
       validator?: `0x${string}`;
     },

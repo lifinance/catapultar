@@ -113,7 +113,6 @@ describe("ConstrainedAssetTransaction", () => {
         });
 
         const executeCall = catx.asExecuteCall({
-          salt: accountSalt,
           address: account.address,
           executionTarget: token2,
           executionPayload: execData,
@@ -200,7 +199,6 @@ describe("ConstrainedAssetTransaction", () => {
       });
 
       const refundCall = catx.asRefundCall({
-        salt: accountSalt,
         address: account.address,
         refund: oftenTargetAddress,
       });

@@ -39,6 +39,7 @@ contract CATValidator is EIP712, ReentrancyGuard {
     error BadSignature();
 
     address public immutable CALL_PROXY;
+    uint256 constant SPEND_BALANCE_OF_MAGIC = 1 << 255;
 
     mapping(address => mapping(uint256 => bool)) public spentNonces;
 
@@ -183,7 +184,9 @@ contract CATValidator is EIP712, ReentrancyGuard {
         for (uint256 i = 0; i < allowances.length; ++i) {
             AllowanceSpend calldata allowance = allowances[i];
 
-            uint256 spend = allowance.spend == 0 ? SafeTransferLib.balanceOf(allowance.token, source) : allowance.spend;
+            uint256 spend = allowance.spend == SPEND_BALANCE_OF_MAGIC
+                ? SafeTransferLib.balanceOf(allowance.token, source)
+                : allowance.spend;
             if (allowance.allocated < spend) revert AllocationTooSmall(allowance.allocated, spend);
 
             SafeTransferLib.safeTransferFrom(allowance.token, source, destination, spend);
