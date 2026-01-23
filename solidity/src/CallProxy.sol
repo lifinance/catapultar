@@ -12,7 +12,7 @@ contract CallProxy {
      * 000000000000000000000000f79Db8d4E9baF5266B2578790363F027AE550B7a
      * 2b096926.... // Payload
      */
-    fallback() external {
+    fallback() external payable {
         assembly ("memory-safe") {
             // get the free memory pointer.
             let m := mload(0x40)
