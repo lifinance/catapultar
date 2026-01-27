@@ -392,17 +392,16 @@ contract CATValidatorTest is LibExecutionConstraintTest {
 
         AllowanceSpend[] memory allowances = new AllowanceSpend[](0);
         Outcome[] memory outcomes = new Outcome[](1);
-        outcomes[0] = Outcome({
-            token: token,
-            amount: 1,
-            destination: dest
-        });
-        
+        outcomes[0] = Outcome({ token: token, amount: 1, destination: dest });
+
         vm.expectRevert();
         validator.entry(token, call, address(this), 0, allowances, outcomes, hex"");
     }
 
-    function isValidSignature(bytes32,bytes calldata) public view returns (bytes4) {
+    function isValidSignature(
+        bytes32,
+        bytes calldata
+    ) public view returns (bytes4) {
         return bytes4(0x1626ba7e);
     }
 }
