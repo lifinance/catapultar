@@ -2,26 +2,10 @@ import {
   createPublicClient,
   createWalletClient,
   encodeFunctionData,
-  erc20Abi,
-  hashStruct,
   http,
   zeroAddress,
 } from "viem";
-import {
-  AccountPublicKeyType,
-  DigestApproval,
-  ExecutionConstraintTyped,
-  ExecutionMode,
-  type Allowance,
-  type AllowanceSpend,
-  type Call,
-  type ExecutionConstraint,
-  type Outcome,
-  type Pubkey,
-} from "../types/types";
-import { BaseTransaction } from "./transaction";
-import CATAPULTAR_V0_1_0_ABI from "../abi/catapultarV0.1.0";
-import { CAT_VALIDATOR_ABI } from "../abi/CATValidator";
+import { AccountPublicKeyType } from "../types/types";
 import { ConstrainedAssetTransaction } from "./constrainedtransaction";
 import { anvil } from "viem/chains";
 import { rpcUrl } from "../../test/setup";
@@ -43,7 +27,10 @@ async function waitForTransaction(hash: `0x${string}`) {
 describe("ConstrainedAssetTransaction", () => {
   describe("unit", () => {
     it("should set nonce 0 if perpetual", () => {
-      const catx = new ConstrainedAssetTransaction({ executor: zeroAddress });
+      const catx = new ConstrainedAssetTransaction({
+        executor: zeroAddress,
+        chainId: 1,
+      });
       expect(catx.constraintNonce).toBe(1n);
       catx.perpetual(true);
       expect(catx.constraintNonce).toBe(0n);
@@ -77,6 +64,7 @@ describe("ConstrainedAssetTransaction", () => {
         const amount2 = 10n ** 6n;
         const catx = new ConstrainedAssetTransaction({
           executor: wallet.address,
+          chainId: 31337,
         });
         // add allowance for token1.
         catx.addAllowances({ token: token1, amount: amount1 });
@@ -168,6 +156,7 @@ describe("ConstrainedAssetTransaction", () => {
       const amount2 = 10n ** 6n;
       const catx = new ConstrainedAssetTransaction({
         executor: wallet.address,
+        chainId: 31337,
       });
       // add allowance for token1.
       catx.addAllowances({ token: token1, amount: amount1 });

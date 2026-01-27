@@ -14,8 +14,6 @@ import CATAPULTAR_V0_1_0_ABI from "../abi/catapultarV0.1.0";
 import { CAT_VALIDATOR_ABI } from "../abi/CATValidator";
 import { cat_validator } from "../config";
 
-const chainId = 31337;
-
 /**
  * Helper class for deploying a Catapultar account with an embedded Constrained Asset Transaction
  */
@@ -24,12 +22,14 @@ export class ConstrainedAssetTransaction {
   outcomes: Outcome[] = [];
 
   executor: `0x${string}`;
+  chainId: number;
 
   constraintNonce: bigint = 1n;
 
-  constructor(opt: { executor: `0x${string}` }) {
-    const { executor } = opt;
+  constructor(opt: { executor: `0x${string}`; chainId: number }) {
+    const { executor, chainId } = opt;
     this.executor = executor;
+    this.chainId = chainId;
   }
 
   addAllowances(...allowances: Allowance[]) {
@@ -100,7 +100,7 @@ export class ConstrainedAssetTransaction {
       primaryType: "ExecutionConstraint",
       message: executionConstraint,
       domain: {
-        chainId: chainId,
+        chainId: this.chainId,
         name: "CAT Validator",
         version: "1",
         verifyingContract: validator,
@@ -134,7 +134,7 @@ export class ConstrainedAssetTransaction {
         primaryType: "ExecutionConstraint",
         message: refundExecutionConstraint,
         domain: {
-          chainId: chainId,
+          chainId: this.chainId,
           name: "CAT Validator",
           version: "1",
           verifyingContract: validator,

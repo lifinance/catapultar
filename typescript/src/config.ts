@@ -10,7 +10,7 @@ export const templates = {
 export const PUBLIC_DEFAULT_ANVIL_ACCOUNT_0 =
   "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
 
-export const cat_validator = "0x40099B52ed0dE7423Dbfb7B891750501AD1500F0";
+export const cat_validator = "0x35C83412d576d624e9aDCa9d5D06559305C097e8";
 
 export const token1 = "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0";
 export const token2 = "0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9";

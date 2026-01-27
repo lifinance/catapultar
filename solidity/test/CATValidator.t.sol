@@ -373,4 +373,36 @@ contract CATValidatorTest is LibExecutionConstraintTest {
         validator.compareOutcomes(account, outcomes, balances);
         validator.compareOutcomes(account, outcomes, zeroBalances);
     }
+
+    // This test tests whether a decrease in balances correctly reverts.
+    // Let this contract be the signer so we can skip the allowance.
+    function test_entry_decrease_balances() external {
+        address proxy = validator.CALL_PROXY();
+
+        // Deal an account some tokens.
+        address dest = makeAddr("dest");
+        address token = address(new MockERC20("Test Token", "TT", 18));
+        MockERC20(token).mint(dest, 1000000000);
+        // approve the proxy so we can use the call to transfer tokens away from the user.
+        vm.prank(dest);
+        MockERC20(token).approve(proxy, 1);
+
+        // Construct a call to collect tokens from the user.
+        bytes memory call = abi.encodeCall(MockERC20.transferFrom, (dest, address(this), 1));
+
+        AllowanceSpend[] memory allowances = new AllowanceSpend[](0);
+        Outcome[] memory outcomes = new Outcome[](1);
+        outcomes[0] = Outcome({
+            token: token,
+            amount: 1,
+            destination: dest
+        });
+        
+        vm.expectRevert();
+        validator.entry(token, call, address(this), 0, allowances, outcomes, hex"");
+    }
+
+    function isValidSignature(bytes32,bytes calldata) public view returns (bytes4) {
+        return bytes4(0x1626ba7e);
+    }
 }
