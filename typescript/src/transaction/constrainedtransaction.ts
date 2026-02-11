@@ -1,5 +1,12 @@
-import { encodeFunctionData, erc20Abi, hashTypedData, zeroAddress } from "viem";
 import {
+  encodeFunctionData,
+  erc20Abi,
+  hashStruct,
+  hashTypedData,
+  zeroAddress,
+} from "viem";
+import {
+  CallsTyped,
   DigestApproval,
   ExecutionConstraintTyped,
   ExecutionMode,
@@ -13,6 +20,7 @@ import { BaseTransaction } from "./transaction";
 import CATAPULTAR_V0_1_0_ABI from "../abi/catapultarV0.1.0";
 import { CAT_VALIDATOR_ABI } from "../abi/CATValidator";
 import { cat_validator } from "../config";
+import WETH_ABI from "../abi/weth";
 
 /**
  * Helper class for deploying a Catapultar account with an embedded Constrained Asset Transaction
@@ -26,10 +34,53 @@ export class ConstrainedAssetTransaction {
 
   constraintNonce: bigint = 1n;
 
+  embeddedAccountTransactions: (Call & { nonce: bigint })[] = [];
+
   constructor(opt: { executor: `0x${string}`; chainId: number }) {
     const { executor, chainId } = opt;
     this.executor = executor;
     this.chainId = chainId;
+  }
+
+  embedNativeWrap(amount: bigint, wtoken: `0x${string}`) {
+    if (amount === 0n) throw new Error("It is meaningless to wrap 0 eth");
+    // Create a deposit call to wtoken
+    const encodedCall = encodeFunctionData({
+      abi: WETH_ABI,
+      functionName: "deposit",
+      args: [],
+    });
+    this.embeddedAccountTransactions.push({
+      nonce: 255n - BigInt(this.embeddedAccountTransactions.length),
+      to: wtoken,
+      data: encodedCall,
+      value: amount,
+    });
+  }
+
+  embeddedCallsAsSetSignatures(): Call[] {
+    const additionalSetSignatures: Call[] = [];
+    for (const callToEmbed of this.embeddedAccountTransactions) {
+      const structHash = hashStruct({
+        types: CallsTyped,
+        primaryType: "Calls",
+        data: {
+          nonce: callToEmbed.nonce,
+          mode: ExecutionMode.RaiseRevert,
+          calls: [callToEmbed],
+        },
+      });
+      additionalSetSignatures.push({
+        to: zeroAddress,
+        value: 0n,
+        data: encodeFunctionData({
+          abi: CATAPULTAR_V0_1_0_ABI,
+          functionName: "setSignature",
+          args: [structHash, DigestApproval.Call],
+        }),
+      });
+    }
+    return additionalSetSignatures;
   }
 
   addAllowances(...allowances: Allowance[]) {
@@ -119,7 +170,7 @@ export class ConstrainedAssetTransaction {
     if (refund) {
       const refundOutcomes: Outcome[] = this.allowances.map((allowance) => ({
         destination: refund,
-        amount: allowance.amount,
+        amount: allowance.amount, // TODO: Maybe custom value??
         token: allowance.token,
       }));
 
@@ -150,12 +201,25 @@ export class ConstrainedAssetTransaction {
         }),
       });
     }
+    // If there is a wrap transaction, embed:
+    calls.push(...this.embeddedCallsAsSetSignatures());
 
     const tx = new BaseTransaction();
     tx.addCall(...calls);
     tx.setMode(ExecutionMode.RaiseRevert);
     tx.setNonce(1n);
     return tx;
+  }
+
+  asAdditionalCall(): Omit<Call, "to">[] {
+    const txs: Omit<Call, "to">[] = [];
+    for (const embedTx of this.embeddedAccountTransactions) {
+      const tx = new BaseTransaction();
+      tx.addCall(embedTx);
+      tx.setNonce(embedTx.nonce);
+      txs.push(tx.asCallData());
+    }
+    return txs;
   }
 
   /**
