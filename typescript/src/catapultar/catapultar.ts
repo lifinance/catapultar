@@ -125,16 +125,7 @@ export class CatapultarTx<
    * @param options.ignoreNoCalls Do not throw an error if no calls have been configured. Default: false
    */
   getSignerData(options?: { ignoreNoCalls?: boolean }) {
-    const { ignoreNoCalls = false } = options ?? {};
-    if (this.nonce === 0n)
-      throw new Error(
-        `Nonce 0 is not allowed. It cannot be differentiated from an invalid nonce.`,
-      );
-    if (!this.nonce) throw new Error("Nonce has not been set");
-    if (!this.mode || !this.hasValidMode())
-      throw new Error("Mode has not been set");
-    if (!ignoreNoCalls && this.calls.length === 0)
-      throw new Error("Calls have not been set");
+    this.validate(options);
 
     return {
       domain: this.account.getDomainSeparator({
@@ -143,8 +134,8 @@ export class CatapultarTx<
       types: CallsTyped,
       primaryType: "Calls",
       message: {
-        nonce: this.nonce,
-        mode: this.mode,
+        nonce: this.nonce!,
+        mode: this.mode!,
         calls: this.calls,
       },
     } as const;
