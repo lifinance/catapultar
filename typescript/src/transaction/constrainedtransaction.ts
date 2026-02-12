@@ -217,6 +217,7 @@ export class ConstrainedAssetTransaction {
       const tx = new BaseTransaction();
       tx.addCall(embedTx);
       tx.setNonce(embedTx.nonce);
+      tx.setMode(ExecutionMode.RaiseRevert);
       txs.push(tx.asCallData());
     }
     return txs;

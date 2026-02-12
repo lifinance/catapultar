@@ -12,6 +12,10 @@ export const PUBLIC_DEFAULT_ANVIL_ACCOUNT_0 =
 
 export const cat_validator = "0x35C83412d576d624e9aDCa9d5D06559305C097e8";
 
+// testing variables
+
+export const WETH = "0x490Dc279b028B1c1a450C3EC846fE0002a344B33";
+
 export const token1 = "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0";
 export const token2 = "0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9";
 export const token3 = "0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9";
