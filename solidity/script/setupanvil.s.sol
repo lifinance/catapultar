@@ -3,8 +3,8 @@ pragma solidity ^0.8.30;
 
 import { Script, console } from "forge-std/src/Script.sol";
 
-import { MockERC20 } from "solady/test/utils/mocks/MockERC20.sol";
 import { WETH } from "solady/src/tokens/WETH.sol";
+import { MockERC20 } from "solady/test/utils/mocks/MockERC20.sol";
 
 import { CATValidator } from "../src/CATValidator.sol";
 import { Catapultar } from "../src/Catapultar.sol";
@@ -32,7 +32,7 @@ contract SetupAnvil is Script {
         token2 = new MockERC20("Test Token Two", "TestTwo", 18);
         token3 = new MockERC20("Test Token Three", "TestThree", 18);
 
-        weth = new WETH{salt: 0}();
+        weth = new WETH{ salt: 0 }();
 
         // Deploy Solady verifier.
         // https://gist.github.com/Vectorized/599b0d8a94d21bc74700eb1354e2f55c
