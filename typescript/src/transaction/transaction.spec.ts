@@ -142,6 +142,72 @@ describe("Base Transaction", () => {
       tx.nonce = 0n;
       expect(() => tx.getOpData()).toThrow(nonce0Error);
     });
+
+    it.concurrent("getOpData should not mutate this.signature", () => {
+      const tx = new BaseTransaction();
+      tx.setNonce(1n);
+      tx.setMode(ExecutionMode.RaiseRevert);
+      // 65-byte (non-compact) ECDSA signature
+      const sig65 =
+        `0x${"ab".repeat(32)}${"cd".repeat(32)}${"1b"}` as `0x${string}`;
+      tx.signature = sig65;
+
+      const result1 = tx.getOpData({ compactSignature: true });
+      // signature should be unchanged after call
+      expect(tx.signature).toBe(sig65);
+      const result2 = tx.getOpData({ compactSignature: true });
+      expect(result1).toBe(result2);
+    });
+
+    it.concurrent("validate() throws for missing nonce", () => {
+      const tx = new BaseTransaction();
+      tx.setMode(ExecutionMode.RaiseRevert);
+      tx.addCall({ to: random(20), data: "0x", value: 0n });
+      expect(() => tx.validate()).toThrow("Nonce has not been set");
+    });
+
+    it.concurrent("validate() throws for nonce 0", () => {
+      const tx = new BaseTransaction();
+      tx.mode = ExecutionMode.RaiseRevert;
+      tx.nonce = 0n;
+      tx.addCall({ to: random(20), data: "0x", value: 0n });
+      expect(() => tx.validate()).toThrow("Nonce 0 is not allowed");
+    });
+
+    it.concurrent("validate() throws for missing mode", () => {
+      const tx = new BaseTransaction();
+      tx.setNonce(1n);
+      tx.addCall({ to: random(20), data: "0x", value: 0n });
+      expect(() => tx.validate()).toThrow("Mode has not been set");
+    });
+
+    it.concurrent("validate() throws for missing calls", () => {
+      const tx = new BaseTransaction();
+      tx.setNonce(1n);
+      tx.setMode(ExecutionMode.RaiseRevert);
+      expect(() => tx.validate()).toThrow("Calls have not been set");
+    });
+
+    it.concurrent("validate() ignores empty calls with ignoreNoCalls", () => {
+      const tx = new BaseTransaction();
+      tx.setNonce(1n);
+      tx.setMode(ExecutionMode.RaiseRevert);
+      expect(() => tx.validate({ ignoreNoCalls: true })).not.toThrow();
+    });
+
+    it.concurrent("asCallData() throws on missing nonce", () => {
+      const tx = new BaseTransaction();
+      tx.setMode(ExecutionMode.RaiseRevert);
+      tx.addCall({ to: random(20), data: "0x", value: 0n });
+      expect(() => tx.asCallData()).toThrow("Nonce has not been set");
+    });
+
+    it.concurrent("asCallData() throws on empty calls", () => {
+      const tx = new BaseTransaction();
+      tx.setNonce(1n);
+      tx.setMode(ExecutionMode.RaiseRevert);
+      expect(() => tx.asCallData()).toThrow("Calls have not been set");
+    });
   });
 
   describe("integration", () => {

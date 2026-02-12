@@ -115,6 +115,7 @@ describe("ConstrainedAssetTransaction", () => {
         executor: zeroAddress,
         chainId: 1,
       });
+      // @ts-expect-error accessing private method for testing
       expect(catx.embeddedCallsAsSetSignatures()).toEqual([]);
     });
 
@@ -127,6 +128,7 @@ describe("ConstrainedAssetTransaction", () => {
         "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2" as `0x${string}`;
       catx.embedNativeWrap(parseEther("1"), wtoken);
 
+      // @ts-expect-error accessing private method for testing
       const sigs = catx.embeddedCallsAsSetSignatures();
       expect(sigs).toHaveLength(1);
       expect(sigs[0]!.to).toBe(zeroAddress);
@@ -147,6 +149,49 @@ describe("ConstrainedAssetTransaction", () => {
         args: [expectedStructHash, DigestApproval.Call],
       });
       expect(sigs[0]!.data).toBe(expectedData);
+    });
+
+    it("embedNativeWrap throws on zeroAddress wtoken", () => {
+      const catx = new ConstrainedAssetTransaction({
+        executor: zeroAddress,
+        chainId: 1,
+      });
+      expect(() => catx.embedNativeWrap(1n, zeroAddress)).toThrow(
+        "wtoken cannot be the zero address",
+      );
+    });
+
+    it("embedNativeWrap throws on 255+ embeds (nonce overflow)", () => {
+      const catx = new ConstrainedAssetTransaction({
+        executor: zeroAddress,
+        chainId: 1,
+      });
+      const wtoken =
+        "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2" as `0x${string}`;
+      for (let i = 0; i < 255; i++) {
+        catx.embedNativeWrap(1n, wtoken);
+      }
+      expect(() => catx.embedNativeWrap(1n, wtoken)).toThrow(
+        "Cannot embed more than 255 transactions: nonce would overflow",
+      );
+    });
+
+    it("asAdditionalCalls returns complete Call objects with to set", () => {
+      const catx = new ConstrainedAssetTransaction({
+        executor: zeroAddress,
+        chainId: 1,
+      });
+      const wtoken =
+        "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2" as `0x${string}`;
+      const account =
+        "0x1234567890abcdef1234567890abcdef12345678" as `0x${string}`;
+      catx.embedNativeWrap(parseEther("1"), wtoken);
+
+      const calls = catx.asAdditionalCalls(account);
+      expect(calls).toHaveLength(1);
+      expect(calls[0]!.to).toBe(account);
+      expect(calls[0]!.value).toBe(0n);
+      expect(calls[0]!.data.startsWith("0x")).toBe(true);
     });
 
     it("asAdditionalCall returns empty when no embeds", () => {

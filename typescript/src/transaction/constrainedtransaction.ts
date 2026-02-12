@@ -44,6 +44,12 @@ export class ConstrainedAssetTransaction {
 
   embedNativeWrap(amount: bigint, wtoken: `0x${string}`) {
     if (amount === 0n) throw new Error("It is meaningless to wrap 0 eth");
+    if (wtoken === zeroAddress)
+      throw new Error("wtoken cannot be the zero address");
+    if (this.embeddedAccountTransactions.length >= 255)
+      throw new Error(
+        "Cannot embed more than 255 transactions: nonce would overflow",
+      );
     // Create a deposit call to wtoken
     const encodedCall = encodeFunctionData({
       abi: WETH_ABI,
@@ -58,7 +64,7 @@ export class ConstrainedAssetTransaction {
     });
   }
 
-  embeddedCallsAsSetSignatures(): Call[] {
+  private embeddedCallsAsSetSignatures(): Call[] {
     const additionalSetSignatures: Call[] = [];
     for (const callToEmbed of this.embeddedAccountTransactions) {
       const structHash = hashStruct({
@@ -209,6 +215,10 @@ export class ConstrainedAssetTransaction {
     tx.setMode(ExecutionMode.RaiseRevert);
     tx.setNonce(1n);
     return tx;
+  }
+
+  asAdditionalCalls(account: `0x${string}`): Call[] {
+    return this.asAdditionalCall().map((call) => ({ ...call, to: account }));
   }
 
   asAdditionalCall(): Omit<Call, "to">[] {

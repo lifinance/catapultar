@@ -103,6 +103,23 @@ export class BaseTransaction {
   }
 
   /**
+   * Validates the transaction state: nonce, mode, and calls.
+   * @param options.ignoreNoCalls Do not throw an error if no calls have been configured. Default: false
+   */
+  validate(options?: { ignoreNoCalls?: boolean }) {
+    const { ignoreNoCalls = false } = options ?? {};
+    if (this.nonce === 0n)
+      throw new Error(
+        `Nonce 0 is not allowed. It cannot be differentiated from an invalid nonce.`,
+      );
+    if (!this.nonce) throw new Error("Nonce has not been set");
+    if (!this.mode || !this.hasValidMode())
+      throw new Error("Mode has not been set");
+    if (!ignoreNoCalls && this.calls.length === 0)
+      throw new Error("Calls have not been set");
+  }
+
+  /**
    * Returns the signature as a compact signature of 64 bytes instead of 65 bytes.
    *
    * @param Signature If provided, will act on the provided signature instead.
@@ -128,13 +145,13 @@ export class BaseTransaction {
       );
     if (!this.nonce) throw new Error("No nonce has been set");
     const { compactSignature = true } = options ?? {};
-    if (this.signature) {
-      this.signature = compactSignature
+    const sig = this.signature
+      ? compactSignature
         ? this.asCompactSignature()
-        : this.signature;
-    }
-    if (this.signature) {
-      return `0x${asHex(this.nonce, 32)}${this.signature.replace("0x", "")}`;
+        : this.signature
+      : undefined;
+    if (sig) {
+      return `0x${asHex(this.nonce, 32)}${sig.replace("0x", "")}`;
     } else {
       return asHex(this.nonce, 32, "0x");
     }
@@ -165,8 +182,7 @@ export class BaseTransaction {
    * @return As a call for further scheduling or manual transaction signing. If used for manual transaction.
    */
   asCallData(): Omit<Call, "to"> {
-    if (!this.hasValidMode())
-      throw new Error(`Mode incorrectly set: ${this.mode}`);
+    this.validate();
     const executionData = this.getExecutionData();
     const data = encodeFunctionData({
       abi: CATAPULTAR_V0_1_0_ABI,
@@ -181,18 +197,11 @@ export class BaseTransaction {
 
   /** Return the calls as an approval diget. This can be used to "embed" the calls into an account */
   asDigest() {
-    if (this.nonce === 0n)
-      throw new Error(
-        `Nonce 0 is not allowed. It cannot be differentiated from an invalid nonce.`,
-      );
-    if (!this.nonce) throw new Error("Nonce has not been set");
-    if (!this.mode || !this.hasValidMode())
-      throw new Error("Mode has not been set");
-    if (this.calls.length === 0) throw new Error("Calls have not been set");
+    this.validate();
     return hashStruct({
       types: CallsTyped,
       primaryType: "Calls",
-      data: { nonce: this.nonce, mode: this.mode, calls: this.calls },
+      data: { nonce: this.nonce!, mode: this.mode!, calls: this.calls },
     });
   }
 
