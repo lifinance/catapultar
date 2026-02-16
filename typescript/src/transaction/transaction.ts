@@ -179,7 +179,7 @@ export class BaseTransaction {
     };
   }
 
-  /** Return the calls as an approval diget. This can be used to "embed" the calls into an account */
+  /** Return the calls as an approval digest. This can be used to "embed" the calls into an account */
   asDigest() {
     if (this.nonce === 0n)
       throw new Error(

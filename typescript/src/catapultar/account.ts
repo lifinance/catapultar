@@ -537,7 +537,9 @@ export class CatapultarAccount<
       this.accountPublicKeyType === AccountPublicKeyType.ECDSAOrSmartContract
     ) {
       const actualAccountOwner = await this.getAccountOwner();
-      if ((this.pubkey as `0x${string}`) !== actualAccountOwner)
+      const expectedPubkey = (this.pubkey as `0x${string}`).toLowerCase();
+      const normalizedAccountOwner = actualAccountOwner.toLowerCase();
+      if (expectedPubkey !== normalizedAccountOwner)
         throw new Error(
           `Expected pubkey: ${this.pubkey}, actual owner: ${actualAccountOwner}`,
         );

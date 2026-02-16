@@ -85,12 +85,13 @@ TODO
 ### Transaction Creation
 
 ```typescript
+import { CatapultarTx } from "catapultar";
+
 const account = {
   address,
   chainId,
   owner,
 }
-CatapultarTx;
 
 const tx = new CatapultarTx({account});
 const call = (await tx.addCalls(...calls).sign((v) => viemWalletClient.signTypedData({account, ...v}))).asCall();
