@@ -104,7 +104,7 @@ viemWalletClient.sendTransaction({
 ### Embed
 
 In some cases, you may want to execute an action on behalf of another user — they are the primary custodian but a pre-approved call has been configured.
-Catapultar can be configured for this use case by embedded a call (or signature) digest.
+Catapultar can be configured for this use case by embedding a call (or signature) digest.
 
 To create embedded accounts, use **BaseTransaction**.
 
@@ -142,7 +142,7 @@ const cat = new ConstrainedAssetTransaction({executor});
 cat.addAllowances(...allowances);
 cat.addOutcomes(...outcomes);
 
-const tx = tx.asCatapultarAllowanceTransaction();
+const tx = cat.asCatapultarAllowanceTransaction();
 const context = tx.asAccount(...);
 
 const entryCall = tx.asExecuteCall({address: context.address, ...})
@@ -158,4 +158,3 @@ See `src/transaction/constrainedtransaction.spec.ts::create account and execute 
 - `src/abi/` — Contract ABIs
 - `src/types/` — shared TypeScript types
 - `src/utils/` — helper utilities
-

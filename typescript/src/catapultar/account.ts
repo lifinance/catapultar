@@ -326,7 +326,7 @@ export class CatapultarAccount<
       const bits = toInvalidate.map((v) => v % 256n);
       let mask = 0n;
       for (const bit of bits) {
-        mask += 1n << bit;
+        mask |= 1n << bit;
       }
       return [wordPos, mask] as [bigint, bigint];
     });

@@ -128,13 +128,13 @@ export class BaseTransaction {
       );
     if (!this.nonce) throw new Error("No nonce has been set");
     const { compactSignature = true } = options ?? {};
-    if (this.signature) {
-      this.signature = compactSignature
+    const sig = this.signature
+      ? compactSignature
         ? this.asCompactSignature()
-        : this.signature;
-    }
-    if (this.signature) {
-      return `0x${asHex(this.nonce, 32)}${this.signature.replace("0x", "")}`;
+        : this.signature
+      : undefined;
+    if (sig) {
+      return `0x${asHex(this.nonce, 32)}${sig.replace("0x", "")}`;
     } else {
       return asHex(this.nonce, 32, "0x");
     }

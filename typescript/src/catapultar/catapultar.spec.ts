@@ -17,7 +17,6 @@ import {
   sha256,
   stringToBytes,
 } from "viem";
-import { Account } from "viem/tempo";
 import { Base64, P256 } from "ox";
 import { CatapultarAccount } from "./account";
 import { rpcUrl } from "../../test/setup";
@@ -126,7 +125,7 @@ describe("Catapultar", () => {
         tx.signature = signature;
 
         expect(await tx.hasValidSignature()).toBe(true);
-        expect(await tx.hasValidSignature({ noSignatureIsValid: true })).toBe(
+        expect(await tx.hasValidSignature({ noSignatureIsValid: false })).toBe(
           true,
         );
         expect(await tx.hasValidSignature({ noSignatureIsValid: true })).toBe(
@@ -360,9 +359,6 @@ describe("Catapultar", () => {
           : p256PubKey(privateKey);
 
       const oftenTargetAddress = random(20); // This is acting as a random address.
-
-      const a = Account.fromP256(privateKey);
-      a.signTypedData;
 
       const wallet = privateKeyToAccount(PUBLIC_DEFAULT_ANVIL_ACCOUNT_0);
       const executor = createWalletClient({
