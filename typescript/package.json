@@ -10,7 +10,7 @@
   "bugs": {
     "url": "https://github.com/lifinance/catapultar/issues"
   },
-  "homepage": "https://github.com/lifinance/catapultarr#readme",
+  "homepage": "https://github.com/lifinance/catapultar#readme",
   "engines": {
     "node": ">=20.0.0",
     "bun": ">=1.3.5"
