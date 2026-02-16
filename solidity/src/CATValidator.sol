@@ -227,9 +227,7 @@ contract CATValidator is EIP712, ReentrancyGuard {
 
             if iszero(success) {
                 returndatacopy(0x00, 0x00, returndatasize())
-                if iszero(success) {
-                    revert(0x00, returndatasize())
-                }
+                revert(0x00, returndatasize())
             }
         }
     }

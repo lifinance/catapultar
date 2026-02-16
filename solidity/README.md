@@ -299,13 +299,13 @@ Spent allowance are sent to `execTarget`. The transaction will revert if either 
 
 ### Execution
 
-Since `CATValidator` relies on standing approvals, it is unsafe to execute arbitrary calldata from it. Instead, it relies on `CallProxy` to safely execue arbitrary calldata. The address of the proxy is `CATValidator::CALL_PROXY`.
+Since `CATValidator` relies on standing approvals, it is unsafe to execute arbitrary calldata from it. Instead, it relies on `CallProxy` to safely execute arbitrary calldata. The address of the proxy is `CATValidator::CALL_PROXY`.
 
 `CATValidator::entry` takes 2 execution parameters: `address execTarget` and `bytes calldata execPayload`. `execTarget` will receive the allowance can be called with exactly `execPayload` from `CATValidator::CALL_PROXY`.
 
 ### Constraint
 
-The signed `Outcome`s will be valdiated by recording the current balance of each `Outcome` before spending `Allowance` and comparing them to the balances after the external call. If the difference is less than `Outcome.amount` the transaction will revert.
+The signed `Outcome`s will be validated by recording the current balance of each `Outcome` before spending `Allowance` and comparing them to the balances after the external call. If the difference is less than `Outcome.amount` the transaction will revert.
 
 ## Development
 
