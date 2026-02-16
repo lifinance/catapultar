@@ -93,7 +93,7 @@ export class BaseTransaction {
   }
 
   /**
-   * @returns Whether the a multichain execution mode is set.
+   * @returns Whether a multichain execution mode is set.
    */
   hasMultichainMode(): boolean {
     return (
