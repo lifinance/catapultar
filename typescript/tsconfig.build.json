@@ -1,5 +1,5 @@
 {
-  // This file is used to compile the for cjs and esm (see package.json build scripts). It should exclude all test files.
+  // Build config for the published ESM package. Excludes test files.
   "extends": "./tsconfig.base.json",
   "include": ["src"],
   "exclude": [

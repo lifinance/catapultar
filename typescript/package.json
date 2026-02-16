@@ -1,7 +1,20 @@
 {
   "name": "catapultar",
-  "description": "Interface for the Catapultar Smart Account ",
-  "version": "0.0.1",
+  "description": "Interface for the Catapultar Smart Account",
+  "version": "0.1.0",
+  "license": "LGPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lifinance/catapultar.git"
+  },
+  "bugs": {
+    "url": "https://github.com/lifinance/catapultar/issues"
+  },
+  "homepage": "https://github.com/lifinance/catapultarr#readme",
+  "engines": {
+    "node": ">=20.0.0",
+    "bun": ">=1.3.5"
+  },
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "files": [
@@ -10,7 +23,9 @@
   "module": "dist/index.js",
   "exports": {
     ".": {
-      "import": "./dist/index.js"
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
     }
   },
   "type": "module",
@@ -18,11 +33,10 @@
   "scripts": {
     "clean": "rm -rf dist/",
     "prebuild": "bun run clean",
-    "build": "tsc --project tsconfig.build.json",
+    "build": "tsc --project tsconfig.build.json && node ./scripts/rewrite-dist-imports.mjs",
     "build:watch": "tsc --project tsconfig.build.json -w",
-    "prepare": "cd .. && husky typescript/.husky",
     "lint:staged": "prettier -w",
-    "prepublishOnly": "bun run build",
+    "prepublishOnly": "bun run build && bun run test",
     "test": "bun test --preload ./test/setup.ts",
     "test:watch": "bun run test --watch",
     "coverage": "bun run test --coverage",

@@ -9,6 +9,7 @@ import {
   keccak256,
   parseAbiParameters,
   recoverAddress,
+  type PublicClient,
 } from "viem";
 import {
   type Version,
@@ -216,7 +217,7 @@ export class CatapultarAccount<
     return CatapultarAccount.deriveCloneAddress(template, salt, factory);
   }
 
-  publicClient(this: CatapultarAccount<any, string, any>) {
+  publicClient(this: CatapultarAccount<any, string, any>): PublicClient {
     const viemChain = getViemChainId(this.chainId);
     return createPublicClient({
       chain: viemChain,
