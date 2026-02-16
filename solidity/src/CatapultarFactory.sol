@@ -47,8 +47,8 @@ contract CatapultarFactory {
         KeyedOwnable.PublicKeyType ktp,
         bytes32[] calldata owner,
         bytes32 salt
-    ) external payable ownerInSalt(salt, ktp, owner) returns (address proxy) {
-        proxy = LibClone.cloneDeterministic_PUSH0(EXECUTOR, salt);
+    ) external payable ownerInSalt(salt, ktp, owner) returns (address payable proxy) {
+        proxy = payable(LibClone.cloneDeterministic_PUSH0(EXECUTOR, salt));
 
         Catapultar(payable(proxy)).init{ value: msg.value }(ktp, owner);
     }
@@ -71,7 +71,7 @@ contract CatapultarFactory {
         bytes32 salt,
         bytes32 digest,
         bool isSignature
-    ) external payable ownerInSalt(salt, ktp, owner) returns (address proxy) {
+    ) external payable ownerInSalt(salt, ktp, owner) returns (address payable proxy) {
         uint256 nonce;
         assembly ("memory-safe") {
             // Catapultar.DigestApproval.Call == 1
@@ -80,7 +80,7 @@ contract CatapultarFactory {
             nonce := add(isSignature, 1)
         }
         bytes32 saltWithDigest = EfficientHashLib.hash(salt, digest, bytes32(nonce));
-        proxy = LibClone.cloneDeterministic_PUSH0(EXECUTOR, saltWithDigest);
+        proxy = payable(LibClone.cloneDeterministic_PUSH0(EXECUTOR, saltWithDigest));
 
         // forge-lint: disable-next-line(unsafe-typecast)
         // wake-disable-next-line reentrancy
@@ -114,8 +114,8 @@ contract CatapultarFactory {
         KeyedOwnable.PublicKeyType ktp,
         bytes32[] calldata owner,
         bytes32 salt
-    ) external payable ownerInSalt(salt, ktp, owner) returns (address proxy) {
-        proxy = LibClone.deployDeterministicERC1967(EXECUTOR, salt);
+    ) external payable ownerInSalt(salt, ktp, owner) returns (address payable proxy) {
+        proxy = payable(LibClone.deployDeterministicERC1967(EXECUTOR, salt));
 
         Catapultar(payable(proxy)).init{ value: msg.value }(ktp, owner);
     }

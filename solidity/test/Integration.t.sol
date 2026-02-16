@@ -4,11 +4,22 @@ pragma solidity ^0.8.30;
 // forge-lint: disable-start(unsafe-typecast)
 // forge-lint: disable-start(unchecked-call)
 
-import { Test } from "forge-std/src/Test.sol";
-
 import { ERC7821 } from "solady/src/accounts/ERC7821.sol";
 import { LibZip } from "solady/src/utils/LibZip.sol";
+import { MockERC20 } from "solady/test/utils/mocks/MockERC20.sol";
 
+import { LibExecutionConstraintTest } from "./helpers/libs/LibExecutionConstraint.t.sol";
+
+import { CATValidator } from "../src/helpers/CATValidator.sol";
+import {
+    ExecutionConstraint,
+    Input,
+    InputTarget,
+    LibExecutionConstraint,
+    Output
+} from "../src/helpers/libs/LibExecutionConstraint.sol";
+
+import { Catapultar } from "../src/Catapultar.sol";
 import { CatapultarFactory } from "../src/CatapultarFactory.sol";
 
 import { KeyedOwnable } from "../src/libs/KeyedOwnable.sol";
@@ -44,7 +55,7 @@ contract DummyContract {
 /**
  * @notice The intention of this test is to showcase the entire usecase-flow of using the Catapultar system.
  */
-contract IntegrationTest is Test {
+contract IntegrationTest is LibExecutionConstraintTest {
     bytes32 constant NO_REVERT_MODE = bytes32(bytes10(0x01000000000078210001));
     bytes32 constant REVERT_MODE = bytes32(bytes10(0x01010000000078210001));
 
@@ -53,9 +64,15 @@ contract IntegrationTest is Test {
     CatapultarFactory factory;
     address dummy;
 
+    CATValidator validator;
+
+    MockERC20 validatorToken;
+    uint256 balanceOfSwap = 0;
+
     function setUp() external {
         factory = new CatapultarFactory();
         dummy = address(new DummyContract());
+        validator = new CATValidator();
     }
 
     function test_integration() external {
@@ -255,6 +272,91 @@ contract IntegrationTest is Test {
 
         assertEq(DummyContract(dummy).store(0), 2, "Should have been called two times");
         assertEq(DummyContract(dummy).store(1), 3, "Should have been called three times");
+    }
+
+    function test_validator() external {
+        validatorToken = new MockERC20("Output Token", "OutTok", 18);
+
+        (address user,) = makeAddrAndKey("user");
+
+        // Create ExecutionConstraint:
+        Input[] memory inputs = new Input[](1);
+        inputs[0] = Input({ amount: 10 ** 18, token: address(new MockERC20("Input Token", "IT", 18)) });
+        Output[] memory outputs = new Output[](1);
+        outputs[0] = Output({ token: address(validatorToken), amount: 10 ** 18, destination: user });
+
+        ExecutionConstraint memory constraint =
+            ExecutionConstraint({ inputs: inputs, outputs: outputs, executor: makeAddr("executor"), nonce: 0 });
+
+        // Get digest.
+        bytes32 th = typehashReference(constraint.inputs, constraint.outputs, constraint.executor, constraint.nonce);
+        bytes32 domainSeparator = EIP712(address(validator)).DOMAIN_SEPARATOR();
+        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", domainSeparator, th));
+
+        address payable proxy;
+        {
+            // Turn the digest into a call of approve and then setSignature.
+            ERC7821.Call[] memory calls = new ERC7821.Call[](2);
+            calls[0] = ERC7821.Call({
+                to: inputs[0].token,
+                data: abi.encodeWithSignature("approve(address,uint256)", address(validator), inputs[0].amount),
+                value: 0
+            });
+            calls[1] = ERC7821.Call({
+                to: address(0), // self
+                data: abi.encodeCall(Catapultar.setSignature, (digest, Catapultar.DigestApproval.Signature)),
+                value: 0
+            });
+
+            bytes32 callsTypeHash = this.typehash(1, REVERT_MODE, calls);
+
+            // Deploy an account with the digest embedded.
+
+            bytes32[] memory keys = new bytes32[](1);
+            keys[0] = bytes32(uint256(uint160(user)));
+            // Lets get a proxy.
+            proxy = factory.deployWithDigest(
+                KeyedOwnable.PublicKeyType.ECDSAOrSmartContract,
+                keys,
+                bytes32(bytes20(uint160(user))),
+                callsTypeHash,
+                false
+            );
+
+            // Execute calls on account.
+            Catapultar(proxy).execute(REVERT_MODE, abi.encode(calls, abi.encodePacked(uint256(1))));
+
+            // Fund the account with the input token.
+            MockERC20(inputs[0].token).mint(proxy, inputs[0].amount);
+        }
+
+        // We can now execute our generate calldata on the validator. Lets generate our calldata.
+        // First, we wanna forward the inputs to this contract. (since the swap function here expected us to send tokens
+        // ahead of time).
+        InputTarget[] memory inputTargets = new InputTarget[](1);
+        inputTargets[0] = InputTarget({ token: inputs[0].token, allocated: inputs[0].amount, spend: inputs[0].amount });
+        bytes memory externalCall =
+            abi.encodeCall(this.swap, (inputs[0].amount, inputs[0].token, outputs[0].destination));
+
+        vm.prank(makeAddr("WrongCaller"));
+        vm.expectRevert(abi.encodeWithSelector(CATValidator.BadSignature.selector));
+        validator.entry(address(this), externalCall, proxy, constraint.nonce, inputTargets, outputs, hex"");
+
+        vm.prank(constraint.executor);
+        validator.entry(address(this), externalCall, proxy, constraint.nonce, inputTargets, outputs, hex"");
+    }
+
+    // Mock functions for exchanging 1 token for another
+    function swap(
+        uint256 amount,
+        address inToken,
+        address target
+    ) external {
+        // Check for balance increase.
+        uint256 diff = MockERC20(inToken).balanceOf(address(this)) - balanceOfSwap;
+        balanceOfSwap += diff;
+
+        validatorToken.mint(target, amount);
     }
 
     function typehash(
