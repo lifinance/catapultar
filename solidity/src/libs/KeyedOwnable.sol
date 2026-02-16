@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 pragma solidity ^0.8.30;
 
+import { DynamicArrayLib } from "solady/src/utils/DynamicArrayLib.sol";
 import { EfficientHashLib } from "solady/src/utils/EfficientHashLib.sol";
 import { LibBit } from "solady/src/utils/LibBit.sol";
 import { LibBytes } from "solady/src/utils/LibBytes.sol";
@@ -13,6 +14,8 @@ import { WebAuthn } from "solady/src/utils/WebAuthn.sol";
  * @author Alexander @ LIFI (https://li.fi)
  */
 contract KeyedOwnable {
+    using DynamicArrayLib for uint256[];
+
     error DirtyEthereumAddress(bytes32);
     error InvalidKey();
     error Unauthorized();
@@ -65,10 +68,11 @@ contract KeyedOwnable {
     function getPublicKey() public view returns (PublicKeyType keyType, bytes32[] memory key) {
         keyType = publicKeyType;
         uint256 length = _keyTypeLength(keyType);
-        key = new bytes32[](length);
+        uint256[] memory _key = DynamicArrayLib.malloc(length);
         for (uint256 i; i < length; ++i) {
-            key[i] = _getPublicKeySlice(i);
+            _key.set(i, _getPublicKeySlice(i));
         }
+        key = _key.asBytes32Array();
     }
 
     /**

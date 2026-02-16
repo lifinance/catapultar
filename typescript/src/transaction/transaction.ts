@@ -4,7 +4,7 @@ import {
   CallsTyped,
   ExecutionMode,
   type Call,
-  type Factory,
+  type MaybeFactory,
   type Pubkey,
 } from "../types/types";
 import { asHex, pubkeyAsArray, random } from "../utils/helpers";
@@ -12,6 +12,7 @@ import { toCompactSignature } from "../utils/signature";
 import { CatapultarAccount } from "../catapultar/account";
 import CATAPULTAR_FACTORY_V0_1_0_ABI from "../abi/catapultarFactoryV0.1.0";
 import CATAPULTAR_V0_1_0_ABI from "../abi/catapultarV0.1.0";
+import { _factory } from "../config";
 
 export class BaseTransaction {
   /** Transaction ExecutionMode, defines transaction behavior for call reverts. */
@@ -197,25 +198,28 @@ export class BaseTransaction {
 
   /** Generate an account with this action embedded. */
   asAccount<AKT extends AccountPublicKeyType>(
-    options: {
+    opt: {
       salt: `0x${string}`;
     } & Pubkey<AKT> &
-      Factory,
+      MaybeFactory,
   ) {
     const callDigest = this.asDigest();
+    const { factory, template } = _factory(opt);
     const address = CatapultarAccount.predict({
-      ...options,
+      ...opt,
+      factory,
+      template,
       callDigest,
       isSignature: false,
     });
 
-    const pubkeyArray = pubkeyAsArray(options);
+    const pubkeyArray = pubkeyAsArray(opt);
     const deployCall = {
-      to: options.factory,
+      to: factory,
       data: encodeFunctionData({
         abi: CATAPULTAR_FACTORY_V0_1_0_ABI,
         functionName: "deployWithDigest",
-        args: [options.keyType, pubkeyArray, options.salt, callDigest, false],
+        args: [opt.keyType, pubkeyArray, opt.salt, callDigest, false],
       }),
       value: 0n,
     };

@@ -240,6 +240,72 @@ If A implements ERC-1271, it can execute **ANY** call it desires on the SCA. Usi
 
 Additionally, remember that token allowances are long-lived. If a token allowance is set on a contract, no signature or approval is needed to withdraw tokens.
 
+## Constrained Asset Transaction Validator
+
+The Constrained Asset Transaction Validator is a intent-like contract for validating that a specific asset exchange happened. The CAT Validator validates that the signed token allowances and tokens outcomes are executed accordingly to the signer's requirements but not the execution itself.
+
+Compare to a fully fledged intent system, the system differs by being a permissioned asset centric system:
+- No validation of best execution.
+- A specific executor is required for each transaction.
+- Custom calldata is not included in validator.
+
+The primary design goal is to create a trust-minimized non-custodian conditional asset allowance.
+
+### Usage
+
+Each CAT requires a EIP712 signed `ExecutionConstraint` and standing ERC20 approvals against the validator. The `ExecutionConstraint` specified the constraints which are required to be fulfilled by end of the transaction.
+
+```solidity
+struct Allowance {
+  address token;
+  uint256 amount;
+}
+struct Outcome {
+  address token;
+  uint256 amount;
+  address destination;
+}
+struct ExecutionConstraint {
+  Allowance[] allowances;
+  Outcome[] outcomes;
+  address executor;
+  uint256 nonce;
+}
+```
+
+Given a signed `ExecutionConstraint` and standing approvals, `ExecutionConstraint.executor` can call `CATValidator::entry` to execute the transaction.
+
+```solidity
+function entry(
+  address execTarget,
+  bytes calldata execPayload,
+  address account,
+  uint256 nonce,
+  AllowanceSpend[] calldata allowances,
+  Outcome[] calldata outcomes,
+  bytes calldata signature
+) external nonReentrant
+```
+
+It is required that you explicitly spend allowances. If the signer receives an uncertain amount, the allocated amount can be set higher than the actual spend. The spend magic value `1 << 255` means the current balance. No allowance magic value exists.
+```solidity
+struct AllowanceSpend {
+  address token;
+  uint256 allocated;
+  uint256 spend;
+}
+```
+Spent allowance are sent to `execTarget`. The transaction will revert if either `allowance` is less than the `spend` or `account` does not have `spend`.
+
+### Execution
+
+Since `CATValidator` relies on standing approvals, it is unsafe to execute arbitrary calldata from it. Instead, it relies on `CallProxy` to safely execue arbitrary calldata. The address of the proxy is `CATValidator::CALL_PROXY`.
+
+`CATValidator::entry` takes 2 execution parameters: `address execTarget` and `bytes calldata execPayload`. `execTarget` will receive the allowance can be called with exactly `execPayload` from `CATValidator::CALL_PROXY`.
+
+### Constraint
+
+The signed `Outcome`s will be valdiated by recording the current balance of each `Outcome` before spending `Allowance` and comparing them to the balances after the external call. If the difference is less than `Outcome.amount` the transaction will revert.
 
 ## Development
 

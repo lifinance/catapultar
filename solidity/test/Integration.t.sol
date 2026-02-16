@@ -8,16 +8,10 @@ import { ERC7821 } from "solady/src/accounts/ERC7821.sol";
 import { LibZip } from "solady/src/utils/LibZip.sol";
 import { MockERC20 } from "solady/test/utils/mocks/MockERC20.sol";
 
-import { LibExecutionConstraintTest } from "./helpers/libs/LibExecutionConstraint.t.sol";
+import { LibExecutionConstraintTest } from "./libs/LibExecutionConstraint.t.sol";
 
-import { CATValidator } from "../src/helpers/CATValidator.sol";
-import {
-    ExecutionConstraint,
-    Input,
-    InputTarget,
-    LibExecutionConstraint,
-    Output
-} from "../src/helpers/libs/LibExecutionConstraint.sol";
+import { CATValidator } from "../src/CATValidator.sol";
+import { Allowance, AllowanceSpend, ExecutionConstraint, Outcome } from "../src/libs/LibExecutionConstraint.sol";
 
 import { Catapultar } from "../src/Catapultar.sol";
 import { CatapultarFactory } from "../src/CatapultarFactory.sol";
@@ -275,21 +269,23 @@ contract IntegrationTest is LibExecutionConstraintTest {
     }
 
     function test_validator() external {
-        validatorToken = new MockERC20("Output Token", "OutTok", 18);
+        validatorToken = new MockERC20("Outcome Token", "OutTok", 18);
 
         (address user,) = makeAddrAndKey("user");
 
         // Create ExecutionConstraint:
-        Input[] memory inputs = new Input[](1);
-        inputs[0] = Input({ amount: 10 ** 18, token: address(new MockERC20("Input Token", "IT", 18)) });
-        Output[] memory outputs = new Output[](1);
-        outputs[0] = Output({ token: address(validatorToken), amount: 10 ** 18, destination: user });
+        Allowance[] memory allowances = new Allowance[](1);
+        allowances[0] = Allowance({ amount: 10 ** 18, token: address(new MockERC20("Allowance Token", "IT", 18)) });
+        Outcome[] memory outcomes = new Outcome[](1);
+        outcomes[0] = Outcome({ token: address(validatorToken), amount: 10 ** 18, destination: user });
 
-        ExecutionConstraint memory constraint =
-            ExecutionConstraint({ inputs: inputs, outputs: outputs, executor: makeAddr("executor"), nonce: 0 });
+        ExecutionConstraint memory constraint = ExecutionConstraint({
+            allowances: allowances, outcomes: outcomes, executor: makeAddr("executor"), nonce: 0
+        });
 
         // Get digest.
-        bytes32 th = typehashReference(constraint.inputs, constraint.outputs, constraint.executor, constraint.nonce);
+        bytes32 th =
+            typehashReference(constraint.allowances, constraint.outcomes, constraint.executor, constraint.nonce);
         bytes32 domainSeparator = EIP712(address(validator)).DOMAIN_SEPARATOR();
         bytes32 digest = keccak256(abi.encodePacked("\x19\x01", domainSeparator, th));
 
@@ -298,8 +294,8 @@ contract IntegrationTest is LibExecutionConstraintTest {
             // Turn the digest into a call of approve and then setSignature.
             ERC7821.Call[] memory calls = new ERC7821.Call[](2);
             calls[0] = ERC7821.Call({
-                to: inputs[0].token,
-                data: abi.encodeWithSignature("approve(address,uint256)", address(validator), inputs[0].amount),
+                to: allowances[0].token,
+                data: abi.encodeWithSignature("approve(address,uint256)", address(validator), allowances[0].amount),
                 value: 0
             });
             calls[1] = ERC7821.Call({
@@ -326,24 +322,26 @@ contract IntegrationTest is LibExecutionConstraintTest {
             // Execute calls on account.
             Catapultar(proxy).execute(REVERT_MODE, abi.encode(calls, abi.encodePacked(uint256(1))));
 
-            // Fund the account with the input token.
-            MockERC20(inputs[0].token).mint(proxy, inputs[0].amount);
+            // Fund the account with the allowance token.
+            MockERC20(allowances[0].token).mint(proxy, allowances[0].amount);
         }
 
         // We can now execute our generate calldata on the validator. Lets generate our calldata.
-        // First, we wanna forward the inputs to this contract. (since the swap function here expected us to send tokens
-        // ahead of time).
-        InputTarget[] memory inputTargets = new InputTarget[](1);
-        inputTargets[0] = InputTarget({ token: inputs[0].token, allocated: inputs[0].amount, spend: inputs[0].amount });
+        // First, we wanna forward the allowances to this contract. (since the swap function here expected us to send
+        // tokens ahead of time).
+        AllowanceSpend[] memory inputTargets = new AllowanceSpend[](1);
+        inputTargets[0] = AllowanceSpend({
+            token: allowances[0].token, allocated: allowances[0].amount, spend: allowances[0].amount
+        });
         bytes memory externalCall =
-            abi.encodeCall(this.swap, (inputs[0].amount, inputs[0].token, outputs[0].destination));
+            abi.encodeCall(this.swap, (allowances[0].amount, allowances[0].token, outcomes[0].destination));
 
         vm.prank(makeAddr("WrongCaller"));
         vm.expectRevert(abi.encodeWithSelector(CATValidator.BadSignature.selector));
-        validator.entry(address(this), externalCall, proxy, constraint.nonce, inputTargets, outputs, hex"");
+        validator.entry(address(this), externalCall, proxy, constraint.nonce, inputTargets, outcomes, hex"");
 
         vm.prank(constraint.executor);
-        validator.entry(address(this), externalCall, proxy, constraint.nonce, inputTargets, outputs, hex"");
+        validator.entry(address(this), externalCall, proxy, constraint.nonce, inputTargets, outcomes, hex"");
     }
 
     // Mock functions for exchanging 1 token for another

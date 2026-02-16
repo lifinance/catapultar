@@ -18,8 +18,8 @@ import {
   type AccountConstructorParams,
   type KeyedSignature,
   type EmbeddedCall,
-  type Factory,
   type Pubkey,
+  type MaybeFactory,
 } from "../types/types";
 import { getViemChainId } from "../utils/viem";
 import CATAPULTAR_V0_1_0_ABI from "../abi/catapultarV0.1.0";
@@ -28,6 +28,7 @@ import { pubkeyAsArray } from "../utils/helpers";
 // import { CATAPULTAR_V0_0_1_ABI } from "../abi/catapultarV0.0.1";
 import { P256, PublicKey, WebAuthnP256 } from "ox";
 import { fromCompactSignature } from "../utils/signature";
+import { _factory } from "../config";
 
 export class CatapultarAccount<
   V extends Version = "0.1.0",
@@ -98,31 +99,36 @@ export class CatapultarAccount<
     options: {
       salt: `0x${string}`;
     } & Pubkey<AKT> &
-      Factory &
+      MaybeFactory &
       ({} | EmbeddedCall),
   ): { call: Call; account: CatapultarAccount<V, undefined, AKT> } {
     let callDigest: `0x${string}` | undefined = undefined;
     let isSignature: boolean | undefined = undefined;
 
     let derivedAddress: `0x${string}`;
+    const { factory, template } = _factory(options);
     if ("callDigest" in options && "isSignature" in options) {
       callDigest = options.callDigest;
       isSignature = options.isSignature;
 
       derivedAddress = CatapultarAccount.predict({
         ...options,
+        factory,
+        template,
         callDigest: callDigest,
         isSignature: isSignature,
       });
     } else {
       derivedAddress = CatapultarAccount.predict({
         ...options,
+        factory,
+        template,
       });
     }
 
     const pubkeyArray = pubkeyAsArray(options);
     const call = {
-      to: options.factory,
+      to: factory,
       data: callDigest
         ? encodeFunctionData({
             abi: CATAPULTAR_FACTORY_V0_1_0_ABI,
@@ -189,12 +195,14 @@ export class CatapultarAccount<
     opt: {
       salt: `0x${string}`;
     } & Pubkey<AKT> &
-      Factory &
+      MaybeFactory &
       ({} | EmbeddedCall),
   ) {
     if (!CatapultarAccount.ownerInSalt(opt))
       throw new Error(`Pubkey: ${opt.pubkey} not in salt: ${opt.salt}`);
-    let { salt, template, factory } = opt;
+    let { salt } = opt;
+    const { factory, template } = _factory(opt);
+
     // If a digest is used, rehash the hash.
     if ("callDigest" in opt && "isSignature" in opt) {
       const { callDigest, isSignature } = opt;
