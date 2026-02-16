@@ -7,6 +7,7 @@ import { rpcUrl } from "../../test/setup";
 import { AccountPublicKeyType, type Version } from "../types/types";
 import { factories, templates } from "../config";
 import CATAPULTAR_FACTORY_V0_1_0_ABI from "../abi/catapultarFactoryV0.1.0";
+import { P256 } from "ox";
 
 const chainId = 31337;
 const PUBLIC_DEFAULT_ANVIL_ACCOUNT_0 =
@@ -129,6 +130,35 @@ describe("Catapultar Account", () => {
       const expectedOwner = pubkey.address;
       expect(publicClientOwner).toBe(expectedOwner);
       expect(onChainOwner).toBe(expectedOwner);
+    });
+
+    it.serial("should validate owner for p256 accounts", async () => {
+      const p256PrivateKey = P256.randomPrivateKey();
+      const { x, y } = P256.getPublicKey({ privateKey: p256PrivateKey });
+      const p256Pubkey = [asHex(x, 32, "0x"), asHex(y, 32, "0x")] as [
+        `0x${string}`,
+        `0x${string}`,
+      ];
+
+      const deployCall = await CatapultarAccount.deploy({
+        keyType: AccountPublicKeyType.P256,
+        pubkey: p256Pubkey,
+        salt: `0x${asHex(0n, 20)}${random(12).replace("0x", "")}`,
+        factory: factories["0.1.0"],
+        template: templates["0.1.0"],
+      });
+
+      const p256Account = deployCall.account.attachRpc({
+        chainId,
+        rpc: rpcUrl(),
+      });
+
+      const tx = await executor.sendTransaction({
+        ...deployCall.call,
+      });
+      await waitForTransaction(tx);
+
+      await expect(p256Account.validateOwner()).resolves.toBe(p256Account);
     });
 
     it.serial("should deploy with digest call", async () => {

@@ -26,7 +26,7 @@ import { KeyedOwnable } from "./libs/KeyedOwnable.sol";
  * front-run call deployment.
  * For the same reason, it may not be safe using a 0 address in the salt.
  *
- * If deploy is called twice with the same parameters (owner, salt), the second transaction will fall. In those cases,
+ * If deploy is called twice with the same parameters (owner, salt), the second transaction will fail. In those cases,
  * the predictDeploy* functions can be used to re-discover the deployed contract.
  * The owner of a deployed proxy may not be the same as the owner it was deployed with.
  */

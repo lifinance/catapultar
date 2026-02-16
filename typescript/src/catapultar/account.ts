@@ -532,11 +532,39 @@ export class CatapultarAccount<
   // --- Validation --- //
 
   async validateOwner(this: CatapultarAccount<any, string, any>) {
-    const actualAccountOwner = await this.getAccountOwner();
-    if (this.pubkey !== actualAccountOwner)
+    if (
+      this.accountPublicKeyType === AccountPublicKeyType.ECDSAOrSmartContract
+    ) {
+      const actualAccountOwner = await this.getAccountOwner();
+      if ((this.pubkey as `0x${string}`) !== actualAccountOwner)
+        throw new Error(
+          `Expected pubkey: ${this.pubkey}, actual owner: ${actualAccountOwner}`,
+        );
+      return this;
+    }
+
+    const [actualKeyType, actualKey] = await this.publicClient().readContract({
+      address: this.address,
+      abi: this.abi(),
+      functionName: "getPublicKey",
+    });
+    if (actualKeyType !== this.accountPublicKeyType) {
       throw new Error(
-        `Expected pubkey: ${actualAccountOwner}, Provided pubkey: ${this.pubkey}`,
+        `Expected keyType: ${this.accountPublicKeyType}, actual keyType: ${actualKeyType}`,
       );
+    }
+
+    const expectedPubkey = this.pubkey as [`0x${string}`, `0x${string}`];
+    const normalizeHex = (value: `0x${string}`) => value.toLowerCase();
+    const [expectedX, expectedY] = expectedPubkey.map(normalizeHex);
+    const [actualX, actualY] = (
+      actualKey as [`0x${string}`, `0x${string}`]
+    ).map(normalizeHex);
+    if (expectedX !== actualX || expectedY !== actualY) {
+      throw new Error(
+        `Expected pubkey: ${expectedPubkey}, actual pubkey: ${actualKey}`,
+      );
+    }
     return this;
   }
 
