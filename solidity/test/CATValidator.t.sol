@@ -375,6 +375,44 @@ contract CATValidatorTest is LibExecutionConstraintTest {
         validator.compareOutcomes(account, outcomes, zeroBalances);
     }
 
+    function test_compareOutcomes_revert_on_wrapped_required_amount() external {
+        address account = makeAddr("account");
+        address destination = makeAddr("destination");
+        address token = address(new MockERC20("Test Token", "TT", 18));
+
+        uint256 initialBalance = 100;
+        MockERC20(token).mint(destination, initialBalance);
+
+        Outcome[] memory outcomes = new Outcome[](1);
+        outcomes[0] = Outcome({ token: token, amount: type(uint256).max, destination: destination });
+
+        uint256[] memory recordedBalances = new uint256[](1);
+        recordedBalances[0] = initialBalance;
+
+        vm.expectRevert(
+            abi.encodeWithSelector(CATValidator.InvalidTokenAmount.selector, type(uint256).max, 0)
+        );
+        validator.compareOutcomes(account, outcomes, recordedBalances);
+    }
+
+    function test_compareOutcomes_revert_on_balance_decrease() external {
+        address account = makeAddr("account");
+        address destination = makeAddr("destination");
+        address token = address(new MockERC20("Test Token", "TT", 18));
+
+        uint256 currentBalance = 100;
+        MockERC20(token).mint(destination, currentBalance);
+
+        Outcome[] memory outcomes = new Outcome[](1);
+        outcomes[0] = Outcome({ token: token, amount: 1, destination: destination });
+
+        uint256[] memory recordedBalances = new uint256[](1);
+        recordedBalances[0] = currentBalance + 1;
+
+        vm.expectRevert(abi.encodeWithSelector(CATValidator.InvalidTokenAmount.selector, 1, 0));
+        validator.compareOutcomes(account, outcomes, recordedBalances);
+    }
+
     // This test tests whether a decrease in balances correctly reverts.
     // Let this contract be the signer so we can skip the allowance.
     function test_entry_decrease_balances() external {

@@ -165,11 +165,10 @@ contract CATValidator is EIP712, ReentrancyGuard {
         for (uint256 i; i < outcomes.length; ++i) {
             Outcome calldata outcome = outcomes[i];
             uint256 newBalance = _balanceOf(account, outcome);
+
             unchecked {
-                // recordedBalances[i] + outcome.amount overflows, then an invalid balance has been requested (balance
-                // excedding type(uint256).max).
-                if (newBalance < recordedBalances[i] + outcome.amount) {
-                    uint256 diff = newBalance > recordedBalances[i] ? newBalance - recordedBalances[i] : 0;
+                uint256 diff = newBalance > recordedBalances[i] ? newBalance - recordedBalances[i] : 0;
+                if (diff < outcome.amount) {
                     revert InvalidTokenAmount(outcome.amount, diff);
                 }
             }
