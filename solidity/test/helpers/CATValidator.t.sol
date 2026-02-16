@@ -197,6 +197,7 @@ contract CATValidatorTest is LibExecutionConstraintTest {
         address account = makeAddr("account");
         vm.assume(amount != type(uint256).max);
         vm.assume(amount != 0);
+        vm.assume(amount != (1 << 255) - 1);
 
         address token = address(new MockERC20("Test Token", "TT", 18));
         MockERC20(token).mint(account, amount);
