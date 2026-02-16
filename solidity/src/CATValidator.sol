@@ -168,9 +168,7 @@ contract CATValidator is EIP712, ReentrancyGuard {
 
             unchecked {
                 uint256 diff = newBalance > recordedBalances[i] ? newBalance - recordedBalances[i] : 0;
-                if (diff < outcome.amount) {
-                    revert InvalidTokenAmount(outcome.amount, diff);
-                }
+                if (diff < outcome.amount) revert InvalidTokenAmount(outcome.amount, diff);
             }
         }
     }

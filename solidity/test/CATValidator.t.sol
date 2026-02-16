@@ -389,9 +389,7 @@ contract CATValidatorTest is LibExecutionConstraintTest {
         uint256[] memory recordedBalances = new uint256[](1);
         recordedBalances[0] = initialBalance;
 
-        vm.expectRevert(
-            abi.encodeWithSelector(CATValidator.InvalidTokenAmount.selector, type(uint256).max, 0)
-        );
+        vm.expectRevert(abi.encodeWithSelector(CATValidator.InvalidTokenAmount.selector, type(uint256).max, 0));
         validator.compareOutcomes(account, outcomes, recordedBalances);
     }
 
