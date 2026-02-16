@@ -2,6 +2,8 @@ name: Forge Test & Coverage
 
 on:
   push:
+    branches:
+      - 'main'
     paths:
       - 'solidity/**'
       - '.github/workflows/forge-test.yml'

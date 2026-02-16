@@ -2,6 +2,8 @@ name: Bun Test & Coverage
 
 on:
   push:
+    branches:
+      - 'main'
     paths:
       - 'typescript/**'
       - '.github/workflows/bun-test.yml'
