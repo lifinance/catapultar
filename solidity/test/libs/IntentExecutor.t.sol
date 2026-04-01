@@ -205,7 +205,7 @@ contract IntentExecutorTest is Test {
             target: address(tokenA),
             allowFailure: false,
             callData: abi.encodeCall(MockERC20.transfer, (recipient, 999 ether)) // no balance
-         });
+        });
         IntentExecutor.SweepTarget[] memory sweeps = new IntentExecutor.SweepTarget[](0);
 
         vm.expectRevert();
@@ -219,7 +219,7 @@ contract IntentExecutorTest is Test {
             target: address(tokenA),
             allowFailure: true,
             callData: abi.encodeCall(MockERC20.transfer, (recipient, 999 ether)) // no balance
-         });
+        });
         IntentExecutor.SweepTarget[] memory sweeps = new IntentExecutor.SweepTarget[](0);
 
         IntentExecutor.Result[] memory results = executor.executeAndSweep(approvals, calls, sweeps);
