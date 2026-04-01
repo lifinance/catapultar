@@ -261,6 +261,21 @@ contract IntentExecutorTest is Test {
         assertEq(recipient.balance, amount);
     }
 
+    function test_callExecution_withValue_revertsOnFailedCall() external {
+        vm.deal(address(executor), 1 ether);
+
+        IntentExecutor.Approval[] memory approvals = new IntentExecutor.Approval[](0);
+        IntentExecutor.Call3Value[] memory calls = new IntentExecutor.Call3Value[](1);
+        // Send value to a contract that can't receive ETH (tokenA has no receive/fallback)
+        calls[0] = IntentExecutor.Call3Value({
+            target: address(tokenA), allowFailure: false, value: 1 ether, callData: hex""
+        });
+        IntentExecutor.SweepTarget[] memory sweeps = new IntentExecutor.SweepTarget[](0);
+
+        vm.expectRevert();
+        executor.executeAndSweepNative{ value: 1 ether }(approvals, calls, sweeps, payable(address(0)));
+    }
+
     // -- Sweep guards --
 
     function testRevert_sweepToZeroAddress() external {
