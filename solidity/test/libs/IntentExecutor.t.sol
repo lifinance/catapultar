@@ -24,7 +24,7 @@ contract IntentExecutorTest is Test {
         feeCollector = makeAddr("feeCollector");
     }
 
-    // ─── executeAndSweep ────────────────────────────────────────────
+    // -- executeAndSweep --
 
     function test_executeAndSweep_sweepsFullBalance() external {
         uint256 amount = 1 ether;
@@ -119,7 +119,7 @@ contract IntentExecutorTest is Test {
         assertEq(tokenA.balanceOf(address(executor)), 0);
     }
 
-    // ─── executeAndSweepNative ──────────────────────────────────────
+    // -- executeAndSweepNative --
 
     function test_executeAndSweepNative_sweepsNativeToRecipient() external {
         uint256 amount = 1 ether;
@@ -196,7 +196,7 @@ contract IntentExecutorTest is Test {
         assertEq(recipient.balance, 1 ether);
     }
 
-    // ─── Call execution ─────────────────────────────────────────────
+    // -- Call execution --
 
     function test_callExecution_revertsOnFailedCall() external {
         IntentExecutor.Approval[] memory approvals = new IntentExecutor.Approval[](0);
@@ -261,7 +261,7 @@ contract IntentExecutorTest is Test {
         assertEq(recipient.balance, amount);
     }
 
-    // ─── Sweep guards ───────────────────────────────────────────────
+    // -- Sweep guards --
 
     function testRevert_sweepToZeroAddress() external {
         tokenA.mint(address(executor), 1 ether);
@@ -275,7 +275,7 @@ contract IntentExecutorTest is Test {
         executor.executeAndSweep(approvals, calls, sweeps);
     }
 
-    // ─── Approvals ──────────────────────────────────────────────────
+    // -- Approvals --
 
     function test_approvalSetsMaxAllowance() external {
         IntentExecutor.Approval[] memory approvals = new IntentExecutor.Approval[](1);
@@ -308,7 +308,7 @@ contract IntentExecutorTest is Test {
         assertLt(gasUsed2, gasUsed1);
     }
 
-    // ─── Receive ────────────────────────────────────────────────────
+    // -- Receive --
 
     function test_receiveAcceptsEth() external {
         vm.deal(address(this), 1 ether);
@@ -317,7 +317,7 @@ contract IntentExecutorTest is Test {
         assertEq(address(executor).balance, 1 ether);
     }
 
-    // ─── End-to-end: approve → swap → fee → sweep ──────────────────
+    // -- End-to-end: approve, swap, fee, sweep --
 
     function test_endToEnd_approveSwapFeeSweep() external {
         uint256 inputAmount = 10 ether;
@@ -355,7 +355,7 @@ contract IntentExecutorTest is Test {
         assertEq(tokenB.balanceOf(address(executor)), 0);
     }
 
-    // ─── Helpers ────────────────────────────────────────────────────
+    // -- Helpers --
 
     receive() external payable { }
 }
