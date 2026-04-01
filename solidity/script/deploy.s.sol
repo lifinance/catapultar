@@ -5,6 +5,7 @@ import { multichain } from "./multichain.s.sol";
 
 import { CATValidator } from "../src/CATValidator.sol";
 import { CatapultarFactory } from "../src/CatapultarFactory.sol";
+import { IntentExecutor } from "../src/libs/IntentExecutor.sol";
 import { KeyedOwnable } from "../src/libs/KeyedOwnable.sol";
 
 contract deploy is multichain {
@@ -12,9 +13,15 @@ contract deploy is multichain {
 
     function run(
         string[] calldata chains
-    ) public iterChains(chains) broadcast returns (CatapultarFactory factory, CATValidator validator) {
+    )
+        public
+        iterChains(chains)
+        broadcast
+        returns (CatapultarFactory factory, CATValidator validator, IntentExecutor intentExecutor)
+    {
         factory = deployFactory();
         validator = deployCATValidator();
+        intentExecutor = deployIntentExecutor();
     }
 
     function deployFactory() internal returns (CatapultarFactory factory) {
@@ -36,11 +43,21 @@ contract deploy is multichain {
         address expectedAddress = getExpectedCreate2Address(bytes32(0), type(CATValidator).creationCode, hex"");
         if (expectedAddress.code.length == 0) {
             validator = new CATValidator{ salt: bytes32(0) }();
-            if (expectedAddress != address(validator)) {
-                revert NotExpectedAddress(expectedAddress, address(validator));
-            }
+            if (expectedAddress != address(validator)) revert NotExpectedAddress(expectedAddress, address(validator));
         }
         return CATValidator(expectedAddress);
+    }
+
+    function deployIntentExecutor() internal returns (IntentExecutor intentExecutor) {
+        address payable expectedAddress =
+            payable(getExpectedCreate2Address(bytes32(0), type(IntentExecutor).creationCode, hex""));
+        if (expectedAddress.code.length == 0) {
+            intentExecutor = new IntentExecutor{ salt: bytes32(0) }();
+            if (expectedAddress != address(intentExecutor)) {
+                revert NotExpectedAddress(expectedAddress, address(intentExecutor));
+            }
+        }
+        return IntentExecutor(expectedAddress);
     }
 
     function account(
