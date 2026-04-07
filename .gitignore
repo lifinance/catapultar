@@ -17,3 +17,5 @@ lcov.info
 lcov.*
 .lcov*
 *lcov*
+
+settings.local.json

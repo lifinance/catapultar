@@ -64,4 +64,12 @@ contract CallProxyTest is Test {
         assertEq(rt, abi.encode(returnData));
         assertEq(success, true);
     }
+
+    function test_emptyEtherTransfer_fails() external {
+        vm.deal(address(this), 1 ether);
+        // Empty calldata causes sub(calldatasize(), 32) to underflow to 2^256-32,
+        // triggering an impossibly large memory expansion that exhausts all gas.
+        (bool success,) = address(c).call{ value: 1 ether }("");
+        assertFalse(success);
+    }
 }
