@@ -4,43 +4,37 @@ pragma solidity ^0.8.30;
 import { Test } from "forge-std/src/Test.sol";
 
 import {
-    Input,
-    InputTarget,
+    AllowanceSpend,
     LibExecutionConstraint,
-    Output
-} from "../../../src/helpers/libs/LibExecutionConstraint.sol";
+    Outcome
+} from "../../../src/libs/LibExecutionConstraint.sol";
 
 contract LibExecutionConstraintTest is Test {
-    function inputTargetToInput(
-        InputTarget[] memory inputTargets
-    ) internal pure returns (Input[] memory inputs) {
-        inputs = new Input[](inputTargets.length);
-        for (uint256 i; i < inputTargets.length; ++i) {
-            inputs[i] = Input({ token: inputTargets[i].token, amount: inputTargets[i].allocated });
-        }
-    }
-
     function typehashReference(
-        Input[] memory inputs,
-        Output[] memory outputs,
+        AllowanceSpend[] memory allowances,
+        Outcome[] memory outcomes,
         address executor,
         uint256 nonce
     ) internal pure returns (bytes32) {
-        bytes32[] memory inputHashes = new bytes32[](inputs.length);
-        for (uint256 i; i < inputs.length; ++i) {
-            inputHashes[i] = keccak256(
-                abi.encode(keccak256(bytes("Input(address token,uint256 amount)")), inputs[i].token, inputs[i].amount)
+        bytes32[] memory allowanceHashes = new bytes32[](allowances.length);
+        for (uint256 i; i < allowances.length; ++i) {
+            allowanceHashes[i] = keccak256(
+                abi.encode(
+                    keccak256(bytes("Allowance(address token,uint256 amount)")),
+                    allowances[i].token,
+                    allowances[i].allocated
+                )
             );
         }
 
-        bytes32[] memory outputHashes = new bytes32[](outputs.length);
-        for (uint256 i; i < outputs.length; ++i) {
-            outputHashes[i] = keccak256(
+        bytes32[] memory outcomeHashes = new bytes32[](outcomes.length);
+        for (uint256 i; i < outcomes.length; ++i) {
+            outcomeHashes[i] = keccak256(
                 abi.encode(
-                    keccak256(bytes("Output(address token,uint256 amount,address destination)")),
-                    outputs[i].token,
-                    outputs[i].amount,
-                    outputs[i].destination
+                    keccak256(bytes("Outcome(address token,uint256 amount,address destination)")),
+                    outcomes[i].token,
+                    outcomes[i].amount,
+                    outcomes[i].destination
                 )
             );
         }
@@ -49,11 +43,11 @@ contract LibExecutionConstraintTest is Test {
             abi.encode(
                 keccak256(
                     bytes(
-                        "ExecutionConstraint(Input[] inputs,Output[] outputs,address executor,uint256 nonce)Input(address token,uint256 amount)Output(address token,uint256 amount,address destination)"
+                        "ExecutionConstraint(Allowance[] allowances,Outcome[] outcomes,address executor,uint256 nonce)Allowance(address token,uint256 amount)Outcome(address token,uint256 amount,address destination)"
                     )
                 ),
-                keccak256(abi.encodePacked(inputHashes)),
-                keccak256(abi.encodePacked(outputHashes)),
+                keccak256(abi.encodePacked(allowanceHashes)),
+                keccak256(abi.encodePacked(outcomeHashes)),
                 executor,
                 nonce
             )
@@ -61,13 +55,13 @@ contract LibExecutionConstraintTest is Test {
     }
 
     function test_typehash(
-        InputTarget[] calldata inputs,
-        Output[] calldata outputs,
+        AllowanceSpend[] calldata allowances,
+        Outcome[] calldata outcomes,
         address executor,
         uint256 nonce
     ) external pure {
-        bytes32 libraryTypeHash = LibExecutionConstraint.typehash(inputs, outputs, executor, nonce);
-        bytes32 expectedTypeHash = typehashReference(inputTargetToInput(inputs), outputs, executor, nonce);
+        bytes32 libraryTypeHash = LibExecutionConstraint.typehash(allowances, outcomes, executor, nonce);
+        bytes32 expectedTypeHash = typehashReference(allowances, outcomes, executor, nonce);
 
         assertEq(libraryTypeHash, expectedTypeHash);
     }
