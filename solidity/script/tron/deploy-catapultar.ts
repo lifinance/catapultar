@@ -7,7 +7,7 @@
  * Prerequisites:
  *   1. `cd catapultar/solidity && forge build`
  *   2. Set environment variables:
- *      - PRIVATE_KEY (deployer private key)
+ *      - PRIVATE_KEY (deployer private key) - can be also passed as --private-key <key>
  *      - RPC_URL_TRON (optional, defaults to https://api.trongrid.io)
  *      - TRONGRID_API_KEY (optional)
  *
