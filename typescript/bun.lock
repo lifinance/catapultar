@@ -8,7 +8,7 @@
         "viem": "^2.43.3",
       },
       "devDependencies": {
-        "@lifi/tron-devkit": "^1.0.0",
+        "@lifi/tron-devkit": "^1.0.1",
         "@types/bun": "latest",
         "bun": "^1.3.5",
         "husky": "^9.1.7",
@@ -26,7 +26,7 @@
 
     "@isaacs/fs-minipass": ["@isaacs/fs-minipass@4.0.1", "", { "dependencies": { "minipass": "^7.0.4" } }, "sha512-wgm9Ehl2jpeqP3zw/7mo3kRHFp5MEDhqAdwy1fTGkHAwnkGOVsgpvQhL8B5n1qlb01jV3n/bI0ZfZp5lWA1k4w=="],
 
-    "@lifi/tron-devkit": ["@lifi/tron-devkit@1.0.0", "", { "dependencies": { "consola": "^3.2.3", "tronweb": "^6.0.3", "viem": "^2.22.16" } }, "sha512-JKdhwTNo/U40UpMhRjsaaEtNavZQ1SWlNv4V+lIoQxkqBYs9gpxGHMSxpQDEyQPAzzUxQXIltWrM0liuJ/7WIA=="],
+    "@lifi/tron-devkit": ["@lifi/tron-devkit@1.0.1", "", { "dependencies": { "consola": "^3.2.3", "tronweb": "^6.0.3", "viem": "^2.22.16" } }, "sha512-u+PFkUUk7A+BIcaxp0Zwvk/n8KF4swgwQBpsIPXQ/dZEPZjwPppiXNrFNTiZN9QKXMfNvgaR8LEnrg87t1LJXw=="],
 
     "@noble/ciphers": ["@noble/ciphers@1.3.0", "", {}, "sha512-2I0gnIVPtfnMw9ee9h1dJG7tp81+8Ob3OJb3Mv37rx5L40/b0i7djjCVvGOVqc9AEIQyvyu1i6ypKdFw8R8gQw=="],
 
