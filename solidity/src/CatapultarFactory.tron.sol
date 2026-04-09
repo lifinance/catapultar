@@ -1,0 +1,166 @@
+// SPDX-License-Identifier: LGPL-3.0-only
+pragma solidity ^0.8.30;
+
+import { EfficientHashLib } from "solady/src/utils/EfficientHashLib.sol";
+
+import { LibCloneTron } from "./libs/LibClone.tron.sol";
+import { Catapultar } from "./Catapultar.sol";
+import { KeyedOwnable } from "./libs/KeyedOwnable.sol";
+
+/**
+ * @title Catapultar Factory Tron
+ * @author Alexander @ LIFI (https://li.fi)
+ * @custom:version 0.2.0
+ * @notice Facilitates the deployment of clones of Catapultar.
+ *
+ * Two cloning strategies are supported:
+ * - Non-upgradeable minimal PUSH_0 clone for a low cost batch execution account.
+ * - Upgradeable ERC1967 proxy for a durable long term account.
+ *
+ * After the proxy has been deployed, init is called to set the owner.
+ *
+ * Each proxy is deployed deterministically using create2 with no overlap in addresses between the types:
+ * - Each proxy has specific init data.
+ * - The owner of each proxy is embedded in the salt.
+ * The caller of deploy is not validated against owner deployments. Someone can deploy a contract for your owner or
+ * front-run call deployment.
+ * For the same reason, it may not be safe using a 0 address in the salt.
+ *
+ * If deploy is called twice with the same parameters (owner, salt), the second transaction will fail. In those cases,
+ * the predictDeploy* functions can be used to re-discover the deployed contract.
+ * The owner of a deployed proxy may not be the same as the owner it was deployed with.
+ */
+contract CatapultarFactoryTron {
+    address payable public immutable EXECUTOR;
+
+    constructor() {
+        EXECUTOR = payable(new Catapultar());
+    }
+
+    function VERSION() external view returns (string memory) {
+        (,, string memory version,,,,) = Catapultar(EXECUTOR).eip712Domain();
+        return version;
+    }
+
+    /// @param salt The first 20 bytes of salt has to be the owner or 0.
+    function deploy(
+        KeyedOwnable.PublicKeyType ktp,
+        bytes32[] calldata owner,
+        bytes32 salt
+    ) external payable ownerInSalt(salt, ktp, owner) returns (address payable proxy) {
+        proxy = payable(LibCloneTron.cloneDeterministic_PUSH0(EXECUTOR, salt));
+
+        Catapultar(payable(proxy)).init{ value: msg.value }(ktp, owner);
+    }
+
+    /// @dev Do not trust that the owner of the returned proxy is equal to the provided owner. Ownership may have been
+    /// handed over.
+    /// @param salt The first 20 bytes of salt has to be the owner or 0.
+    function predictDeploy(
+        KeyedOwnable.PublicKeyType ktp,
+        bytes32[] calldata owner,
+        bytes32 salt
+    ) external view ownerInSalt(salt, ktp, owner) returns (address proxy) {
+        return LibCloneTron.predictDeterministicAddress_PUSH0(EXECUTOR, salt, address(this));
+    }
+
+    /// @param salt The first 20 bytes of salt has to be the owner or 0.
+    function deployWithDigest(
+        KeyedOwnable.PublicKeyType ktp,
+        bytes32[] calldata owner,
+        bytes32 salt,
+        bytes32 digest,
+        bool isSignature
+    ) external payable ownerInSalt(salt, ktp, owner) returns (address payable proxy) {
+        uint256 nonce;
+        assembly ("memory-safe") {
+            // Catapultar.DigestApproval.Call == 1
+            // Catapultar.DigestApproval.Signature == 2
+            // isSignature + 1 == 2 if isSignature === true otherwise 1.
+            nonce := add(isSignature, 1)
+        }
+        bytes32 saltWithDigest = EfficientHashLib.hash(salt, digest, bytes32(nonce));
+        proxy = payable(LibCloneTron.cloneDeterministic_PUSH0(EXECUTOR, saltWithDigest));
+
+        // forge-lint: disable-next-line(unsafe-typecast)
+        // wake-disable-next-line reentrancy
+        Catapultar(payable(proxy)).setSignature(digest, Catapultar.DigestApproval(uint8(nonce)));
+        Catapultar(payable(proxy)).init{ value: msg.value }(ktp, owner);
+    }
+
+    /// @dev Do not trust that the owner of the returned proxy is equal to the provided owner. Ownership may have been
+    /// handed over.
+    /// @param salt The first 20 bytes of salt has to be the owner or 0.
+    function predictDeployWithDigest(
+        KeyedOwnable.PublicKeyType ktp,
+        bytes32[] calldata owner,
+        bytes32 salt,
+        bytes32 digest,
+        bool isSignature
+    ) external view ownerInSalt(salt, ktp, owner) returns (address proxy) {
+        uint256 nonce;
+        assembly ("memory-safe") {
+            // Catapultar.DigestApproval.Call == 1
+            // Catapultar.DigestApproval.Signature == 2
+            // isSignature + 1 == 2 if isSignature === true otherwise 1.
+            nonce := add(isSignature, 1)
+        }
+        bytes32 saltWithDigest = EfficientHashLib.hash(salt, digest, bytes32(nonce));
+        return LibCloneTron.predictDeterministicAddress_PUSH0(EXECUTOR, saltWithDigest, address(this));
+    }
+
+    /// @param salt The first 20 bytes of salt has to be the owner or 0.
+    function deployUpgradeable(
+        KeyedOwnable.PublicKeyType ktp,
+        bytes32[] calldata owner,
+        bytes32 salt
+    ) external payable ownerInSalt(salt, ktp, owner) returns (address payable proxy) {
+        proxy = payable(LibCloneTron.deployDeterministicERC1967(EXECUTOR, salt));
+
+        Catapultar(payable(proxy)).init{ value: msg.value }(ktp, owner);
+    }
+
+    /// @dev Do not trust that the owner of the returned proxy is equal to the provided owner. Ownership may have been
+    /// handed over.
+    /// Do not trust that the implementation of the returned proxy matches the expected version of Catapultar or
+    /// Catapultar in general. The contract implementation is upgradeable.
+    /// @param salt The first 20 bytes of salt has to be the owner or 0.
+    function predictDeployUpgradeable(
+        KeyedOwnable.PublicKeyType ktp,
+        bytes32[] calldata owner,
+        bytes32 salt
+    ) external view ownerInSalt(salt, ktp, owner) returns (address proxy) {
+        return LibCloneTron.predictDeterministicAddressERC1967(EXECUTOR, salt, address(this));
+    }
+
+    // --- Helpers --- //
+
+    /**
+     * @notice Requires that the salt contains the owner as the first 20 bytes or they are 0.
+     * @dev When deploying proxies, it may not be safe to set the first 20 bytes to 0. If this is desired, the risk is
+     * entirely up to the user.
+     * For a key larger than 20 bytes, the first 20 bytes are taken of keccak256(ktp, keccak256(owner))
+     * @param salt A bytes32 value intended to pseudo-randomize the deployed address.
+     * @param ktp The keytype for the account
+     * @param owner A desired callable parameter for a proxy address
+     */
+    modifier ownerInSalt(
+        bytes32 salt,
+        KeyedOwnable.PublicKeyType ktp,
+        bytes32[] calldata owner
+    ) {
+        LibCloneTron.checkStartsWith(salt, _saltPrefix(ktp, owner));
+        _;
+    }
+
+    function _saltPrefix(
+        KeyedOwnable.PublicKeyType ktp,
+        bytes32[] calldata owner
+    ) internal pure returns (address) {
+        if (ktp == KeyedOwnable.PublicKeyType.ECDSAOrSmartContract && owner.length == 1) {
+            return address(uint160(uint256(owner[0])));
+        } else {
+            return address(bytes20(EfficientHashLib.hash(bytes32(uint256(uint8(ktp))), EfficientHashLib.hash(owner))));
+        }
+    }
+}
