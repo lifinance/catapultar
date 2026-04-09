@@ -34,6 +34,7 @@ import {
   getTronRpcUrl,
   getTronGridAPIKey,
   TRON_PRO_API_KEY_HEADER,
+  promptEnergyRentalReminder,
   type ITronDeploymentConfig,
   type ITronDeploymentResult,
   type TronTvmNetworkName,
@@ -157,6 +158,8 @@ async function main() {
     consola.info(`Steps: ${contractsToRun.join(' → ')}`)
   }
   if (dryRun) consola.warn('DRY RUN mode - no transactions will be broadcast')
+
+  if (!dryRun) await promptEnergyRentalReminder()
 
   const privateKey = getPrivateKey(pkFlag)
   const rpcUrl = getTronRpcUrl(network, rpcUrlFlag)
