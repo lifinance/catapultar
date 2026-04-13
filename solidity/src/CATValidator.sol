@@ -37,6 +37,7 @@ contract CATValidator is EIP712, ReentrancyGuard {
     error AllocationTooSmall(uint256 allocated, uint256 spend);
     error NonceAlreadySpent();
     error BadSignature();
+    error BalanceOfFailed(address token);
 
     address public immutable CALL_PROXY;
     uint256 constant SPEND_BALANCE_OF_MAGIC = 1 << 255;
@@ -121,6 +122,14 @@ contract CATValidator is EIP712, ReentrancyGuard {
         if (!SignatureCheckerLib.isValidSignatureNowCalldata(account, digest, signature)) revert BadSignature();
     }
 
+    /// @dev Calls token.balanceOf(account). Reverts with BalanceOfFailed if the call
+    /// fails or returns fewer than 32 bytes, instead of silently returning zero.
+    function _safeBalanceOf(address token, address account) private view returns (uint256 bal) {
+        bool implemented;
+        (implemented, bal) = SafeTransferLib.checkBalanceOf(token, account);
+        if (!implemented) revert BalanceOfFailed(token);
+    }
+
     /**
      * @notice Wraps balanceOf call for ERC20 tokens and natives.
      * @param account Fallback address for to read if outcome.destination is 0.
@@ -131,7 +140,7 @@ contract CATValidator is EIP712, ReentrancyGuard {
         Outcome calldata outcome
     ) internal view returns (uint256 bal) {
         address destination = outcome.destination == address(0) ? account : outcome.destination;
-        bal = outcome.token == address(0) ? destination.balance : SafeTransferLib.balanceOf(outcome.token, destination);
+        bal = outcome.token == address(0) ? destination.balance : _safeBalanceOf(outcome.token, destination);
     }
 
     /**

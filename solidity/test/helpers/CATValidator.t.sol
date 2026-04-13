@@ -352,4 +352,91 @@ contract CATValidatorTest is LibExecutionConstraintTest {
         validator.compareOutcomes(account, outcomes, balances);
         validator.compareOutcomes(account, outcomes, zeroBalances);
     }
+
+    function test_revert_recordBalances_when_balanceOf_reverts() external {
+        address account = makeAddr("account");
+        address token = address(new RevertingBalanceOf());
+
+        Outcome[] memory outcomes = new Outcome[](1);
+        outcomes[0] = Outcome({ token: token, amount: 0, destination: address(0) });
+
+        vm.expectRevert(abi.encodeWithSelector(CATValidator.BalanceOfFailed.selector, token));
+        validator.recordBalances(account, outcomes);
+    }
+
+    function test_revert_compareOutcomes_when_balanceOf_reverts() external {
+        address account = makeAddr("account");
+        address token = address(new RevertingBalanceOf());
+
+        Outcome[] memory outcomes = new Outcome[](1);
+        outcomes[0] = Outcome({ token: token, amount: 0, destination: address(0) });
+
+        uint256[] memory balances = new uint256[](1);
+        balances[0] = 0;
+
+        vm.expectRevert(abi.encodeWithSelector(CATValidator.BalanceOfFailed.selector, token));
+        validator.compareOutcomes(account, outcomes, balances);
+    }
+
+    // Reproduces the attack from issue 6.2.1: a token whose balanceOf() fails on the
+    // pre-execution read but succeeds post-execution, producing a spurious positive diff.
+    //
+    // Attack path (old behavior):
+    //   1. recordBalances silently returns 0 because pre-execution balanceOf reverts.
+    //   2. Attacker alters external state so post-execution balanceOf now succeeds.
+    //   3. compareOutcomes observes diff = realBalance − 0 ≥ required → fraudulent pass.
+    //
+    // With the fix, step 1 reverts with BalanceOfFailed, blocking the attack entirely.
+    function test_issue_6_2_1_failed_first_balanceOf_cannot_produce_spurious_diff() external {
+        address account = makeAddr("account");
+        address destination = makeAddr("destination");
+        ToggleableBalanceOf token = new ToggleableBalanceOf();
+
+        uint256 realBalance = 100e18;
+        uint256 requiredIncrease = 1; // attacker only needs a tiny required amount
+        token.setBalance(destination, realBalance);
+        // token starts with failing == true, so pre-execution balanceOf() reverts
+
+        Outcome[] memory outcomes = new Outcome[](1);
+        outcomes[0] = Outcome({ token: address(token), amount: requiredIncrease, destination: destination });
+
+        // Pre-execution read must revert — attack is blocked before it can progress.
+        vm.expectRevert(abi.encodeWithSelector(CATValidator.BalanceOfFailed.selector, address(token)));
+        validator.recordBalances(account, outcomes);
+
+        // Demonstrate concretely why the old silent-zero was exploitable:
+        // simulate the attacker enabling balanceOf mid-execution (state change between reads).
+        token.setFailing(false);
+
+        // compareOutcomes with the fraudulent zero snapshot passes because diff = 100e18 >= 1.
+        // This confirms the attack would have worked without the fix.
+        uint256[] memory silentZeroSnapshot = new uint256[](1); // what old code would have recorded
+        validator.compareOutcomes(account, outcomes, silentZeroSnapshot);
+    }
+}
+
+contract RevertingBalanceOf {
+    function balanceOf(address) external pure returns (uint256) {
+        revert("balanceOf reverts");
+    }
+}
+
+/// @dev Token whose balanceOf() can be toggled between failing and succeeding.
+/// Models a token whose behavior depends on external state changeable mid-execution.
+contract ToggleableBalanceOf {
+    bool public failing = true;
+    mapping(address => uint256) private _balances;
+
+    function setBalance(address account, uint256 amount) external {
+        _balances[account] = amount;
+    }
+
+    function setFailing(bool _failing) external {
+        failing = _failing;
+    }
+
+    function balanceOf(address account) external view returns (uint256) {
+        require(!failing, "balanceOf: disabled");
+        return _balances[account];
+    }
 }
