@@ -126,6 +126,12 @@ contract CatapultarFactoryTest is Test {
         assertEq(predictedDeployedTo, deployedTo);
     }
 
+    function testRevert_tooManyOwners() external {
+        bytes32[] memory keys = new bytes32[](256);
+        vm.expectRevert(abi.encodeWithSignature("TooManyOwners()"));
+        factory.predictDeploy(KeyedOwnable.PublicKeyType.ECDSAOrSmartContract, keys, bytes32(0));
+    }
+
     // Verifies that _salt encodes preSalt || ktp || numOwners || owners as documented.
     function test_saltEncoding() external view {
         bytes32 preSalt = bytes32(uint256(0xdead));
