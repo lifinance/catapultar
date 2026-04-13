@@ -5,6 +5,8 @@ pragma solidity ^0.8.30;
 
 import { Test } from "forge-std/src/Test.sol";
 
+import { LibCloneTron } from "../../src/libs/LibClone.tron.sol";
+
 import { CatapultarFactoryTron } from "../../src/CatapultarFactory.tron.sol";
 import { KeyedOwnable } from "../../src/libs/KeyedOwnable.sol";
 
@@ -167,89 +169,20 @@ contract CatapultarFactoryTronTest is Test {
         assertNotEq(minimal, upgradeable);
     }
 
-    // --- Check salt contains owner --- //
+    // Verifies that _salt encodes preSalt || ktp || numOwners || owners as documented.
+    function test_saltEncoding() external view {
+        bytes32 preSalt = bytes32(uint256(0xdead));
+        KeyedOwnable.PublicKeyType ktp = KeyedOwnable.PublicKeyType.P256;
 
-    function testRevert_deploy_salt_does_not_contain_owner(
-        address owner,
-        bytes32 salt
-    ) external {
-        vm.assume(owner != address(0));
-        if (bytes20(salt) != bytes20(0) && address(uint160(bytes20(salt))) != owner) {
-            vm.expectRevert(abi.encodeWithSignature("SaltDoesNotStartWith()"));
-        }
-        bytes32[] memory keys = new bytes32[](1);
-        keys[0] = bytes32(uint256(uint160(owner)));
+        bytes32[] memory keys = new bytes32[](2);
+        keys[0] = bytes32(uint256(1));
+        keys[1] = bytes32(uint256(2));
 
-        factory.deploy(KeyedOwnable.PublicKeyType.ECDSAOrSmartContract, keys, salt);
+        bytes32 expectedSalt = keccak256(abi.encodePacked(preSalt, uint8(ktp), uint8(keys.length), keys[0], keys[1]));
+        address expected =
+            LibCloneTron.predictDeterministicAddress_PUSH0(factory.EXECUTOR(), expectedSalt, address(factory));
+
+        assertEq(factory.predictDeploy(ktp, keys, preSalt), expected);
     }
 
-    function testRevert_deployWithDigest_salt_does_not_contain_owner(
-        address owner,
-        bytes32 salt
-    ) external {
-        vm.assume(owner != address(0));
-        if (bytes20(salt) != bytes20(0) && address(uint160(bytes20(salt))) != owner) {
-            vm.expectRevert(abi.encodeWithSignature("SaltDoesNotStartWith()"));
-        }
-        bytes32[] memory keys = new bytes32[](1);
-        keys[0] = bytes32(uint256(uint160(owner)));
-
-        factory.deployWithDigest(KeyedOwnable.PublicKeyType.ECDSAOrSmartContract, keys, salt, bytes32(0), false);
-    }
-
-    function testRevert_deployUpgradeable_salt_does_not_contain_owner(
-        address owner,
-        bytes32 salt
-    ) external {
-        vm.assume(owner != address(0));
-        if (bytes20(salt) != bytes20(0) && address(uint160(bytes20(salt))) != owner) {
-            vm.expectRevert(abi.encodeWithSignature("SaltDoesNotStartWith()"));
-        }
-        bytes32[] memory keys = new bytes32[](1);
-        keys[0] = bytes32(uint256(uint160(owner)));
-
-        factory.deployUpgradeable(KeyedOwnable.PublicKeyType.ECDSAOrSmartContract, keys, salt);
-    }
-
-    function testRevert_predictDeploy_salt_does_not_contain_owner(
-        address owner,
-        bytes32 salt
-    ) external {
-        vm.assume(owner != address(0));
-        if (bytes20(salt) != bytes20(0) && address(uint160(bytes20(salt))) != owner) {
-            vm.expectRevert(abi.encodeWithSignature("SaltDoesNotStartWith()"));
-        }
-        bytes32[] memory keys = new bytes32[](1);
-        keys[0] = bytes32(uint256(uint160(owner)));
-
-        factory.predictDeploy(KeyedOwnable.PublicKeyType.ECDSAOrSmartContract, keys, salt);
-    }
-
-    function testRevert_predictDeployWithDigest_salt_does_not_contain_owner(
-        address owner,
-        bytes32 salt
-    ) external {
-        vm.assume(owner != address(0));
-        if (bytes20(salt) != bytes20(0) && address(uint160(bytes20(salt))) != owner) {
-            vm.expectRevert(abi.encodeWithSignature("SaltDoesNotStartWith()"));
-        }
-        bytes32[] memory keys = new bytes32[](1);
-        keys[0] = bytes32(uint256(uint160(owner)));
-
-        factory.predictDeployWithDigest(KeyedOwnable.PublicKeyType.ECDSAOrSmartContract, keys, salt, bytes32(0), false);
-    }
-
-    function testRevert_predictDeployUpgradeable_salt_does_not_contain_owner(
-        address owner,
-        bytes32 salt
-    ) external {
-        vm.assume(owner != address(0));
-        if (bytes20(salt) != bytes20(0) && address(uint160(bytes20(salt))) != owner) {
-            vm.expectRevert(abi.encodeWithSignature("SaltDoesNotStartWith()"));
-        }
-        bytes32[] memory keys = new bytes32[](1);
-        keys[0] = bytes32(uint256(uint160(owner)));
-
-        factory.predictDeployUpgradeable(KeyedOwnable.PublicKeyType.ECDSAOrSmartContract, keys, salt);
-    }
 }
