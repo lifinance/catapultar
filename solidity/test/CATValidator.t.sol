@@ -2,6 +2,7 @@
 pragma solidity ^0.8.30;
 
 import { MockERC20 } from "solady/test/utils/mocks/MockERC20.sol";
+import { SafeTransferLib } from "solady/src/utils/SafeTransferLib.sol";
 
 import { LibExecutionConstraintTest } from "./libs/LibExecutionConstraint.t.sol";
 
@@ -44,20 +45,46 @@ contract CATValidatorMock is CATValidator {
         return _call(target, payload);
     }
 
-    function recordBalances(
-        address account,
+    function validatePayment(
+        address signer,
         Outcome[] calldata outcomes
-    ) external view returns (uint256[] memory balances) {
-        return _recordBalances(account, outcomes);
+    ) external {
+        return _validatePayment(signer, outcomes);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// MockExecutor — simulates a solver that can deliver tokens to CATValidator
+// (correct) or to some other address (incorrect).
+// ---------------------------------------------------------------------------
+contract MockExecutor {
+    address public immutable validator;
+
+    constructor(
+        address _validator
+    ) {
+        validator = _validator;
     }
 
-    function compareOutcomes(
-        address account,
-        Outcome[] calldata outcomes,
-        uint256[] calldata balances
-    ) external view {
-        return _compareOutcomes(account, outcomes, balances);
+    /// Sends `amount` of `token` to CATValidator — the correct behaviour.
+    function executeAndDeliverToValidator(
+        address token,
+        uint256 amount
+    ) external {
+        SafeTransferLib.safeTransfer(token, validator, amount);
     }
+
+    /// Sends `amount` of `token` to an arbitrary address — incorrect; CATValidator
+    /// receives nothing so the outcome check must fail.
+    function executeAndDeliverElsewhere(
+        address token,
+        uint256 amount,
+        address wrongDest
+    ) external {
+        SafeTransferLib.safeTransfer(token, wrongDest, amount);
+    }
+
+    receive() external payable { }
 }
 
 contract CATValidatorTest is LibExecutionConstraintTest {
@@ -66,6 +93,10 @@ contract CATValidatorTest is LibExecutionConstraintTest {
     function setUp() external {
         validator = new CATValidatorMock();
     }
+
+    // -----------------------------------------------------------------------
+    // Nonce
+    // -----------------------------------------------------------------------
 
     function test_checkNonce() external {
         address a = makeAddr("a");
@@ -83,13 +114,16 @@ contract CATValidatorTest is LibExecutionConstraintTest {
         validator.checkNonce(b, 100);
     }
 
+    // -----------------------------------------------------------------------
+    // validateApproval
+    // -----------------------------------------------------------------------
+
     function test_validateApproval(
         AllowanceSpend[] memory allowances,
         Outcome[] memory outcomes,
         address executor,
         uint256 nonce
     ) external {
-        // Tested function.
         uint8 v;
         bytes32 r;
         bytes32 s;
@@ -106,7 +140,6 @@ contract CATValidatorTest is LibExecutionConstraintTest {
             (v, r, s) = vm.sign(key, digest);
         }
 
-        // Sets msg.sender for the test
         vm.startPrank(executor);
 
         validator.validateApproval(signer, nonce, allowances, outcomes, abi.encodePacked(r, s, v));
@@ -117,6 +150,10 @@ contract CATValidatorTest is LibExecutionConstraintTest {
         vm.expectRevert(abi.encodeWithSelector(CATValidator.BadSignature.selector));
         validator.validateApproval(signer, nonce, allowances, outcomes, hex"");
     }
+
+    // -----------------------------------------------------------------------
+    // handleAllowances
+    // -----------------------------------------------------------------------
 
     function test_fuzz_handleAllowances(
         uint256[] calldata amounts
@@ -257,19 +294,20 @@ contract CATValidatorTest is LibExecutionConstraintTest {
         validator.handleAllowances(destination, account, targets);
     }
 
+    // -----------------------------------------------------------------------
+    // _call / CallProxy
+    // -----------------------------------------------------------------------
+
     function test_revert_call_transfer() external {
         address account = makeAddr("account");
         address target = makeAddr("target");
         uint256 amount = uint256(keccak256(bytes("amount")));
 
-        // set allowance to validator. This can "technically" be claimed if we could execute transferFrom from the
-        // validator.
         address token = address(new MockERC20("Test Token", "TT", 18));
         MockERC20(token).mint(account, amount);
         vm.prank(account);
         MockERC20(token).approve(address(validator), amount);
 
-        // Tell validator to execute transferFrom.
         bytes memory cd = abi.encodeCall(MockERC20.transferFrom, (account, target, amount));
 
         vm.expectCall(token, cd);
@@ -283,156 +321,387 @@ contract CATValidatorTest is LibExecutionConstraintTest {
         address proxy = validator.CALL_PROXY();
         uint256 amount = uint256(keccak256(bytes("amount")));
 
-        // set allowance to the proxy. This is bad, since anyone can call from the proxy.
         address token = address(new MockERC20("Test Token", "TT", 18));
         MockERC20(token).mint(account, amount);
         vm.prank(account);
         MockERC20(token).approve(proxy, amount);
 
-        // Tell validator to execute transferFrom.
         bytes memory cd = abi.encodeCall(MockERC20.transferFrom, (account, target, amount));
 
         vm.expectCall(token, cd);
         validator.call(token, cd);
     }
 
-    struct AmountAndDestination {
-        address destination;
-        uint128 amount;
-    }
+    // -----------------------------------------------------------------------
+    // _validatePayment
+    // -----------------------------------------------------------------------
 
-    function test_fuzz_recordBalances(
-        AmountAndDestination[] calldata ad
-    ) external {
-        address account = makeAddr("account");
-
-        Outcome[] memory outcomes = new Outcome[](ad.length);
-        for (uint256 i; i < outcomes.length; ++i) {
-            address dest = ad[i].destination == address(0) ? account : ad[i].destination;
-            if (i == 2) {
-                vm.deal(dest, ad[i].amount);
-                outcomes[i] = Outcome({ amount: ad[i].amount, destination: ad[i].destination, token: address(0) });
-                continue;
-            }
-            string memory vv = string(abi.encode(keccak256(abi.encode(i))));
-            address token = address(new MockERC20(vv, vv, 18));
-            MockERC20(token).mint(dest, ad[i].amount);
-            outcomes[i] = Outcome({ amount: ad[i].amount, destination: ad[i].destination, token: token });
-        }
-
-        uint256[] memory balances = validator.recordBalances(account, outcomes);
-
-        assertEq(balances.length, outcomes.length);
-        for (uint256 i; i < outcomes.length; ++i) {
-            assertEq(balances[i], outcomes[i].amount);
-        }
-    }
-
-    function test_fuzz_compareOutcomes(
-        AmountAndDestination[] calldata ad
-    ) external {
-        address account = makeAddr("account");
-        vm.assume(ad.length > 0);
-        vm.assume(ad[0].amount != 0);
-
-        Outcome[] memory outcomes = new Outcome[](ad.length);
-        for (uint256 i; i < outcomes.length; ++i) {
-            address dest = ad[i].destination == address(0) ? account : ad[i].destination;
-            if (i == 2) {
-                vm.deal(dest, ad[i].amount);
-                outcomes[i] = Outcome({ amount: ad[i].amount, destination: ad[i].destination, token: address(0) });
-                continue;
-            }
-            string memory vv = string(abi.encode(keccak256(abi.encode(i))));
-            address token = address(new MockERC20(vv, vv, 18));
-            MockERC20(token).mint(dest, ad[i].amount);
-            outcomes[i] = Outcome({ amount: ad[i].amount, destination: ad[i].destination, token: token });
-        }
-
-        uint256[] memory balances = validator.recordBalances(account, outcomes);
-
-        // If we run compare outcomes it should fail immediately on the first entry.
-        vm.expectRevert(abi.encodeWithSelector(CATValidator.InvalidTokenAmount.selector, ad[0].amount, 0));
-        validator.compareOutcomes(account, outcomes, balances);
-
-        // However, if we give a 0 array, then it should pass.
-        uint256[] memory zeroBalances = new uint256[](outcomes.length);
-        validator.compareOutcomes(account, outcomes, zeroBalances);
-
-        // Lets send another batch so the amounts will be 2x ad[i].amount.
-        for (uint256 i; i < outcomes.length; ++i) {
-            address dest = ad[i].destination == address(0) ? account : ad[i].destination;
-            if (i == 2) {
-                vm.deal(dest, uint256(ad[i].amount) * 2);
-
-                continue;
-            }
-            MockERC20(outcomes[i].token).mint(dest, ad[i].amount);
-        }
-
-        // Neither reverts.
-        validator.compareOutcomes(account, outcomes, balances);
-        validator.compareOutcomes(account, outcomes, zeroBalances);
-    }
-
-    function test_compareOutcomes_revert_on_wrapped_required_amount() external {
-        address account = makeAddr("account");
-        address destination = makeAddr("destination");
-        address token = address(new MockERC20("Test Token", "TT", 18));
-
-        uint256 initialBalance = 100;
-        MockERC20(token).mint(destination, initialBalance);
-
-        Outcome[] memory outcomes = new Outcome[](1);
-        outcomes[0] = Outcome({ token: token, amount: type(uint256).max, destination: destination });
-
-        uint256[] memory recordedBalances = new uint256[](1);
-        recordedBalances[0] = initialBalance;
-
-        vm.expectRevert(abi.encodeWithSelector(CATValidator.InvalidTokenAmount.selector, type(uint256).max, 0));
-        validator.compareOutcomes(account, outcomes, recordedBalances);
-    }
-
-    function test_compareOutcomes_revert_on_balance_decrease() external {
-        address account = makeAddr("account");
-        address destination = makeAddr("destination");
-        address token = address(new MockERC20("Test Token", "TT", 18));
-
-        uint256 currentBalance = 100;
-        MockERC20(token).mint(destination, currentBalance);
-
-        Outcome[] memory outcomes = new Outcome[](1);
-        outcomes[0] = Outcome({ token: token, amount: 1, destination: destination });
-
-        uint256[] memory recordedBalances = new uint256[](1);
-        recordedBalances[0] = currentBalance + 1;
-
-        vm.expectRevert(abi.encodeWithSelector(CATValidator.InvalidTokenAmount.selector, 1, 0));
-        validator.compareOutcomes(account, outcomes, recordedBalances);
-    }
-
-    // This test tests whether a decrease in balances correctly reverts.
-    // Let this contract be the signer so we can skip the allowance.
-    function test_entry_decrease_balances() external {
-        address proxy = validator.CALL_PROXY();
-
-        // Deal an account some tokens.
+    /// Executor deposits tokens to CATValidator; they are forwarded to destination.
+    function test_validatePayment_success() external {
         address dest = makeAddr("dest");
-        address token = address(new MockERC20("Test Token", "TT", 18));
-        MockERC20(token).mint(dest, 1000000000);
-        // approve the proxy so we can use the call to transfer tokens away from the user.
-        vm.prank(dest);
-        MockERC20(token).approve(proxy, 1);
+        uint256 amount = 1 ether;
 
-        // Construct a call to collect tokens from the user.
-        bytes memory call = abi.encodeCall(MockERC20.transferFrom, (dest, address(this), 1));
+        address token = address(new MockERC20("T", "T", 18));
+        MockERC20(token).mint(address(validator), amount);
 
-        AllowanceSpend[] memory allowances = new AllowanceSpend[](0);
         Outcome[] memory outcomes = new Outcome[](1);
-        outcomes[0] = Outcome({ token: token, amount: 1, destination: dest });
+        outcomes[0] = Outcome({ token: token, amount: amount, destination: dest });
 
-        vm.expectRevert();
-        validator.entry(token, call, address(this), 0, allowances, outcomes, hex"");
+        validator.validatePayment(address(this), outcomes);
+
+        assertEq(MockERC20(token).balanceOf(dest), amount);
+        assertEq(MockERC20(token).balanceOf(address(validator)), 0);
+    }
+
+    /// Executor deposits more than required; the full deposited balance is forwarded.
+    function test_validatePayment_excess_balance_forwarded() external {
+        address dest = makeAddr("dest");
+        uint256 required = 1 ether;
+        uint256 deposited = 2 ether;
+
+        address token = address(new MockERC20("T", "T", 18));
+        MockERC20(token).mint(address(validator), deposited);
+
+        Outcome[] memory outcomes = new Outcome[](1);
+        outcomes[0] = Outcome({ token: token, amount: required, destination: dest });
+
+        validator.validatePayment(address(this), outcomes);
+
+        assertEq(MockERC20(token).balanceOf(dest), deposited);
+        assertEq(MockERC20(token).balanceOf(address(validator)), 0);
+    }
+
+    /// Multiple outcomes — each token is checked and forwarded independently.
+    function test_validatePayment_multiple_outcomes() external {
+        address destA = makeAddr("destA");
+        address destB = makeAddr("destB");
+        uint256 amountA = 1 ether;
+        uint256 amountB = 2 ether;
+
+        address tokenA = address(new MockERC20("A", "A", 18));
+        address tokenB = address(new MockERC20("B", "B", 18));
+        MockERC20(tokenA).mint(address(validator), amountA);
+        MockERC20(tokenB).mint(address(validator), amountB);
+
+        Outcome[] memory outcomes = new Outcome[](2);
+        outcomes[0] = Outcome({ token: tokenA, amount: amountA, destination: destA });
+        outcomes[1] = Outcome({ token: tokenB, amount: amountB, destination: destB });
+
+        validator.validatePayment(address(this), outcomes);
+
+        assertEq(MockERC20(tokenA).balanceOf(destA), amountA);
+        assertEq(MockERC20(tokenB).balanceOf(destB), amountB);
+    }
+
+    /// CATValidator balance below required → InvalidTokenAmount with exact values.
+    function test_validatePayment_revert_insufficient() external {
+        address dest = makeAddr("dest");
+        uint256 required = 1 ether;
+
+        address token = address(new MockERC20("T", "T", 18));
+        MockERC20(token).mint(address(validator), required - 1);
+
+        Outcome[] memory outcomes = new Outcome[](1);
+        outcomes[0] = Outcome({ token: token, amount: required, destination: dest });
+
+        vm.expectRevert(abi.encodeWithSelector(CATValidator.InvalidTokenAmount.selector, required, required - 1));
+        validator.validatePayment(address(this), outcomes);
+    }
+
+    /// Fuzz: any non-zero amount with empty CATValidator always reverts.
+    function test_fuzz_validatePayment_revert_empty_validator(
+        uint128 amount
+    ) external {
+        vm.assume(amount > 0);
+        address dest = makeAddr("dest");
+        address token = address(new MockERC20("T", "T", 18));
+
+        Outcome[] memory outcomes = new Outcome[](1);
+        outcomes[0] = Outcome({ token: token, amount: amount, destination: dest });
+
+        vm.expectRevert(abi.encodeWithSelector(CATValidator.InvalidTokenAmount.selector, amount, 0));
+        validator.validatePayment(address(this), outcomes);
+    }
+
+    /// Zero-amount outcome is satisfied trivially; safeTransfer(0) is a no-op.
+    function test_validatePayment_zero_amount_passes() external {
+        address dest = makeAddr("dest");
+        address token = address(new MockERC20("T", "T", 18));
+
+        Outcome[] memory outcomes = new Outcome[](1);
+        outcomes[0] = Outcome({ token: token, amount: 0, destination: dest });
+
+        validator.validatePayment(address(this), outcomes);
+    }
+
+    /// outcome.destination == address(0) routes tokens to the signer, not to address(0).
+    function test_validatePayment_zero_destination_routes_to_signer() external {
+        address signer = makeAddr("signer");
+        uint256 amount = 1 ether;
+        address token = address(new MockERC20("T", "T", 18));
+        MockERC20(token).mint(address(validator), amount);
+
+        Outcome[] memory outcomes = new Outcome[](1);
+        outcomes[0] = Outcome({ token: token, amount: amount, destination: address(0) });
+
+        validator.validatePayment(signer, outcomes);
+
+        assertEq(MockERC20(token).balanceOf(signer), amount);
+        assertEq(MockERC20(token).balanceOf(address(validator)), 0);
+    }
+
+    // -----------------------------------------------------------------------
+    // entry() end-to-end tests
+    // -----------------------------------------------------------------------
+
+    function _signEntry(
+        address account,
+        uint256 signerKey,
+        address executor,
+        uint256 nonce,
+        AllowanceSpend[] memory allowances,
+        Outcome[] memory outcomes
+    ) internal view returns (bytes memory sig) {
+        bytes32 th = typehashReference(allowanceSpendToAllowance(allowances), outcomes, executor, nonce);
+        bytes32 domainSeparator = EIP712(address(validator)).DOMAIN_SEPARATOR();
+        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", domainSeparator, th));
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(signerKey, digest);
+        sig = abi.encodePacked(r, s, v);
+    }
+
+    function _setupEntryFixture(uint256 amount)
+        internal
+        returns (
+            address account,
+            uint256 key,
+            address executor,
+            address dest,
+            address inToken,
+            address outToken,
+            MockExecutor exec
+        )
+    {
+        (account, key) = makeAddrAndKey("account");
+        executor = makeAddr("executor");
+        dest = makeAddr("dest");
+
+        inToken = address(new MockERC20("In", "IN", 18));
+        outToken = address(new MockERC20("Out", "OUT", 18));
+
+        MockERC20(inToken).mint(account, amount);
+        vm.prank(account);
+        MockERC20(inToken).approve(address(validator), amount);
+
+        exec = new MockExecutor(address(validator));
+        MockERC20(outToken).mint(address(exec), amount);
+    }
+
+    /// Happy path: executor delivers outcome tokens to CATValidator;
+    /// CATValidator forwards them to destination.
+    function test_entry_success() external {
+        uint256 amount = 1 ether;
+        (
+            address account,
+            uint256 key,
+            address executor,
+            address dest,
+            address inToken,
+            address outToken,
+            MockExecutor exec
+        ) = _setupEntryFixture(amount);
+
+        AllowanceSpend[] memory allowances = new AllowanceSpend[](1);
+        allowances[0] = AllowanceSpend({ token: inToken, allocated: amount, spend: amount });
+
+        Outcome[] memory outcomes = new Outcome[](1);
+        outcomes[0] = Outcome({ token: outToken, amount: amount, destination: dest });
+
+        bytes memory sig = _signEntry(account, key, executor, 1, allowances, outcomes);
+        bytes memory execPayload = abi.encodeCall(MockExecutor.executeAndDeliverToValidator, (outToken, amount));
+
+        vm.prank(executor);
+        validator.entry(address(exec), execPayload, account, 1, allowances, outcomes, sig);
+
+        assertEq(MockERC20(outToken).balanceOf(dest), amount);
+        assertEq(MockERC20(inToken).balanceOf(address(exec)), amount);
+        assertEq(MockERC20(outToken).balanceOf(address(validator)), 0);
+    }
+
+    /// Executor sends output tokens to a wrong address; CATValidator holds nothing → revert.
+    function test_entry_executor_sends_to_wrong_address_reverts() external {
+        uint256 amount = 1 ether;
+        (
+            address account,
+            uint256 key,
+            address executor,
+            address dest,
+            address inToken,
+            address outToken,
+            MockExecutor exec
+        ) = _setupEntryFixture(amount);
+
+        address wrongDest = makeAddr("wrongDest");
+
+        AllowanceSpend[] memory allowances = new AllowanceSpend[](1);
+        allowances[0] = AllowanceSpend({ token: inToken, allocated: amount, spend: amount });
+
+        Outcome[] memory outcomes = new Outcome[](1);
+        outcomes[0] = Outcome({ token: outToken, amount: amount, destination: dest });
+
+        bytes memory sig = _signEntry(account, key, executor, 1, allowances, outcomes);
+        bytes memory execPayload =
+            abi.encodeCall(MockExecutor.executeAndDeliverElsewhere, (outToken, amount, wrongDest));
+
+        vm.prank(executor);
+        vm.expectRevert(abi.encodeWithSelector(CATValidator.InvalidTokenAmount.selector, amount, 0));
+        validator.entry(address(exec), execPayload, account, 1, allowances, outcomes, sig);
+    }
+
+    /// Wrong executor (msg.sender ≠ signed executor) → BadSignature before any state change.
+    function test_entry_bad_executor_reverts() external {
+        uint256 amount = 1 ether;
+        (
+            address account,
+            uint256 key,
+            address executor,
+            address dest,
+            address inToken,
+            address outToken,
+            MockExecutor exec
+        ) = _setupEntryFixture(amount);
+
+        AllowanceSpend[] memory allowances = new AllowanceSpend[](1);
+        allowances[0] = AllowanceSpend({ token: inToken, allocated: amount, spend: amount });
+
+        Outcome[] memory outcomes = new Outcome[](1);
+        outcomes[0] = Outcome({ token: outToken, amount: amount, destination: dest });
+
+        bytes memory sig = _signEntry(account, key, executor, 1, allowances, outcomes);
+        bytes memory execPayload = abi.encodeCall(MockExecutor.executeAndDeliverToValidator, (outToken, amount));
+
+        vm.prank(makeAddr("wrongCaller"));
+        vm.expectRevert(abi.encodeWithSelector(CATValidator.BadSignature.selector));
+        validator.entry(address(exec), execPayload, account, 1, allowances, outcomes, sig);
+    }
+
+    /// Non-zero nonce is consumed after a successful call; replaying reverts with NonceAlreadySpent.
+    function test_entry_nonce_consumed_after_success() external {
+        uint256 amount = 1 ether;
+        (
+            address account,
+            uint256 key,
+            address executor,
+            address dest,
+            address inToken,
+            address outToken,
+            MockExecutor exec
+        ) = _setupEntryFixture(amount);
+
+        // Mint extra so the second call can also attempt allowances.
+        MockERC20(inToken).mint(account, amount);
+        vm.prank(account);
+        MockERC20(inToken).approve(address(validator), amount * 2);
+        MockERC20(outToken).mint(address(exec), amount);
+
+        AllowanceSpend[] memory allowances = new AllowanceSpend[](1);
+        allowances[0] = AllowanceSpend({ token: inToken, allocated: amount, spend: amount });
+
+        Outcome[] memory outcomes = new Outcome[](1);
+        outcomes[0] = Outcome({ token: outToken, amount: amount, destination: dest });
+
+        bytes memory sig = _signEntry(account, key, executor, 1, allowances, outcomes);
+        bytes memory execPayload = abi.encodeCall(MockExecutor.executeAndDeliverToValidator, (outToken, amount));
+
+        vm.prank(executor);
+        validator.entry(address(exec), execPayload, account, 1, allowances, outcomes, sig);
+
+        vm.prank(executor);
+        vm.expectRevert(abi.encodeWithSelector(CATValidator.NonceAlreadySpent.selector));
+        validator.entry(address(exec), execPayload, account, 1, allowances, outcomes, sig);
+    }
+
+    /// Nonce 0 is never stored — can be used for long-lived approvals (e.g. DCAs).
+    function test_entry_nonce_zero_is_long_lived() external {
+        uint256 amount = 1 ether;
+        (
+            address account,
+            uint256 key,
+            address executor,
+            address dest,
+            address inToken,
+            address outToken,
+            MockExecutor exec
+        ) = _setupEntryFixture(amount);
+
+        // Mint enough for two rounds.
+        MockERC20(inToken).mint(account, amount);
+        vm.prank(account);
+        MockERC20(inToken).approve(address(validator), amount * 2);
+        MockERC20(outToken).mint(address(exec), amount);
+
+        AllowanceSpend[] memory allowances = new AllowanceSpend[](1);
+        allowances[0] = AllowanceSpend({ token: inToken, allocated: amount, spend: amount });
+
+        Outcome[] memory outcomes = new Outcome[](1);
+        outcomes[0] = Outcome({ token: outToken, amount: amount, destination: dest });
+
+        bytes memory sig = _signEntry(account, key, executor, 0, allowances, outcomes);
+        bytes memory execPayload = abi.encodeCall(MockExecutor.executeAndDeliverToValidator, (outToken, amount));
+
+        // First call succeeds.
+        vm.prank(executor);
+        validator.entry(address(exec), execPayload, account, 0, allowances, outcomes, sig);
+
+        // Second call with nonce 0 also succeeds — no NonceAlreadySpent.
+        vm.prank(executor);
+        validator.entry(address(exec), execPayload, account, 0, allowances, outcomes, sig);
+
+        assertEq(MockERC20(outToken).balanceOf(dest), amount * 2);
+    }
+
+    /// A reverted transaction rolls back the nonce; the same nonce can be retried.
+    function test_entry_nonce_not_consumed_on_revert() external {
+        uint256 amount = 1 ether;
+        (
+            address account,
+            uint256 key,
+            address executor,
+            address dest,
+            address inToken,
+            address outToken,
+            MockExecutor exec
+        ) = _setupEntryFixture(amount);
+
+        // Mint extra for the second attempt.
+        MockERC20(inToken).mint(account, amount);
+        vm.prank(account);
+        MockERC20(inToken).approve(address(validator), amount * 2);
+        MockERC20(outToken).mint(address(exec), amount);
+
+        AllowanceSpend[] memory allowances = new AllowanceSpend[](1);
+        allowances[0] = AllowanceSpend({ token: inToken, allocated: amount, spend: amount });
+
+        Outcome[] memory outcomes = new Outcome[](1);
+        outcomes[0] = Outcome({ token: outToken, amount: amount, destination: dest });
+
+        bytes memory sig = _signEntry(account, key, executor, 1, allowances, outcomes);
+        // Wrong delivery: executor sends to wrongDest, CATValidator gets nothing.
+        address wrongDest = makeAddr("wrongDest");
+        bytes memory failPayload =
+            abi.encodeCall(MockExecutor.executeAndDeliverElsewhere, (outToken, amount, wrongDest));
+        bytes memory goodPayload = abi.encodeCall(MockExecutor.executeAndDeliverToValidator, (outToken, amount));
+
+        // First call: fails at _validatePayment → all state rolled back including nonce.
+        vm.prank(executor);
+        vm.expectRevert(abi.encodeWithSelector(CATValidator.InvalidTokenAmount.selector, amount, 0));
+        validator.entry(address(exec), failPayload, account, 1, allowances, outcomes, sig);
+
+        // Second call: nonce 1 is available again; executor delivers correctly this time.
+        MockERC20(outToken).mint(address(exec), amount); // replenish exec's outToken
+        vm.prank(executor);
+        validator.entry(address(exec), goodPayload, account, 1, allowances, outcomes, sig);
+
+        assertEq(MockERC20(outToken).balanceOf(dest), amount);
     }
 
     function isValidSignature(

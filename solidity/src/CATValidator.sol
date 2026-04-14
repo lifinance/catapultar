@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 pragma solidity ^0.8.30;
 
-import { DynamicArrayLib } from "solady/src/utils/DynamicArrayLib.sol";
 import { EIP712 } from "solady/src/utils/EIP712.sol";
 import { ReentrancyGuard } from "solady/src/utils/ReentrancyGuard.sol";
 import { SafeTransferLib } from "solady/src/utils/SafeTransferLib.sol";
@@ -20,10 +19,12 @@ import { AllowanceSpend, LibExecutionConstraint, Outcome } from "./libs/LibExecu
  * transaction of setSignature and approve, allows the configured executor to find calldata to complete the provided
  * description: allowances for outcomes.
  *
- * This contract should never hold assets:
- * - Allowances are collected from the signer and delivered to an executor specified destination.
- * - Outcomes are expected to be delivered directly to the destination specified in the outcome. Initial balances are
- * recorded before allowance transfers and after the external call.
+ * This contract transiently holds outcome assets during settlement:
+ * - Allowances are collected from the signer and delivered to the executor.
+ * - The executor must deliver outcome tokens to this contract during execution.
+ * - After execution, this contract verifies its own token balance meets each outcome amount,
+ *   then forwards the full balance to each outcome's destination.
+ * - Fee on transfer tokens will arrive with the amount minus the fee.
  *
  * This contract uses a call proxy for arbitrary call execution. This makes it safe to set approvals to the contract.
  * This contract does not have a fixed callback function. The call proxy address is ::CALL_PROXY().
@@ -32,7 +33,6 @@ import { AllowanceSpend, LibExecutionConstraint, Outcome } from "./libs/LibExecu
  * long lived approvals like DCAs.
  */
 contract CATValidator is EIP712, ReentrancyGuard {
-    using DynamicArrayLib for uint256[];
     error InvalidTokenAmount(uint256 expected, uint256 received);
     error AllocationTooSmall(uint256 allocated, uint256 spend);
     error NonceAlreadySpent();
@@ -59,10 +59,7 @@ contract CATValidator is EIP712, ReentrancyGuard {
     /**
      * @notice Execute a transaction for an account given a signed execution constraint.
      * @dev This function can only be called by the designated executor. The caller check is made by embedding
-     * msg.sender as the executor in the typehash. This contract does not support _any_ executor and one has to be
-     * provided.
-     * If a destination is address(0), it specifies the signer. If a spend is 0 the current balance of the signer will
-     * be used.
+     * msg.sender as the executor in the typehash. This contract does not support _any_ executor and one has to be provided. If a destination is address(0), it specifies the signer. If a spend is 0 the current balance of the signer will be used.
      */
     function entry(
         address execTarget,
@@ -77,13 +74,11 @@ contract CATValidator is EIP712, ReentrancyGuard {
 
         _validateApproval(account, nonce, allowances, outcomes, signature);
 
-        uint256[] memory recordedBalances = _recordBalances(account, outcomes);
-
         _handleAllowances(execTarget, account, allowances);
 
         if (execPayload.length != 0) _call(execTarget, execPayload);
 
-        _compareOutcomes(account, outcomes, recordedBalances);
+        _validatePayment(account, outcomes);
     }
 
     /**
@@ -122,54 +117,34 @@ contract CATValidator is EIP712, ReentrancyGuard {
     }
 
     /**
-     * @notice Wraps balanceOf call for ERC20 tokens and natives.
-     * @param account Fallback address for to read if outcome.destination is 0.
-     * @param outcome Description of the balance read: target and token. 0 token is native.
+     * @notice Returns the balance of `token` held by `target`.
+     * @param token ERC20 token address. address(0) returns the native ETH balance of `target`.
+     * @param target Account to query.
      */
     function _balanceOf(
-        address account,
-        Outcome calldata outcome
+        address token,
+        address target
     ) internal view returns (uint256 bal) {
-        address destination = outcome.destination == address(0) ? account : outcome.destination;
-        bal = outcome.token == address(0) ? destination.balance : SafeTransferLib.balanceOf(outcome.token, destination);
+        bal = token == address(0) ? target.balance : SafeTransferLib.balanceOf(token, target);
     }
 
     /**
-     * @notice Record balances.
-     * @param account Fallback address if outcomes[].destination is 0.
-     * @param outcomes Description of balances to read: target and token.
-     * @return balances List of current balances of outcomes.
+     * @notice Verify this contract holds enough of each outcome token, then forward to destinations.
+     * @dev The executor is expected to have transferred outcome tokens to address(this) during execution.
+     *      The full held balance is forwarded, so any surplus beyond outcome.amount also goes to the destination.
+     * @param signer Token recipient if outcome.destination is 0.
+     * @param outcomes Tokens and minimum amounts that must be present at address(this).
      */
-    function _recordBalances(
-        address account,
+    function _validatePayment(
+        address signer,
         Outcome[] calldata outcomes
-    ) internal view returns (uint256[] memory balances) {
-        balances = DynamicArrayLib.malloc(outcomes.length);
+    ) internal {
         for (uint256 i; i < outcomes.length; ++i) {
             Outcome calldata outcome = outcomes[i];
-            balances.set(i, _balanceOf(account, outcome));
-        }
-    }
+            uint256 recordedPayment = _balanceOf(outcome.token, address(this));
+            if (recordedPayment < outcome.amount) revert InvalidTokenAmount(outcome.amount, recordedPayment);
 
-    /**
-     * @notice Compare current balances to recorded balances.
-     * @param account Fallback address if outcomes[].destination is 0.
-     * @param outcomes Description of balances to compare: target, token, and difference.
-     * @param recordedBalances List of previously recorded balances.
-     */
-    function _compareOutcomes(
-        address account,
-        Outcome[] calldata outcomes,
-        uint256[] memory recordedBalances
-    ) internal view {
-        for (uint256 i; i < outcomes.length; ++i) {
-            Outcome calldata outcome = outcomes[i];
-            uint256 newBalance = _balanceOf(account, outcome);
-
-            unchecked {
-                uint256 diff = newBalance > recordedBalances[i] ? newBalance - recordedBalances[i] : 0;
-                if (diff < outcome.amount) revert InvalidTokenAmount(outcome.amount, diff);
-            }
+            SafeTransferLib.safeTransfer(outcome.token, outcome.destination == address(0) ? signer : outcome.destination, recordedPayment);
         }
     }
 
