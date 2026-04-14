@@ -265,7 +265,7 @@ contract KeyedOwnable {
                 // extracts the rightmost byte of the 32-byte word, which is exactly the byte at
                 // (signature.offset + n - 1) — i.e., the true last byte of the signature.
                 // The gt(n, 0) guard ensures digestPrehash is always 0 when n = 0.
-                digestPrehash := and(not(iszero(and(calldataload(sub(add(signature.offset, n), 32)), 0xff))), gt(n, 0))
+                digestPrehash := and(iszero(iszero(and(calldataload(sub(add(signature.offset, n), 32)), 0xff))), gt(n, 0))
             }
             if (digestPrehash) {
                 digest = EfficientHashLib.sha2(digest); // `sha256(abi.encode(digest))`.
