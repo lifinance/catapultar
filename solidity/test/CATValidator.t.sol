@@ -704,10 +704,87 @@ contract CATValidatorTest is LibExecutionConstraintTest {
         assertEq(MockERC20(outToken).balanceOf(dest), amount);
     }
 
+    // -----------------------------------------------------------------------
+    // _validatePayment — native ETH outcomes
+    // -----------------------------------------------------------------------
+
+    /// Executor deposits ETH to CATValidator; it is forwarded to destination.
+    function test_validatePayment_nativeETH_success() external {
+        address dest = makeAddr("dest");
+        uint256 amount = 1 ether;
+
+        vm.deal(address(validator), amount);
+
+        Outcome[] memory outcomes = new Outcome[](1);
+        outcomes[0] = Outcome({ token: address(0), amount: amount, destination: dest });
+
+        uint256 destBefore = dest.balance;
+        validator.validatePayment(address(this), outcomes);
+
+        assertEq(dest.balance - destBefore, amount);
+        assertEq(address(validator).balance, 0);
+    }
+
+    /// ETH outcome with address(0) destination routes to signer.
+    function test_validatePayment_nativeETH_zero_destination_routes_to_signer() external {
+        address signer = makeAddr("signer");
+        uint256 amount = 1 ether;
+
+        vm.deal(address(validator), amount);
+
+        Outcome[] memory outcomes = new Outcome[](1);
+        outcomes[0] = Outcome({ token: address(0), amount: amount, destination: address(0) });
+
+        uint256 signerBefore = signer.balance;
+        validator.validatePayment(signer, outcomes);
+
+        assertEq(signer.balance - signerBefore, amount);
+        assertEq(address(validator).balance, 0);
+    }
+
+    /// ETH balance below required → InvalidTokenAmount.
+    function test_validatePayment_nativeETH_revert_insufficient() external {
+        address dest = makeAddr("dest");
+        uint256 required = 1 ether;
+
+        vm.deal(address(validator), required - 1);
+
+        Outcome[] memory outcomes = new Outcome[](1);
+        outcomes[0] = Outcome({ token: address(0), amount: required, destination: dest });
+
+        vm.expectRevert(abi.encodeWithSelector(CATValidator.InvalidTokenAmount.selector, required, required - 1));
+        validator.validatePayment(address(this), outcomes);
+    }
+
+    /// Mixed ETH + ERC-20 outcomes in a single call.
+    function test_validatePayment_mixed_eth_and_erc20() external {
+        address destETH = makeAddr("destETH");
+        address destERC = makeAddr("destERC");
+        uint256 ethAmount = 0.5 ether;
+        uint256 ercAmount = 100e18;
+
+        vm.deal(address(validator), ethAmount);
+        address token = address(new MockERC20("T", "T", 18));
+        MockERC20(token).mint(address(validator), ercAmount);
+
+        Outcome[] memory outcomes = new Outcome[](2);
+        outcomes[0] = Outcome({ token: address(0), amount: ethAmount, destination: destETH });
+        outcomes[1] = Outcome({ token: token, amount: ercAmount, destination: destERC });
+
+        validator.validatePayment(address(this), outcomes);
+
+        assertEq(destETH.balance, ethAmount);
+        assertEq(MockERC20(token).balanceOf(destERC), ercAmount);
+        assertEq(address(validator).balance, 0);
+        assertEq(MockERC20(token).balanceOf(address(validator)), 0);
+    }
+
     function isValidSignature(
         bytes32,
         bytes calldata
     ) public view returns (bytes4) {
         return bytes4(0x1626ba7e);
     }
+
+    receive() external payable { }
 }

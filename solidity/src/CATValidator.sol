@@ -129,6 +129,23 @@ contract CATValidator is EIP712, ReentrancyGuard {
     }
 
     /**
+     * @notice Transfer `amount` of `token` to `dest`.
+     * @dev Handles both ERC-20 and native ETH (token == address(0)).
+     * @param token ERC-20 token address, or address(0) for native ETH.
+     * @param amount Amount to transfer.
+     * @param dest Recipient address.
+     */
+    function _transfer(
+        address token,
+        uint256 amount,
+        address dest
+    ) internal {
+        token == address(0)
+            ? SafeTransferLib.safeTransferETH(dest, amount)
+            : SafeTransferLib.safeTransfer(token, dest, amount);
+    }
+
+    /**
      * @notice Verify this contract holds enough of each outcome token, then forward to destinations.
      * @dev The executor is expected to have transferred outcome tokens to address(this) during execution.
      *      The full held balance is forwarded, so any surplus beyond outcome.amount also goes to the destination.
@@ -144,7 +161,7 @@ contract CATValidator is EIP712, ReentrancyGuard {
             uint256 recordedPayment = _balanceOf(outcome.token, address(this));
             if (recordedPayment < outcome.amount) revert InvalidTokenAmount(outcome.amount, recordedPayment);
 
-            SafeTransferLib.safeTransfer(outcome.token, outcome.destination == address(0) ? signer : outcome.destination, recordedPayment);
+            _transfer(outcome.token, recordedPayment, outcome.destination == address(0) ? signer : outcome.destination);
         }
     }
 
