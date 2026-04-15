@@ -21,6 +21,15 @@ import { SafeTransferLib } from "solady/src/utils/SafeTransferLib.sol";
 ///      This contract is stateless and designed for permissionless deployment
 ///      via the Catapultar stack's CREATE2 deployment scheme.
 ///
+///      This contract intentionally has no access control. executeAndSweep(),
+///      executeAndSweepNative(), and receive() are all open to any caller.
+///      The security model relies entirely on the caller supplying correct sweep
+///      recipients: tokens and ETH are swept out within the same transaction,
+///      so the contract should hold no balance between calls under normal
+///      operation. Any residual balance (e.g. from a direct ETH send or a
+///      failed sweep) can be extracted by any subsequent caller — this is
+///      accepted and expected. Do not leave tokens behind.
+///
 /// @custom:version 2.0.0
 contract IntentExecutor is ReentrancyGuard {
     /// @dev Multicall3-compatible call struct (no value)
