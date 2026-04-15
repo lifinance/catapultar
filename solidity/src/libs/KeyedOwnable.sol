@@ -226,8 +226,9 @@ contract KeyedOwnable {
         // Use max(prevLen, 1) so we clear any extra slots from a prior P256/WebAuthn key.
         uint256 slotsToWrite = _keyTypeLength(publicKeyType);
         publicKeyType = PublicKeyType.ECDSAOrSmartContract;
-        for (uint256 i; i < slotsToWrite; ++i) {
-            _setPublicKeySlice(i, i == 0 ? bytes32(uint256(uint160(newOwner))) : bytes32(0));
+        _setPublicKeySlice(0, bytes32(uint256(uint160(newOwner))));
+        for (uint256 i = 1; i < slotsToWrite; ++i) {
+            _setPublicKeySlice(i, bytes32(0));
         }
 
         bytes32[] memory nextKeys = new bytes32[](1);
