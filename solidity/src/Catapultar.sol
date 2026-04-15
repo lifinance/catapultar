@@ -68,7 +68,25 @@ contract Catapultar is ERC7821LIFI, EIP712, BitmapNonce, KeyedOwnable, Initializ
         Signature
     }
 
-    mapping(bytes32 hash => DigestApproval flag) public approvedDigest;
+    struct CatapultarStorage {
+        mapping(bytes32 hash => DigestApproval flag) approvedDigest;
+    }
+
+    // keccak256("catapultar.main")
+    bytes32 private constant _CATAPULTAR_SLOT = keccak256("catapultar.main");
+
+    function _catapultarStorage() private pure returns (CatapultarStorage storage $) {
+        bytes32 slot = _CATAPULTAR_SLOT;
+        assembly ("memory-safe") {
+            $.slot := slot
+        }
+    }
+
+    function approvedDigest(
+        bytes32 hash
+    ) public view returns (DigestApproval) {
+        return _catapultarStorage().approvedDigest[hash];
+    }
 
     constructor() {
         // This contract is intended to be used through a proxy. This proxy target should not be used.
@@ -114,7 +132,7 @@ contract Catapultar is ERC7821LIFI, EIP712, BitmapNonce, KeyedOwnable, Initializ
     ) public payable {
         if (!ownerOrSelf() && _getInitializedVersion() != 0) revert Unauthorized();
 
-        approvedDigest[hash] = flag;
+        _catapultarStorage().approvedDigest[hash] = flag;
         emit SignatureSet(hash, flag);
     }
 
@@ -132,7 +150,7 @@ contract Catapultar is ERC7821LIFI, EIP712, BitmapNonce, KeyedOwnable, Initializ
         bytes32 hash,
         bytes calldata signature
     ) public view virtual returns (bytes4 result) {
-        if (signature.length == 0 && approvedDigest[hash] == DigestApproval.Signature) return bytes4(0x1626ba7e);
+        if (signature.length == 0 && _catapultarStorage().approvedDigest[hash] == DigestApproval.Signature) return bytes4(0x1626ba7e);
         bytes32 digest = EfficientHashLib.hash(
             REPLAY_PROTECTION, // Offset hash to ensure no standard payload replicates this structure.
             asUnsafeBytes32(address(this)),
@@ -157,7 +175,7 @@ contract Catapultar is ERC7821LIFI, EIP712, BitmapNonce, KeyedOwnable, Initializ
         uint256 wordPos,
         uint256 mask
     ) external payable onlyOwnerOrSelf {
-        nonceBitmap[wordPos] |= mask;
+        _bitmapNonceStorage().nonceBitmap[wordPos] |= mask;
 
         emit UnorderedNonceInvalidation(wordPos, mask);
     }
@@ -226,7 +244,7 @@ contract Catapultar is ERC7821LIFI, EIP712, BitmapNonce, KeyedOwnable, Initializ
         bytes32 callTypeHash = LibCalls.typehash(nonce, mode, calls);
         // We need to check if the hash matches before. This is required for "embedded" calls since we cannot know the
         // address ahead of time. 0 and type(uint256).max are disallowed by _useUnorderedNonce.
-        if (opdataLength32 && approvedDigest[callTypeHash] == DigestApproval.Call) return true;
+        if (opdataLength32 && _catapultarStorage().approvedDigest[callTypeHash] == DigestApproval.Call) return true;
 
         // Validate whether the mode contains the multichain flag.
         bool isMultichain;

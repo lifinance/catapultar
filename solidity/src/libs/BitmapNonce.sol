@@ -7,7 +7,25 @@ abstract contract BitmapNonce {
 
     event UnorderedNonceInvalidation(uint256 word, uint256 mask);
 
-    mapping(uint256 => uint256) public nonceBitmap;
+    struct BitmapNonceStorage {
+        mapping(uint256 => uint256) nonceBitmap;
+    }
+
+    // keccak256("catapultar.bitmap.nonce")
+    bytes32 private constant _BITMAP_NONCE_SLOT = keccak256("catapultar.bitmap.nonce");
+
+    function _bitmapNonceStorage() internal pure returns (BitmapNonceStorage storage $) {
+        bytes32 slot = _BITMAP_NONCE_SLOT;
+        assembly ("memory-safe") {
+            $.slot := slot
+        }
+    }
+
+    function nonceBitmap(
+        uint256 wordPos
+    ) public view returns (uint256) {
+        return _bitmapNonceStorage().nonceBitmap[wordPos];
+    }
 
     /// @notice Returns the index of the bitmap and the bit position within the bitmap. Used for unordered nonces
     /// @param nonce The nonce to get the associated word and bit positions
@@ -34,7 +52,7 @@ abstract contract BitmapNonce {
         (uint256 wordPos, uint256 bitPos) = bitmapPositions(nonce);
         // forge-lint: disable-next-line(incorrect-shift)
         uint256 bit = 1 << bitPos;
-        uint256 flipped = nonceBitmap[wordPos] ^= bit;
+        uint256 flipped = _bitmapNonceStorage().nonceBitmap[wordPos] ^= bit;
 
         if (flipped & bit == 0) revert InvalidNonce();
     }

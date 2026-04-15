@@ -35,7 +35,23 @@ contract KeyedOwnable {
     /// used is ECDSAOrSmartContract, there is a chance that the account is still in control of someone.
     bytes32 internal constant _OWNER_SLOT = 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffff74873927;
 
-    PublicKeyType public publicKeyType;
+    struct KeyedOwnableStorage {
+        PublicKeyType publicKeyType;
+    }
+
+    // keccak256("catapultar.keyed.ownable")
+    bytes32 private constant _KEYED_OWNABLE_SLOT = keccak256("catapultar.keyed.ownable");
+
+    function _keyedOwnableStorage() private pure returns (KeyedOwnableStorage storage $) {
+        bytes32 slot = _KEYED_OWNABLE_SLOT;
+        assembly ("memory-safe") {
+            $.slot := slot
+        }
+    }
+
+    function publicKeyType() public view returns (PublicKeyType) {
+        return _keyedOwnableStorage().publicKeyType;
+    }
 
     /**
      * @notice Sets a slice of a key.
@@ -66,7 +82,7 @@ contract KeyedOwnable {
     }
 
     function getPublicKey() public view returns (PublicKeyType keyType, bytes32[] memory key) {
-        keyType = publicKeyType;
+        keyType = _keyedOwnableStorage().publicKeyType;
         uint256 length = _keyTypeLength(keyType);
         uint256[] memory _key = DynamicArrayLib.malloc(length);
         for (uint256 i; i < length; ++i) {
@@ -194,7 +210,7 @@ contract KeyedOwnable {
         for (uint256 i; i < nextKeyLength; ++i) {
             _setPublicKeySlice(i, nextKey[i]);
         }
-        publicKeyType = ktp;
+        _keyedOwnableStorage().publicKeyType = ktp;
         emit OwnershipTransferred(ktp, nextKey);
     }
 
@@ -219,7 +235,7 @@ contract KeyedOwnable {
         address newOwner
     ) public payable onlyOwnerOrSelf {
         // We set the keytype as smart contract
-        publicKeyType = PublicKeyType.ECDSAOrSmartContract;
+        _keyedOwnableStorage().publicKeyType = PublicKeyType.ECDSAOrSmartContract;
         _setPublicKeySlice(0, bytes32(uint256(uint160(newOwner))));
 
         bytes32[] memory nextKeys = new bytes32[](1);
@@ -257,7 +273,7 @@ contract KeyedOwnable {
             }
         }
 
-        if (publicKeyType == PublicKeyType.P256) {
+        if (_keyedOwnableStorage().publicKeyType == PublicKeyType.P256) {
             // The try decode functions returns `(0,0)` if the bytes is too short,
             // which will make the signature check fail.
             (bytes32 r, bytes32 s) = P256.tryDecodePointCalldata(signature);
@@ -265,7 +281,7 @@ contract KeyedOwnable {
             bytes32 y = _getPublicKeySlice(1);
             return P256.verifySignature(digest, r, s, x, y);
         }
-        if (publicKeyType == PublicKeyType.WebAuthnP256) {
+        if (_keyedOwnableStorage().publicKeyType == PublicKeyType.WebAuthnP256) {
             bytes32 x = _getPublicKeySlice(0);
             bytes32 y = _getPublicKeySlice(1);
             return WebAuthn.verify(
@@ -277,7 +293,7 @@ contract KeyedOwnable {
                 y
             );
         }
-        if (publicKeyType == PublicKeyType.ECDSAOrSmartContract) {
+        if (_keyedOwnableStorage().publicKeyType == PublicKeyType.ECDSAOrSmartContract) {
             address account = _asAddressNotDirty(_getPublicKeySlice(0));
             return SignatureCheckerLib.isValidSignatureNowCalldata(account, digest, signature);
         }
