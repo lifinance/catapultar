@@ -171,9 +171,37 @@ contract KeyedOwnableTest is P256VerifierEtcher {
         assertEq(uint8(ktp), uint8(KeyedOwnable.PublicKeyType.ECDSAOrSmartContract));
         assertEq(key, expectedKey);
 
-        // Notice that we have a dirty slot now.
-        bytes32 dirtySlot = ownable.getPublicKeySlice(1);
-        assertNotEq(dirtySlot, 0);
+        // Slot 1 must be zeroed after downgrading from P256/WebAuthn to ECDSA.
+        bytes32 clearedSlot = ownable.getPublicKeySlice(1);
+        assertEq(clearedSlot, 0);
+    }
+
+    // Regression test: stale P256/WebAuthn key slot not cleared on ownership downgrade.
+    function test_transferOwnership_clearsStaleSlotOnDowngrade() external {
+        (, bytes32[] memory publickeyP256) = makeP256("P256Owner");
+
+        // Upgrade to P256 — writes slot 0 (x) and slot 1 (y).
+        vm.prank(address(ownable));
+        ownable.transferOwnership(KeyedOwnable.PublicKeyType.P256, publickeyP256);
+        assertNotEq(ownable.getPublicKeySlice(1), 0);
+
+        // Downgrade to ECDSA via transferOwnership(PublicKeyType, bytes32[]) — slot 1 must be zeroed.
+        bytes32[] memory ecdsaKey = new bytes32[](1);
+        ecdsaKey[0] = bytes32(uint256(uint160(makeAddr("ecdsaOwner"))));
+        vm.prank(address(ownable));
+        ownable.transferOwnership(KeyedOwnable.PublicKeyType.ECDSAOrSmartContract, ecdsaKey);
+        assertEq(ownable.getPublicKeySlice(1), 0, "slot 1 not cleared after downgrade via transferOwnership(ktp, key)");
+
+        // Upgrade to WebAuthn — writes slot 0 (x) and slot 1 (y).
+        (, bytes32[] memory publickeyWebAuthn) = makeP256("WebAuthnOwner");
+        vm.prank(address(ownable));
+        ownable.transferOwnership(KeyedOwnable.PublicKeyType.WebAuthnP256, publickeyWebAuthn);
+        assertNotEq(ownable.getPublicKeySlice(1), 0);
+
+        // Downgrade to ECDSA via transferOwnership(address) — slot 1 must be zeroed.
+        vm.prank(address(ownable));
+        ownable.transferOwnership(makeAddr("ecdsaOwner2"));
+        assertEq(ownable.getPublicKeySlice(1), 0, "slot 1 not cleared after downgrade via transferOwnership(address)");
     }
 
     function testRevert_transferOwnership_invalid_key() external {
