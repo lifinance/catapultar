@@ -61,8 +61,8 @@ contract CATValidator is EIP712, ReentrancyGuard {
      * @dev This function can only be called by the designated executor. The caller check is made by embedding
      * msg.sender as the executor in the typehash. This contract does not support _any_ executor and one has to be
      * provided.
-     * If a destination is address(0), it specifies the signer. If a spend is 0 the current balance of the signer will
-     * be used.
+     * If a destination is address(0), it specifies the signer. If a spend is 1 << 255 (SPEND_BALANCE_OF_MAGIC), the
+     * current balance of the signer will be used.
      */
     function entry(
         address execTarget,
