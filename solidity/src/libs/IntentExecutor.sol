@@ -30,6 +30,13 @@ import { SafeTransferLib } from "solady/src/utils/SafeTransferLib.sol";
 ///      failed sweep) can be extracted by any subsequent caller — this is
 ///      accepted and expected. Do not leave tokens behind.
 ///
+///      function selection:
+///      - If the swap/call outputs ERC20 tokens only, use executeAndSweep().
+///      - If the swap/call outputs native ETH (e.g. unwrap WETH → ETH, or a
+///        DEX that settles in ETH), you MUST use executeAndSweepNative().
+///        executeAndSweep() has no native sweep step; any ETH received during
+///        execution will remain in the contract and be claimable by anyone.
+///
 /// @custom:version 2.0.0
 contract IntentExecutor is ReentrancyGuard {
     /// @dev Multicall3-compatible call struct (no value)
@@ -81,6 +88,12 @@ contract IntentExecutor is ReentrancyGuard {
     ///      1. For each approval: safeApproveWithRetry(token, spender, type(uint256).max)
     ///      2. Execute all calls in order
     ///      3. For each sweep target: transfer full balanceOf(this) to recipient
+    ///
+    ///      ERC20 outputs only. This function does NOT sweep native ETH.
+    ///      If any executed call sends ETH to this contract (e.g. WETH unwrap,
+    ///      native-output DEX), that ETH will be left in the contract and can
+    ///      be swept by any subsequent caller. Use executeAndSweepNative()
+    ///      instead whenever the output may include native ETH.
     /// @param approvals Token+spender pairs to max-approve before execution
     /// @param calls Array of calls to execute (swap, fee transfer, etc.)
     /// @param sweepTargets Token+recipient pairs to sweep after execution
@@ -95,8 +108,15 @@ contract IntentExecutor is ReentrancyGuard {
         _sweepAll(sweepTargets);
     }
 
-    /// @notice Execute with safe approvals, batched calls with value, and native balance sweep.
-    /// @dev Used for swaps that output native tokens (ETH/MATIC/etc).
+    /// @notice Execute with safe approvals, batched calls with value, and native + ERC20 balance sweep.
+    /// @dev Used for swaps that output native tokens (ETH/MATIC/etc). Extends executeAndSweep()
+    ///      with two additional capabilities: calls may forward ETH via the value field, and any
+    ///      native balance remaining after execution is swept to nativeSweepRecipient.
+    ///
+    ///      Use this function (instead of executeAndSweep()) whenever the output may include
+    ///      native ETH — e.g. WETH unwrap, a DEX that settles in ETH, or any call chain where
+    ///      ETH could land in this contract. If you use executeAndSweep() in that scenario the
+    ///      ETH will be left in the contract and claimable by anyone.
     /// @param approvals Token+spender pairs to max-approve before execution
     /// @param calls Array of calls with value to execute
     /// @param sweepTargets ERC20 token+recipient pairs to sweep after execution
