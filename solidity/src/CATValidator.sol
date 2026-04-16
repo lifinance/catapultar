@@ -47,6 +47,8 @@ contract CATValidator is EIP712, ReentrancyGuard {
         CALL_PROXY = address(new CallProxy());
     }
 
+    receive() external payable { }
+
     function _domainNameAndVersion() internal pure override returns (string memory name, string memory version) {
         name = "CAT Validator";
         version = "1";

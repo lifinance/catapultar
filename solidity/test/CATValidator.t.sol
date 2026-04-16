@@ -84,6 +84,13 @@ contract MockExecutor {
         SafeTransferLib.safeTransfer(token, wrongDest, amount);
     }
 
+    /// Sends ETH to CATValidator — for testing native ETH output outcomes.
+    function executeAndDeliverETHToValidator(
+        uint256 amount
+    ) external {
+        SafeTransferLib.safeTransferETH(validator, amount);
+    }
+
     receive() external payable { }
 }
 
@@ -702,6 +709,44 @@ contract CATValidatorTest is LibExecutionConstraintTest {
         validator.entry(address(exec), goodPayload, account, 1, allowances, outcomes, sig);
 
         assertEq(MockERC20(outToken).balanceOf(dest), amount);
+    }
+
+    /// ERC-20 input, native ETH output: signer approves an ERC-20 and requests ETH back.
+    /// Executor is pre-loaded with ETH and delivers it to CATValidator; validator forwards to dest.
+    function test_entry_erc20_in_eth_out() external {
+        uint256 amount = 1 ether;
+        (address account, uint256 key) = makeAddrAndKey("account");
+        address executor = makeAddr("executor");
+        address dest = makeAddr("dest");
+
+        // Input: random ERC-20 approved by signer to validator
+        address inToken = address(new MockERC20("In", "IN", 18));
+        MockERC20(inToken).mint(account, amount);
+        vm.prank(account);
+        MockERC20(inToken).approve(address(validator), amount);
+
+        // Executor holds ETH that it will "swap" and deliver
+        MockExecutor exec = new MockExecutor(address(validator));
+        vm.deal(address(exec), amount);
+
+        AllowanceSpend[] memory allowances = new AllowanceSpend[](1);
+        allowances[0] = AllowanceSpend({ token: inToken, allocated: amount, spend: amount });
+
+        // Output: native ETH to dest
+        Outcome[] memory outcomes = new Outcome[](1);
+        outcomes[0] = Outcome({ token: address(0), amount: amount, destination: dest });
+
+        bytes memory sig = _signEntry(account, key, executor, 1, allowances, outcomes);
+        bytes memory execPayload = abi.encodeCall(MockExecutor.executeAndDeliverETHToValidator, (amount));
+
+        uint256 destBefore = dest.balance;
+        vm.prank(executor);
+        validator.entry(address(exec), execPayload, account, 1, allowances, outcomes, sig);
+
+        // ETH forwarded to dest, validator drained, executor received the ERC-20
+        assertEq(dest.balance - destBefore, amount);
+        assertEq(address(validator).balance, 0);
+        assertEq(MockERC20(inToken).balanceOf(address(exec)), amount);
     }
 
     // -----------------------------------------------------------------------
