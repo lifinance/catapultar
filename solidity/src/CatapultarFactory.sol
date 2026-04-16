@@ -43,7 +43,6 @@ contract CatapultarFactory {
         return version;
     }
 
-    /// @param salt The first 20 bytes of salt has to be the owner or 0.
     function deploy(
         KeyedOwnable.PublicKeyType ktp,
         bytes32[] calldata owner,
@@ -56,7 +55,6 @@ contract CatapultarFactory {
 
     /// @dev Do not trust that the owner of the returned proxy is equal to the provided owner. Ownership may have been
     /// handed over.
-    /// @param salt The first 20 bytes of salt has to be the owner or 0.
     function predictDeploy(
         KeyedOwnable.PublicKeyType ktp,
         bytes32[] calldata owner,
@@ -65,7 +63,6 @@ contract CatapultarFactory {
         return LibClone.predictDeterministicAddress_PUSH0(EXECUTOR, _salt(salt, ktp, owner), address(this));
     }
 
-    /// @param salt The first 20 bytes of salt has to be the owner or 0.
     function deployWithDigest(
         KeyedOwnable.PublicKeyType ktp,
         bytes32[] calldata owner,
@@ -91,7 +88,6 @@ contract CatapultarFactory {
 
     /// @dev Do not trust that the owner of the returned proxy is equal to the provided owner. Ownership may have been
     /// handed over.
-    /// @param salt The first 20 bytes of salt has to be the owner or 0.
     function predictDeployWithDigest(
         KeyedOwnable.PublicKeyType ktp,
         bytes32[] calldata owner,
@@ -110,13 +106,12 @@ contract CatapultarFactory {
         return LibClone.predictDeterministicAddress_PUSH0(EXECUTOR, saltWithDigest, address(this));
     }
 
-    /// @param salt The first 20 bytes of salt has to be the owner or 0.
     function deployUpgradeable(
         KeyedOwnable.PublicKeyType ktp,
         bytes32[] calldata owner,
         bytes32 salt
     ) external payable returns (address payable proxy) {
-        proxy = payable(LibClone.deployDeterministicERC1967(EXECUTOR, salt));
+        proxy = payable(LibClone.deployDeterministicERC1967(EXECUTOR, _salt(salt, ktp, owner)));
 
         Catapultar(payable(proxy)).init{ value: msg.value }(ktp, owner);
     }
@@ -125,13 +120,12 @@ contract CatapultarFactory {
     /// handed over.
     /// Do not trust that the implementation of the returned proxy matches the expected version of Catapultar or
     /// Catapultar in general. The contract implementation is upgradeable.
-    /// @param salt The first 20 bytes of salt has to be the owner or 0.
     function predictDeployUpgradeable(
         KeyedOwnable.PublicKeyType ktp,
         bytes32[] calldata owner,
         bytes32 salt
     ) external view returns (address proxy) {
-        return LibClone.predictDeterministicAddressERC1967(EXECUTOR, salt, address(this));
+        return LibClone.predictDeterministicAddressERC1967(EXECUTOR, _salt(salt, ktp, owner), address(this));
     }
 
     // --- Helpers --- //
