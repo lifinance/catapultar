@@ -12,8 +12,8 @@ import { SafeTransferLib } from "solady/src/utils/SafeTransferLib.sol";
 ///      Three-phase execution:
 ///      1. Safe approvals — safeApproveWithRetry(type(uint256).max) for each input token,
 ///         handling USDT-style tokens that revert on non-zero-to-non-zero approve.
-///         Max approval means subsequent executions with the same token+spender
-///         skip the storage write (~3-4k gas saved per repeat).
+///         Allowance is checked first; if already type(uint256).max the approve is skipped
+///         entirely (~1,800+ gas saved per repeat, avoiding the Approval event emission).
 ///      2. Call execution — arbitrary batched calls (swap, fee transfer, etc.)
 ///      3. Balance sweep — reads balanceOf(this) for each output token and transfers
 ///         the full remaining balance to the specified recipient.
@@ -149,14 +149,39 @@ contract IntentExecutor is ReentrancyGuard {
     /// @dev Safe max-approve each token to its spender.
     ///      Uses SafeTransferLib.safeApproveWithRetry which handles USDT-style tokens
     ///      by resetting to 0 first if needed.
-    ///      Max approval is a one-time storage write — subsequent calls with
-    ///      the same token+spender pair are a no-op read (~3-4k gas saved).
+    ///      Skips the approve entirely when allowance is already type(uint256).max,
+    ///      avoiding an unnecessary SSTORE + Approval event (~1,800+ gas per pair).
     function _safeApproveAll(
         Approval[] calldata approvals
     ) private {
         uint256 len = approvals.length;
         for (uint256 i = 0; i < len; ++i) {
-            SafeTransferLib.safeApproveWithRetry(approvals[i].token, approvals[i].spender, type(uint256).max);
+            address token = approvals[i].token;
+            address spender = approvals[i].spender;
+            if (_allowance(token, address(this), spender) < type(uint256).max) {
+                SafeTransferLib.safeApproveWithRetry(token, spender, type(uint256).max);
+            }
+        }
+    }
+
+    /// @dev Returns the ERC20 allowance of `owner` for `spender`. Returns 0 on failure.
+    /// This contract returns 0 if no contract has been deployed.
+    function _allowance(address token, address owner, address spender) private view returns (uint256 amount) {
+        assembly ("memory-safe") {
+            // Save free memory pointer. We will overwrite it.
+            let m := mload(0x40)
+            mstore(0x34, spender) // Spender zero-pad: 0x34-0x3f, address: 0x40-0x53 (corrupts free ptr temporarily).
+            mstore(0x14, owner) // Owner zero-pad: 0x14-0x1f, address: 0x20-0x33.
+            mstore(0x00, 0xdd62ed3e000000000000000000000000) // `allowance(address,address)` selector at 0x10.
+            amount :=
+                mul( // The arguments of `mul` are evaluated from right to left.
+                    mload(0x00),
+                    and( // The arguments of `and` are evaluated from right to left.
+                        gt(returndatasize(), 0x1f), // At least 32 bytes returned.
+                        staticcall(gas(), token, 0x10, 0x44, 0x00, 0x20)
+                    )
+                )
+            mstore(0x40, m) // Restore the free memory pointer.
         }
     }
 
