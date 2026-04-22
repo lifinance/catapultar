@@ -197,7 +197,7 @@ contract CATValidator is EIP712, ReentrancyGuard {
             AllowanceSpend calldata allowance = allowances[i];
 
             uint256 spend = allowance.spend == SPEND_BALANCE_OF_MAGIC
-                ? SafeTransferLib.balanceOf(allowance.token, source)
+                ? _safeBalanceOf(allowance.token, source)
                 : allowance.spend;
             if (allowance.allocated < spend) revert AllocationTooSmall(allowance.allocated, spend);
 
