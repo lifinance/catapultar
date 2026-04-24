@@ -61,6 +61,7 @@ contract IntegrationTest is LibExecutionConstraintTest {
     CATValidator validator;
 
     MockERC20 validatorToken;
+    address validatorAddress;
     uint256 balanceOfSwap = 0;
 
     function setUp() external {
@@ -270,6 +271,7 @@ contract IntegrationTest is LibExecutionConstraintTest {
 
     function test_validator() external {
         validatorToken = new MockERC20("Outcome Token", "OutTok", 18);
+        validatorAddress = address(validator);
 
         (address user,) = makeAddrAndKey("user");
 
@@ -333,8 +335,10 @@ contract IntegrationTest is LibExecutionConstraintTest {
         inputTargets[0] = AllowanceSpend({
             token: allowances[0].token, allocated: allowances[0].amount, spend: allowances[0].amount
         });
+        // Pass the CATValidator address so swap() delivers output tokens there,
+        // not to the final destination (which would leave CATValidator with nothing).
         bytes memory externalCall =
-            abi.encodeCall(this.swap, (allowances[0].amount, allowances[0].token, outcomes[0].destination));
+            abi.encodeCall(this.swap, (allowances[0].amount, allowances[0].token, address(validator)));
 
         vm.prank(makeAddr("WrongCaller"));
         vm.expectRevert(abi.encodeWithSelector(CATValidator.BadSignature.selector));
@@ -342,19 +346,136 @@ contract IntegrationTest is LibExecutionConstraintTest {
 
         vm.prank(constraint.executor);
         validator.entry(address(this), externalCall, proxy, constraint.nonce, inputTargets, outcomes, hex"");
+
+        assertEq(validatorToken.balanceOf(outcomes[0].destination), outcomes[0].amount);
     }
 
-    // Mock functions for exchanging 1 token for another
+    // -----------------------------------------------------------------------
+    // Audit 6.1.1 integration tests — full multicall path
+    // -----------------------------------------------------------------------
+
+    /// Shared setup: deploy a Catapultar account that has pre-approved `validator`
+    /// to spend its allowance token and pre-registered the execution constraint digest
+    /// via setSignature. Returns the account proxy and the prepared calldata pieces.
+    ///
+    /// The execution constraint uses nonce 0 (long-lived) so the CATValidator
+    /// accepts `hex""` as signature via the account's EIP-1271 isValidSignature path.
+    function _deployConstrainedProxy(
+        address executor,
+        address user
+    )
+        internal
+        returns (
+            address payable proxy,
+            AllowanceSpend[] memory inputTargets,
+            Outcome[] memory outcomes
+        )
+    {
+        uint256 amount = 10 ** 18;
+        address allowanceToken = address(new MockERC20("Allowance Token", "IT", 18));
+
+        Allowance[] memory allowances = new Allowance[](1);
+        allowances[0] = Allowance({ amount: amount, token: allowanceToken });
+        outcomes = new Outcome[](1);
+        outcomes[0] = Outcome({ token: address(validatorToken), amount: amount, destination: user });
+
+        // Build the EIP-712 digest for the constraint so the account can store it.
+        bytes32 th = typehashReference(allowances, outcomes, executor, 0);
+        bytes32 domainSeparator = EIP712(address(validator)).DOMAIN_SEPARATOR();
+        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", domainSeparator, th));
+
+        // Batch: approve validator + call setSignature on the account itself.
+        ERC7821.Call[] memory calls = new ERC7821.Call[](2);
+        calls[0] = ERC7821.Call({
+            to: allowanceToken,
+            data: abi.encodeWithSignature("approve(address,uint256)", address(validator), amount),
+            value: 0
+        });
+        calls[1] = ERC7821.Call({
+            to: address(0), // self
+            data: abi.encodeCall(Catapultar.setSignature, (digest, Catapultar.DigestApproval.Signature)),
+            value: 0
+        });
+
+        bytes32[] memory keys = new bytes32[](1);
+        keys[0] = bytes32(uint256(uint160(user)));
+        proxy = factory.deployWithDigest(
+            KeyedOwnable.PublicKeyType.ECDSAOrSmartContract,
+            keys,
+            bytes32(bytes20(uint160(user))),
+            this.typehash(1, REVERT_MODE, calls),
+            false
+        );
+
+        // Execute the approve + setSignature batch on the freshly deployed account.
+        Catapultar(proxy).execute(REVERT_MODE, abi.encode(calls, abi.encodePacked(uint256(1))));
+
+        // Fund the account with the allowance token.
+        MockERC20(allowanceToken).mint(proxy, amount);
+
+        inputTargets = new AllowanceSpend[](1);
+        inputTargets[0] =
+            AllowanceSpend({ token: allowanceToken, allocated: amount, spend: amount });
+    }
+
+    /// Audit 6.1.1: executor calls swap(), which mints output tokens directly to the
+    /// outcome destination during execution. CATValidator receives nothing.
+    /// The outcome check must fail even though `dest` was paid via the external call.
+    function test_audit_611_swap_mints_to_dest_rejected() external {
+        validatorToken = new MockERC20("Outcome Token", "OutTok", 18);
+
+        address user = makeAddr("user");
+        address executor = makeAddr("executor");
+
+        (address payable proxy, AllowanceSpend[] memory inputTargets, Outcome[] memory outcomes) =
+            _deployConstrainedProxy(executor, user);
+
+        // swap() mints validatorToken to `user` — not to CATValidator.
+        bytes memory externalCall =
+            abi.encodeCall(this.swap, (inputTargets[0].spend, inputTargets[0].token, user));
+
+        vm.prank(executor);
+        vm.expectRevert(
+            abi.encodeWithSelector(CATValidator.InvalidTokenAmount.selector, outcomes[0].amount, 0)
+        );
+        validator.entry(address(this), externalCall, proxy, 0, inputTargets, outcomes, hex"");
+    }
+
+    /// Audit 6.1.1 correct path: executor calls swap(), which mints output tokens to
+    /// CATValidator during execution. Outcome check passes and tokens are forwarded to dest.
+    function test_audit_611_swap_mints_to_validator_accepted() external {
+        validatorToken = new MockERC20("Outcome Token", "OutTok", 18);
+
+        address user = makeAddr("user");
+        address executor = makeAddr("executor");
+
+        (address payable proxy, AllowanceSpend[] memory inputTargets, Outcome[] memory outcomes) =
+            _deployConstrainedProxy(executor, user);
+
+        // swap() mints validatorToken to CATValidator — correct delivery path.
+        bytes memory externalCall =
+            abi.encodeCall(this.swap, (inputTargets[0].spend, inputTargets[0].token, address(validator)));
+
+        vm.prank(executor);
+        validator.entry(address(this), externalCall, proxy, 0, inputTargets, outcomes, hex"");
+
+        assertEq(validatorToken.balanceOf(user), outcomes[0].amount);
+        assertEq(validatorToken.balanceOf(address(validator)), 0);
+    }
+
+    // Mock functions for exchanging 1 token for another.
+    // `deliverTo` must be the CATValidator address so _validatePayment can read
+    // its own balance and then forward tokens to the final outcome destination.
     function swap(
         uint256 amount,
         address inToken,
-        address target
+        address deliverTo
     ) external {
         // Check for balance increase.
         uint256 diff = MockERC20(inToken).balanceOf(address(this)) - balanceOfSwap;
         balanceOfSwap += diff;
 
-        validatorToken.mint(target, amount);
+        validatorToken.mint(deliverTo, amount);
     }
 
     function typehash(

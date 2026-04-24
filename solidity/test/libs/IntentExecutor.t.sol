@@ -2,12 +2,24 @@
 pragma solidity ^0.8.17;
 
 import { Test } from "forge-std/src/Test.sol";
+import { VmSafe } from "forge-std/src/Vm.sol";
 
 import { MockERC20 } from "solady/test/utils/mocks/MockERC20.sol";
 
 import { IntentExecutor } from "../../src/libs/IntentExecutor.sol";
 
+/// @dev USDT-style token: reverts when approving a non-zero amount over an existing non-zero allowance.
+contract MockUSDT is MockERC20 {
+    constructor() MockERC20("Tether USD", "USDT", 6) { }
+
+    function approve(address spender, uint256 amount) public override returns (bool) {
+        if (amount > 0 && allowance(msg.sender, spender) > 0) revert("USDT: non-zero to non-zero");
+        return super.approve(spender, amount);
+    }
+}
+
 contract IntentExecutorTest is Test {
+    event Approval(address indexed owner, address indexed spender, uint256 amount);
     IntentExecutor executor;
     MockERC20 tokenA;
     MockERC20 tokenB;
@@ -291,6 +303,115 @@ contract IntentExecutorTest is Test {
     }
 
     // -- Approvals --
+
+    /// @dev Verify the guard skips approve entirely when allowance is already max.
+    /// The Approval event is the definitive proof — if it's not emitted, no approve call was made.
+    function test_approval_skipsApproveWhenAlreadyMax() external {
+        IntentExecutor.Approval[] memory approvals = new IntentExecutor.Approval[](1);
+        approvals[0] = IntentExecutor.Approval({ token: address(tokenA), spender: address(this) });
+        IntentExecutor.Call3[] memory calls = new IntentExecutor.Call3[](0);
+        IntentExecutor.SweepTarget[] memory sweeps = new IntentExecutor.SweepTarget[](0);
+
+        // First call sets max allowance.
+        executor.executeAndSweep(approvals, calls, sweeps);
+        assertEq(tokenA.allowance(address(executor), address(this)), type(uint256).max);
+
+        // Second call: allowance already max — no Approval event should be emitted.
+        vm.recordLogs();
+        executor.executeAndSweep(approvals, calls, sweeps);
+        assertEq(vm.getRecordedLogs().length, 0);
+        assertEq(tokenA.allowance(address(executor), address(this)), type(uint256).max);
+    }
+
+    /// @dev Verify approve IS called when allowance is below max.
+    function test_approval_approvesWhenBelowMax() external {
+        address spender = address(this);
+
+        // Manually set a partial allowance on the executor.
+        vm.prank(address(executor));
+        tokenA.approve(spender, 1 ether);
+        assertEq(tokenA.allowance(address(executor), spender), 1 ether);
+
+        IntentExecutor.Approval[] memory approvals = new IntentExecutor.Approval[](1);
+        approvals[0] = IntentExecutor.Approval({ token: address(tokenA), spender: spender });
+        IntentExecutor.Call3[] memory calls = new IntentExecutor.Call3[](0);
+        IntentExecutor.SweepTarget[] memory sweeps = new IntentExecutor.SweepTarget[](0);
+
+        vm.expectEmit(true, true, false, true, address(tokenA));
+        emit Approval(address(executor), spender, type(uint256).max);
+        executor.executeAndSweep(approvals, calls, sweeps);
+
+        assertEq(tokenA.allowance(address(executor), spender), type(uint256).max);
+    }
+
+    /// @dev With multiple pairs in one call, only the pairs not already at max should approve.
+    function test_approval_multiPairs_onlyApprovesNonMax() external {
+        address spenderA = makeAddr("spenderA");
+        address spenderB = makeAddr("spenderB");
+
+        // Pre-approve spenderA to max; spenderB stays at zero.
+        vm.prank(address(executor));
+        tokenA.approve(spenderA, type(uint256).max);
+
+        IntentExecutor.Approval[] memory approvals = new IntentExecutor.Approval[](2);
+        approvals[0] = IntentExecutor.Approval({ token: address(tokenA), spender: spenderA });
+        approvals[1] = IntentExecutor.Approval({ token: address(tokenA), spender: spenderB });
+        IntentExecutor.Call3[] memory calls = new IntentExecutor.Call3[](0);
+        IntentExecutor.SweepTarget[] memory sweeps = new IntentExecutor.SweepTarget[](0);
+
+        // Only spenderB should trigger an Approval event.
+        vm.recordLogs();
+        executor.executeAndSweep(approvals, calls, sweeps);
+
+        VmSafe.Log[] memory logs = vm.getRecordedLogs();
+        assertEq(logs.length, 1);
+        // The single Approval event must be for spenderB (topic[2] = spender).
+        assertEq(logs[0].topics[2], bytes32(uint256(uint160(spenderB))));
+
+        assertEq(tokenA.allowance(address(executor), spenderA), type(uint256).max);
+        assertEq(tokenA.allowance(address(executor), spenderB), type(uint256).max);
+    }
+
+    /// @dev USDT-style token: guard prevents the revert that would occur if approve were called
+    ///      over an existing non-zero allowance.
+    function test_approval_usdtStyle_skipsApproveWhenAlreadyMax() external {
+        MockUSDT usdt = new MockUSDT();
+        address spender = address(this);
+
+        // First call: sets max allowance via safeApproveWithRetry.
+        IntentExecutor.Approval[] memory approvals = new IntentExecutor.Approval[](1);
+        approvals[0] = IntentExecutor.Approval({ token: address(usdt), spender: spender });
+        IntentExecutor.Call3[] memory calls = new IntentExecutor.Call3[](0);
+        IntentExecutor.SweepTarget[] memory sweeps = new IntentExecutor.SweepTarget[](0);
+
+        executor.executeAndSweep(approvals, calls, sweeps);
+        assertEq(usdt.allowance(address(executor), spender), type(uint256).max);
+
+        // Second call: guard skips approve entirely — USDT would revert if approve were called.
+        executor.executeAndSweep(approvals, calls, sweeps);
+        assertEq(usdt.allowance(address(executor), spender), type(uint256).max);
+    }
+
+    /// @dev USDT-style token with a partial allowance: safeApproveWithRetry must reset to 0
+    ///      before setting max. Guard correctly lets the call through when allowance < max.
+    function test_approval_usdtStyle_handlesPartialAllowance() external {
+        MockUSDT usdt = new MockUSDT();
+        address spender = address(this);
+
+        // Set a non-zero, non-max allowance directly on the executor.
+        vm.prank(address(executor));
+        usdt.approve(spender, 500e6);
+        assertEq(usdt.allowance(address(executor), spender), 500e6);
+
+        IntentExecutor.Approval[] memory approvals = new IntentExecutor.Approval[](1);
+        approvals[0] = IntentExecutor.Approval({ token: address(usdt), spender: spender });
+        IntentExecutor.Call3[] memory calls = new IntentExecutor.Call3[](0);
+        IntentExecutor.SweepTarget[] memory sweeps = new IntentExecutor.SweepTarget[](0);
+
+        // safeApproveWithRetry should reset to 0, then approve max.
+        executor.executeAndSweep(approvals, calls, sweeps);
+        assertEq(usdt.allowance(address(executor), spender), type(uint256).max);
+    }
 
     function test_approvalSetsMaxAllowance() external {
         IntentExecutor.Approval[] memory approvals = new IntentExecutor.Approval[](1);

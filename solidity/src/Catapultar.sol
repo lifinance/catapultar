@@ -225,7 +225,7 @@ contract Catapultar is ERC7821LIFI, EIP712, BitmapNonce, KeyedOwnable, Initializ
 
         bytes32 callTypeHash = LibCalls.typehash(nonce, mode, calls);
         // We need to check if the hash matches before. This is required for "embedded" calls since we cannot know the
-        // address ahead of time. 0 and type(uint256).max are disallowed by _useUnorderedNonce.
+        // address ahead of time. 0 is disallowed by _useUnorderedNonce.
         if (opdataLength32 && approvedDigest[callTypeHash] == DigestApproval.Call) return true;
 
         // Validate whether the mode contains the multichain flag.

@@ -3,6 +3,7 @@ pragma solidity ^0.8.30;
 
 import { DynamicArrayLib } from "solady/src/utils/DynamicArrayLib.sol";
 import { EfficientHashLib } from "solady/src/utils/EfficientHashLib.sol";
+import { FixedPointMathLib } from "solady/src/utils/FixedPointMathLib.sol";
 import { LibBit } from "solady/src/utils/LibBit.sol";
 import { LibBytes } from "solady/src/utils/LibBytes.sol";
 import { P256 } from "solady/src/utils/P256.sol";
@@ -146,14 +147,14 @@ contract KeyedOwnable {
                         // Check the upper 12 bytes
                         eq(shr(mul(8, 20), addr), 0),
                         // Check the lower 20 bytes
-                        not(eq(shl(mul(8, 12), addr), 0))
+                        iszero(eq(shl(mul(8, 12), addr), 0))
                     )
                 )
             }
             case 1 {
                 valid := and(
                     valid,
-                    not(
+                    iszero(
                         or(
                             // Check if first word of key is 0
                             eq(calldataload(key.offset), 0),
@@ -166,7 +167,7 @@ contract KeyedOwnable {
             case 2 {
                 valid := and(
                     valid,
-                    not(
+                    iszero(
                         or(
                             // Check if first word of key is 0
                             eq(calldataload(key.offset), 0),
@@ -191,8 +192,12 @@ contract KeyedOwnable {
         if (!_isValidKey(ktp, nextKey)) revert InvalidKey();
 
         uint256 nextKeyLength = nextKey.length;
-        for (uint256 i; i < nextKeyLength; ++i) {
-            _setPublicKeySlice(i, nextKey[i]);
+        // Use max(prevLen, nextLen) so we write every slot that either key occupies,
+        // clearing stale slots on downgrade without touching slots neither key uses.
+        uint256 slotsToWrite = _keyTypeLength(publicKeyType);
+        slotsToWrite = FixedPointMathLib.max(slotsToWrite, nextKeyLength);
+        for (uint256 i; i < slotsToWrite; ++i) {
+            _setPublicKeySlice(i, i < nextKeyLength ? nextKey[i] : bytes32(0));
         }
         publicKeyType = ktp;
         emit OwnershipTransferred(ktp, nextKey);
@@ -218,9 +223,13 @@ contract KeyedOwnable {
     function transferOwnership(
         address newOwner
     ) public payable onlyOwnerOrSelf {
-        // We set the keytype as smart contract
+        // Use max(prevLen, 1) so we clear any extra slots from a prior P256/WebAuthn key.
+        uint256 slotsToWrite = _keyTypeLength(publicKeyType);
         publicKeyType = PublicKeyType.ECDSAOrSmartContract;
         _setPublicKeySlice(0, bytes32(uint256(uint160(newOwner))));
+        for (uint256 i = 1; i < slotsToWrite; ++i) {
+            _setPublicKeySlice(i, bytes32(0));
+        }
 
         bytes32[] memory nextKeys = new bytes32[](1);
         nextKeys[0] = bytes32(uint256(uint160(newOwner)));
