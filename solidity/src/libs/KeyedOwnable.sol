@@ -147,14 +147,14 @@ contract KeyedOwnable {
                         // Check the upper 12 bytes
                         eq(shr(mul(8, 20), addr), 0),
                         // Check the lower 20 bytes
-                        not(eq(shl(mul(8, 12), addr), 0))
+                        iszero(eq(shl(mul(8, 12), addr), 0))
                     )
                 )
             }
             case 1 {
                 valid := and(
                     valid,
-                    not(
+                    iszero(
                         or(
                             // Check if first word of key is 0
                             eq(calldataload(key.offset), 0),
@@ -167,7 +167,7 @@ contract KeyedOwnable {
             case 2 {
                 valid := and(
                     valid,
-                    not(
+                    iszero(
                         or(
                             // Check if first word of key is 0
                             eq(calldataload(key.offset), 0),
