@@ -40,7 +40,8 @@ contract deploy is multichain {
     }
 
     function deployCATValidator() internal returns (CATValidator validator) {
-        address expectedAddress = getExpectedCreate2Address(bytes32(0), type(CATValidator).creationCode, hex"");
+        address payable expectedAddress =
+            payable(getExpectedCreate2Address(bytes32(0), type(CATValidator).creationCode, hex""));
         if (expectedAddress.code.length == 0) {
             validator = new CATValidator{ salt: bytes32(0) }();
             if (expectedAddress != address(validator)) revert NotExpectedAddress(expectedAddress, address(validator));
