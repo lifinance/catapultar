@@ -244,6 +244,8 @@ contract KeyedOwnable {
      * P256 signatures needs to append 2 bytes to their 64 bytes to get the signature to size 66. The last byte is a
      * flag for rehashing the digest with SHA256.
      * @param signature `abi.encodePacked(bytes(signature), bool(prehash))`.
+     *   - length 0: no prehash byte; empty signature passed to key-type dispatch.
+     *   - length 1: the single byte is the prehash indicator; empty signature passed downstream.
      */
     function _validateSignature(
         bytes32 digest,
@@ -255,13 +257,26 @@ contract KeyedOwnable {
             return SignatureCheckerLib.isValidSignatureNowCalldata(account, digest, signature);
         }
 
-        unchecked {
-            uint256 n = signature.length;
-            // Remove the last byte from the signature
-            signature = LibBytes.truncatedCalldata(signature, n - 1);
-            // Do the prehash if last byte is non-zero. Select the last word of the signature, then select the last byte
-            // of the word.
-            if ((uint256(LibBytes.loadCalldata(signature, n - 32)) & 0xff) != 0) {
+        // We need to load the signature and identify whether we need to do a sha prehash.
+        // If a signature of length 0 is provided, we will process signature as is.
+        // If a signature of length > 0 is provided, the last byte will be a signal byte for whether to sha256 hash the digest before signature validation.
+        {
+            bool digestPrehash;
+            assembly ("memory-safe") {
+                let n := signature.length
+
+                // Subtract 1 from signature length if n > 0
+                signature.length := sub(n, gt(n, 0))
+
+                // Select the last byte of the signature, then check if it is not 0.
+                // For n >= 32 this reads the last 32 bytes of the signature (in-bounds).
+                // For 1 <= n < 32 the calldataload starts before signature.offset, but & 0xff
+                // extracts the rightmost byte of the 32-byte word, which is exactly the byte at
+                // (signature.offset + n - 1) — i.e., the true last byte of the signature.
+                // The gt(n, 0) guard ensures digestPrehash is always 0 when n = 0.
+                digestPrehash := and(iszero(iszero(and(calldataload(sub(add(signature.offset, n), 32)), 0xff))), gt(n, 0))
+            }
+            if (digestPrehash) {
                 digest = EfficientHashLib.sha2(digest); // `sha256(abi.encode(digest))`.
             }
         }
