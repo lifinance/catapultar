@@ -6,6 +6,7 @@ import { Test } from "forge-std/src/Test.sol";
 import { KeyedOwnable } from "../../src/libs/KeyedOwnable.sol";
 
 import { MockKeyedOwnable } from "../mocks/MockKeyedOwnable.sol";
+import { MockERC1271 } from "../mocks/MockERC1271.sol";
 
 import { Base64 } from "solady/src/utils/Base64.sol";
 import { P256 } from "solady/src/utils/P256.sol";
@@ -171,9 +172,37 @@ contract KeyedOwnableTest is P256VerifierEtcher {
         assertEq(uint8(ktp), uint8(KeyedOwnable.PublicKeyType.ECDSAOrSmartContract));
         assertEq(key, expectedKey);
 
-        // Notice that we have a dirty slot now.
-        bytes32 dirtySlot = ownable.getPublicKeySlice(1);
-        assertNotEq(dirtySlot, 0);
+        // Slot 1 must be zeroed after downgrading from P256/WebAuthn to ECDSA.
+        bytes32 clearedSlot = ownable.getPublicKeySlice(1);
+        assertEq(clearedSlot, 0);
+    }
+
+    // Regression test: stale P256/WebAuthn key slot not cleared on ownership downgrade.
+    function test_transferOwnership_clearsStaleSlotOnDowngrade() external {
+        (, bytes32[] memory publickeyP256) = makeP256("P256Owner");
+
+        // Upgrade to P256 — writes slot 0 (x) and slot 1 (y).
+        vm.prank(address(ownable));
+        ownable.transferOwnership(KeyedOwnable.PublicKeyType.P256, publickeyP256);
+        assertNotEq(ownable.getPublicKeySlice(1), 0);
+
+        // Downgrade to ECDSA via transferOwnership(PublicKeyType, bytes32[]) — slot 1 must be zeroed.
+        bytes32[] memory ecdsaKey = new bytes32[](1);
+        ecdsaKey[0] = bytes32(uint256(uint160(makeAddr("ecdsaOwner"))));
+        vm.prank(address(ownable));
+        ownable.transferOwnership(KeyedOwnable.PublicKeyType.ECDSAOrSmartContract, ecdsaKey);
+        assertEq(ownable.getPublicKeySlice(1), 0, "slot 1 not cleared after downgrade via transferOwnership(ktp, key)");
+
+        // Upgrade to WebAuthn — writes slot 0 (x) and slot 1 (y).
+        (, bytes32[] memory publickeyWebAuthn) = makeP256("WebAuthnOwner");
+        vm.prank(address(ownable));
+        ownable.transferOwnership(KeyedOwnable.PublicKeyType.WebAuthnP256, publickeyWebAuthn);
+        assertNotEq(ownable.getPublicKeySlice(1), 0);
+
+        // Downgrade to ECDSA via transferOwnership(address) — slot 1 must be zeroed.
+        vm.prank(address(ownable));
+        ownable.transferOwnership(makeAddr("ecdsaOwner2"));
+        assertEq(ownable.getPublicKeySlice(1), 0, "slot 1 not cleared after downgrade via transferOwnership(address)");
     }
 
     function testRevert_transferOwnership_invalid_key() external {
@@ -270,6 +299,60 @@ contract KeyedOwnableTest is P256VerifierEtcher {
         owner[1] = keccak256(bytes("y"));
         vm.expectRevert(KeyedOwnable.InvalidKey.selector);
         ownable.transferOwnership(KeyedOwnable.PublicKeyType.WebAuthnP256, owner);
+    }
+
+    function test_validateSignature_shortSignature() external view {
+        // Audit finding 6.3.1: lengths 0 and 1 are supported inputs (for smart-contract
+        // owners using approvedDigest). Lengths 2–31 are handled safely (no underflow);
+        // the truncated signature is too short for any key-type dispatch and returns false.
+
+        bytes32 digest = keccak256("digest");
+
+        // Zero-length: no prehash byte, empty signature falls through to key-type dispatch
+        assertFalse(ownable.validateSignature(digest, new bytes(0)));
+        // 1-byte, prehash=0: prehash indicator is 0x00, empty signature passed downstream
+        assertFalse(ownable.validateSignature(digest, hex"00"));
+        // 1-byte, prehash=1: digest is sha256-hashed, then empty signature passed downstream
+        assertFalse(ownable.validateSignature(digest, hex"01"));
+        // 2-byte: truncated to 1 byte, too short for any key-type dispatch
+        assertFalse(ownable.validateSignature(digest, new bytes(2)));
+        // 31-byte: truncated to 30 bytes, too short for any key-type dispatch
+        assertFalse(ownable.validateSignature(digest, new bytes(31)));
+    }
+
+    function test_validateSignature_shortSignature_smartContractOwner() external {
+        // Verify that short signatures are forwarded byte-for-byte to the ERC-1271 owner after
+        // the prehash indicator byte is stripped. The mock validates both the forwarded digest
+        // and the forwarded signature bytes.
+
+        bytes32 digest = keccak256("digest");
+        bytes32[] memory ownerSlot = new bytes32[](1);
+
+        MockERC1271 mock = new MockERC1271(digest, hex"ffa345");
+        ownerSlot[0] = bytes32(uint256(uint160(address(mock))));
+        ownable.setOwnership(KeyedOwnable.PublicKeyType.ECDSAOrSmartContract, ownerSlot);
+
+        // Case 1: accepted = (digest, 0xffa345), prehash=0x00 → digest unchanged, 0xffa345 forwarded.
+        assertTrue(ownable.validateSignature(digest, abi.encodePacked(hex"ffa345", bytes1(0x00))));
+        assertFalse(ownable.validateSignature(digest, abi.encodePacked(hex"01",    bytes1(0x00))));
+
+        // Case 2: accepted = (digest, 0x01), prehash=0x00 → digest unchanged, 0x01 forwarded.
+        mock.setAccepted(digest, hex"01");
+        assertTrue(ownable.validateSignature(digest, abi.encodePacked(hex"01", bytes1(0x00))));
+        assertFalse(ownable.validateSignature(digest, abi.encodePacked(hex"ffa345", bytes1(0x00))));
+
+        // Case 3: accepted = (digest, 0x) — length-0 input, no prehash byte stripped, digest unchanged.
+        mock.setAccepted(digest, hex"");
+        assertTrue(ownable.validateSignature(digest, new bytes(0)));
+        assertFalse(ownable.validateSignature(digest, abi.encodePacked(hex"ffa345", bytes1(0x00))));
+
+        // Case 4: prehash=0x01 → digest is sha256(digest) before forwarding to ERC-1271.
+        // The mock must expect the sha256-hashed digest; the original digest is rejected.
+        bytes32 sha256Digest = sha256(abi.encodePacked(digest));
+        mock.setAccepted(sha256Digest, hex"ffa345");
+        assertTrue(ownable.validateSignature(digest,  abi.encodePacked(hex"ffa345", bytes1(0x01))));
+        // prehash=0x00 forwards the original digest unchanged — mock now expects sha256Digest, so this fails.
+        assertFalse(ownable.validateSignature(digest, abi.encodePacked(hex"ffa345", bytes1(0x00))));
     }
 
     function test_validateSignature_ECDSA() external view {

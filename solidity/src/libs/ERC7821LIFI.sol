@@ -59,7 +59,8 @@ abstract contract ERC7821LIFI is ERC7821 {
         // Bytes Layout:
         // - [0] ( 1 byte ) `0x01` for batch call.
         // - [1] ( 1 byte ) `0x00` for revert on any failure.
-        // - [2..5] ( 4 bytes) Reserved by ERC7579 for future standardization.
+        // - [2]    ( 1 byte ) Multichain flag: non-zero selects chain-agnostic digest (used by Catapultar).
+        // - [3..5] ( 3 bytes) Reserved by ERC7579 for future standardization.
         // - [6..9] ( 4 bytes) `0x00000000` or `0x78210001` or `0x78210002`.
         // - [10..31] (22 bytes) Unused. Free for use.
         assembly ("memory-safe") {
