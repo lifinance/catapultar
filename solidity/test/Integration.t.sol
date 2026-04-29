@@ -363,14 +363,7 @@ contract IntegrationTest is LibExecutionConstraintTest {
     function _deployConstrainedProxy(
         address executor,
         address user
-    )
-        internal
-        returns (
-            address payable proxy,
-            AllowanceSpend[] memory inputTargets,
-            Outcome[] memory outcomes
-        )
-    {
+    ) internal returns (address payable proxy, AllowanceSpend[] memory inputTargets, Outcome[] memory outcomes) {
         uint256 amount = 10 ** 18;
         address allowanceToken = address(new MockERC20("Allowance Token", "IT", 18));
 
@@ -414,8 +407,7 @@ contract IntegrationTest is LibExecutionConstraintTest {
         MockERC20(allowanceToken).mint(proxy, amount);
 
         inputTargets = new AllowanceSpend[](1);
-        inputTargets[0] =
-            AllowanceSpend({ token: allowanceToken, allocated: amount, spend: amount });
+        inputTargets[0] = AllowanceSpend({ token: allowanceToken, allocated: amount, spend: amount });
     }
 
     /// Audit 6.1.1: executor calls swap(), which mints output tokens directly to the
@@ -431,13 +423,10 @@ contract IntegrationTest is LibExecutionConstraintTest {
             _deployConstrainedProxy(executor, user);
 
         // swap() mints validatorToken to `user` — not to CATValidator.
-        bytes memory externalCall =
-            abi.encodeCall(this.swap, (inputTargets[0].spend, inputTargets[0].token, user));
+        bytes memory externalCall = abi.encodeCall(this.swap, (inputTargets[0].spend, inputTargets[0].token, user));
 
         vm.prank(executor);
-        vm.expectRevert(
-            abi.encodeWithSelector(CATValidator.InvalidTokenAmount.selector, outcomes[0].amount, 0)
-        );
+        vm.expectRevert(abi.encodeWithSelector(CATValidator.InvalidTokenAmount.selector, outcomes[0].amount, 0));
         validator.entry(address(this), externalCall, proxy, 0, inputTargets, outcomes, hex"");
     }
 

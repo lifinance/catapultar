@@ -13,17 +13,26 @@ contract MockERC1271 {
     bytes32 public acceptedDigest;
     bytes public acceptedSignature;
 
-    constructor(bytes32 digest, bytes memory signature) {
+    constructor(
+        bytes32 digest,
+        bytes memory signature
+    ) {
         acceptedDigest = digest;
         acceptedSignature = signature;
     }
 
-    function setAccepted(bytes32 digest, bytes calldata signature) external {
+    function setAccepted(
+        bytes32 digest,
+        bytes calldata signature
+    ) external {
         acceptedDigest = digest;
         acceptedSignature = signature;
     }
 
-    function isValidSignature(bytes32 hash, bytes calldata signature) external view returns (bytes4) {
+    function isValidSignature(
+        bytes32 hash,
+        bytes calldata signature
+    ) external view returns (bytes4) {
         if (hash == acceptedDigest && keccak256(signature) == keccak256(acceptedSignature)) {
             return _ERC1271_MAGIC_VALUE;
         }

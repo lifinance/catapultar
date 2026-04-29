@@ -12,7 +12,10 @@ import { IntentExecutor } from "../../src/libs/IntentExecutor.sol";
 contract MockUSDT is MockERC20 {
     constructor() MockERC20("Tether USD", "USDT", 6) { }
 
-    function approve(address spender, uint256 amount) public override returns (bool) {
+    function approve(
+        address spender,
+        uint256 amount
+    ) public override returns (bool) {
         if (amount > 0 && allowance(msg.sender, spender) > 0) revert("USDT: non-zero to non-zero");
         return super.approve(spender, amount);
     }

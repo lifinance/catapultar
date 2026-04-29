@@ -5,8 +5,8 @@ import { Test } from "forge-std/src/Test.sol";
 
 import { KeyedOwnable } from "../../src/libs/KeyedOwnable.sol";
 
-import { MockKeyedOwnable } from "../mocks/MockKeyedOwnable.sol";
 import { MockERC1271 } from "../mocks/MockERC1271.sol";
+import { MockKeyedOwnable } from "../mocks/MockKeyedOwnable.sol";
 
 import { Base64 } from "solady/src/utils/Base64.sol";
 import { P256 } from "solady/src/utils/P256.sol";
@@ -334,7 +334,7 @@ contract KeyedOwnableTest is P256VerifierEtcher {
 
         // Case 1: accepted = (digest, 0xffa345), prehash=0x00 → digest unchanged, 0xffa345 forwarded.
         assertTrue(ownable.validateSignature(digest, abi.encodePacked(hex"ffa345", bytes1(0x00))));
-        assertFalse(ownable.validateSignature(digest, abi.encodePacked(hex"01",    bytes1(0x00))));
+        assertFalse(ownable.validateSignature(digest, abi.encodePacked(hex"01", bytes1(0x00))));
 
         // Case 2: accepted = (digest, 0x01), prehash=0x00 → digest unchanged, 0x01 forwarded.
         mock.setAccepted(digest, hex"01");
@@ -350,7 +350,7 @@ contract KeyedOwnableTest is P256VerifierEtcher {
         // The mock must expect the sha256-hashed digest; the original digest is rejected.
         bytes32 sha256Digest = sha256(abi.encodePacked(digest));
         mock.setAccepted(sha256Digest, hex"ffa345");
-        assertTrue(ownable.validateSignature(digest,  abi.encodePacked(hex"ffa345", bytes1(0x01))));
+        assertTrue(ownable.validateSignature(digest, abi.encodePacked(hex"ffa345", bytes1(0x01))));
         // prehash=0x00 forwards the original digest unchanged — mock now expects sha256Digest, so this fails.
         assertFalse(ownable.validateSignature(digest, abi.encodePacked(hex"ffa345", bytes1(0x00))));
     }

@@ -259,7 +259,8 @@ contract KeyedOwnable {
 
         // We need to load the signature and identify whether we need to do a sha prehash.
         // If a signature of length 0 is provided, we will process signature as is.
-        // If a signature of length > 0 is provided, the last byte will be a signal byte for whether to sha256 hash the digest before signature validation.
+        // If a signature of length > 0 is provided, the last byte will be a signal byte for whether to sha256 hash the
+        // digest before signature validation.
         {
             bool digestPrehash;
             assembly ("memory-safe") {
@@ -274,11 +275,12 @@ contract KeyedOwnable {
                 // extracts the rightmost byte of the 32-byte word, which is exactly the byte at
                 // (signature.offset + n - 1) — i.e., the true last byte of the signature.
                 // The gt(n, 0) guard ensures digestPrehash is always 0 when n = 0.
-                digestPrehash := and(iszero(iszero(and(calldataload(sub(add(signature.offset, n), 32)), 0xff))), gt(n, 0))
+                digestPrehash := and(
+                    iszero(iszero(and(calldataload(sub(add(signature.offset, n), 32)), 0xff))),
+                    gt(n, 0)
+                )
             }
-            if (digestPrehash) {
-                digest = EfficientHashLib.sha2(digest); // `sha256(abi.encode(digest))`.
-            }
+            if (digestPrehash) digest = EfficientHashLib.sha2(digest); // `sha256(abi.encode(digest))`.
         }
 
         if (publicKeyType == PublicKeyType.P256) {

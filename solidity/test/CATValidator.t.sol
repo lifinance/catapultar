@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 pragma solidity ^0.8.30;
 
-import { MockERC20 } from "solady/test/utils/mocks/MockERC20.sol";
 import { SafeTransferLib } from "solady/src/utils/SafeTransferLib.sol";
+import { MockERC20 } from "solady/test/utils/mocks/MockERC20.sol";
 
 import { LibExecutionConstraintTest } from "./libs/LibExecutionConstraint.t.sol";
 
@@ -476,7 +476,9 @@ contract CATValidatorTest is LibExecutionConstraintTest {
         sig = abi.encodePacked(r, s, v);
     }
 
-    function _setupEntryFixture(uint256 amount)
+    function _setupEntryFixture(
+        uint256 amount
+    )
         internal
         returns (
             address account,
@@ -692,16 +694,18 @@ contract CATValidatorTest is LibExecutionConstraintTest {
         outcomes[0] = Outcome({ token: outToken, amount: amount, destination: dest });
 
         bytes memory sig = _signEntry(account, key, executor, 1, allowances, outcomes);
-        // Wrong delivery: executor sends to wrongDest, CATValidator gets nothing.
-        address wrongDest = makeAddr("wrongDest");
-        bytes memory failPayload =
-            abi.encodeCall(MockExecutor.executeAndDeliverElsewhere, (outToken, amount, wrongDest));
-        bytes memory goodPayload = abi.encodeCall(MockExecutor.executeAndDeliverToValidator, (outToken, amount));
+        {
+            // Wrong delivery: executor sends to wrongDest, CATValidator gets nothing.
+            address wrongDest = makeAddr("wrongDest");
+            bytes memory failPayload =
+                abi.encodeCall(MockExecutor.executeAndDeliverElsewhere, (outToken, amount, wrongDest));
 
-        // First call: fails at _validatePayment → all state rolled back including nonce.
-        vm.prank(executor);
-        vm.expectRevert(abi.encodeWithSelector(CATValidator.InvalidTokenAmount.selector, amount, 0));
-        validator.entry(address(exec), failPayload, account, 1, allowances, outcomes, sig);
+            // First call: fails at _validatePayment → all state rolled back including nonce.
+            vm.prank(executor);
+            vm.expectRevert(abi.encodeWithSelector(CATValidator.InvalidTokenAmount.selector, amount, 0));
+            validator.entry(address(exec), failPayload, account, 1, allowances, outcomes, sig);
+        }
+        bytes memory goodPayload = abi.encodeCall(MockExecutor.executeAndDeliverToValidator, (outToken, amount));
 
         // Second call: nonce 1 is available again; executor delivers correctly this time.
         MockERC20(outToken).mint(address(exec), amount); // replenish exec's outToken

@@ -166,21 +166,24 @@ contract IntentExecutor is ReentrancyGuard {
 
     /// @dev Returns the ERC20 allowance of `owner` for `spender`. Returns 0 on failure.
     /// This contract returns 0 if no contract has been deployed.
-    function _allowance(address token, address owner, address spender) private view returns (uint256 amount) {
+    function _allowance(
+        address token,
+        address owner,
+        address spender
+    ) private view returns (uint256 amount) {
         assembly ("memory-safe") {
             // Save free memory pointer. We will overwrite it.
             let m := mload(0x40)
             mstore(0x34, spender) // Spender zero-pad: 0x34-0x3f, address: 0x40-0x53 (corrupts free ptr temporarily).
             mstore(0x14, owner) // Owner zero-pad: 0x14-0x1f, address: 0x20-0x33.
             mstore(0x00, 0xdd62ed3e000000000000000000000000) // `allowance(address,address)` selector at 0x10.
-            amount :=
-                mul( // The arguments of `mul` are evaluated from right to left.
-                    mload(0x00),
-                    and( // The arguments of `and` are evaluated from right to left.
-                        gt(returndatasize(), 0x1f), // At least 32 bytes returned.
-                        staticcall(gas(), token, 0x10, 0x44, 0x00, 0x20)
-                    )
+            amount := mul( // The arguments of `mul` are evaluated from right to left.
+                mload(0x00),
+                and( // The arguments of `and` are evaluated from right to left.
+                    gt(returndatasize(), 0x1f), // At least 32 bytes returned.
+                    staticcall(gas(), token, 0x10, 0x44, 0x00, 0x20)
                 )
+            )
             mstore(0x40, m) // Restore the free memory pointer.
         }
     }
