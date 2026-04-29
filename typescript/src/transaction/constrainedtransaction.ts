@@ -226,13 +226,14 @@ export class ConstrainedAssetTransaction {
       destination: opt.refund,
     }));
 
+    // Set target to the validator. The validator will forward funds to the user at the end of the call.
     const executeCall: Call = {
       to: validator,
       data: encodeFunctionData({
         abi: CAT_VALIDATOR_ABI,
         functionName: "entry",
         args: [
-          opt.refund,
+          validator,
           "0x",
           opt.address,
           this.constraintNonce,

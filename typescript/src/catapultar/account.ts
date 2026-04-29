@@ -177,6 +177,29 @@ export class CatapultarAccount<
     });
   }
 
+  // Mirrors CatapultarFactory._salt(preSalt, ktp, owner):
+  // keccak256(preSalt || ktp (1 byte) || numOwners (1 byte) || owner[0] || ... || owner[n])
+  private static _factorySalt<AKT extends AccountPublicKeyType>(
+    preSalt: `0x${string}`,
+    ktp: AKT,
+    pubkeyArray: `0x${string}`[],
+  ): `0x${string}` {
+    const numOwners = pubkeyArray.length;
+    const types = [
+      "bytes32",
+      "uint8",
+      "uint8",
+      ...pubkeyArray.map((): "bytes32" => "bytes32"),
+    ] as const;
+    const values = [preSalt, ktp as number, numOwners, ...pubkeyArray] as const;
+    return keccak256(
+      encodePacked(
+        types as unknown as string[],
+        values as unknown as unknown[],
+      ),
+    );
+  }
+
   private static ownerInSalt<AKT extends AccountPublicKeyType>(
     opt: {
       salt: `0x${string}`;
@@ -201,20 +224,31 @@ export class CatapultarAccount<
   ) {
     if (!CatapultarAccount.ownerInSalt(opt))
       throw new Error(`Pubkey: ${opt.pubkey} not in salt: ${opt.salt}`);
-    let { salt } = opt;
+    const { salt } = opt;
     const { factory, template } = _factory(opt);
+    const pubkeyArray = pubkeyAsArray(opt);
 
-    // If a digest is used, rehash the hash.
+    const internalSalt = CatapultarAccount._factorySalt(
+      salt,
+      opt.keyType,
+      pubkeyArray,
+    );
+
     if ("callDigest" in opt && "isSignature" in opt) {
       const { callDigest, isSignature } = opt;
-      salt = keccak256(
+      const finalSalt = keccak256(
         encodePacked(
           ["bytes32", "bytes32", "uint256"],
-          [salt, callDigest, isSignature ? 2n : 1n],
+          [internalSalt, callDigest, isSignature ? 2n : 1n],
         ),
       );
+      return CatapultarAccount.deriveCloneAddress(template, finalSalt, factory);
     }
-    return CatapultarAccount.deriveCloneAddress(template, salt, factory);
+    return CatapultarAccount.deriveCloneAddress(
+      template,
+      internalSalt,
+      factory,
+    );
   }
 
   publicClient(this: CatapultarAccount<any, string, any>): PublicClient {

@@ -11,7 +11,12 @@ import { anvil } from "viem/chains";
 import { rpcUrl } from "../../test/setup";
 import { random } from "../utils/helpers";
 import { privateKeyToAccount } from "viem/accounts";
-import { PUBLIC_DEFAULT_ANVIL_ACCOUNT_0, token1, token2 } from "../config";
+import {
+  PUBLIC_DEFAULT_ANVIL_ACCOUNT_0,
+  cat_validator,
+  token1,
+  token2,
+} from "../config";
 import { MOCKERC20_abi } from "../abi/mockerc20";
 
 async function waitForTransaction(hash: `0x${string}`) {
@@ -97,7 +102,7 @@ describe("ConstrainedAssetTransaction", () => {
         const execData = encodeFunctionData({
           abi: MOCKERC20_abi,
           functionName: "mint",
-          args: [oftenTargetAddress, amount2],
+          args: [cat_validator, amount2],
         });
 
         const executeCall = catx.asExecuteCall({
