@@ -8,7 +8,9 @@ async function walk(dir) {
   const files = [];
 
   for (const entry of entries) {
-    const fullPath = path.join(dir, entry.name);
+    const fullPath = path.resolve(dir, entry.name);
+    const relative = path.relative(distDir, fullPath);
+    if (relative.startsWith("..") || path.isAbsolute(relative)) continue;
     if (entry.isDirectory()) {
       files.push(...(await walk(fullPath)));
       continue;
