@@ -694,16 +694,18 @@ contract CATValidatorTest is LibExecutionConstraintTest {
         outcomes[0] = Outcome({ token: outToken, amount: amount, destination: dest });
 
         bytes memory sig = _signEntry(account, key, executor, 1, allowances, outcomes);
-        // Wrong delivery: executor sends to wrongDest, CATValidator gets nothing.
-        address wrongDest = makeAddr("wrongDest");
-        bytes memory failPayload =
-            abi.encodeCall(MockExecutor.executeAndDeliverElsewhere, (outToken, amount, wrongDest));
-        bytes memory goodPayload = abi.encodeCall(MockExecutor.executeAndDeliverToValidator, (outToken, amount));
+        {
+            // Wrong delivery: executor sends to wrongDest, CATValidator gets nothing.
+            address wrongDest = makeAddr("wrongDest");
+            bytes memory failPayload =
+                abi.encodeCall(MockExecutor.executeAndDeliverElsewhere, (outToken, amount, wrongDest));
 
-        // First call: fails at _validatePayment → all state rolled back including nonce.
-        vm.prank(executor);
-        vm.expectRevert(abi.encodeWithSelector(CATValidator.InvalidTokenAmount.selector, amount, 0));
-        validator.entry(address(exec), failPayload, account, 1, allowances, outcomes, sig);
+            // First call: fails at _validatePayment → all state rolled back including nonce.
+            vm.prank(executor);
+            vm.expectRevert(abi.encodeWithSelector(CATValidator.InvalidTokenAmount.selector, amount, 0));
+            validator.entry(address(exec), failPayload, account, 1, allowances, outcomes, sig);
+        }
+        bytes memory goodPayload = abi.encodeCall(MockExecutor.executeAndDeliverToValidator, (outToken, amount));
 
         // Second call: nonce 1 is available again; executor delivers correctly this time.
         MockERC20(outToken).mint(address(exec), amount); // replenish exec's outToken
