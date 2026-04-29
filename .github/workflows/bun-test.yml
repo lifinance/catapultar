@@ -49,7 +49,7 @@ jobs:
         working-directory: typescript
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@75cd11691c0faa626561e295848008c8a7dddffe # v5
         with:
           files: typescript/lcov.info
           token: ${{ secrets.CODECOV_TOKEN }}
