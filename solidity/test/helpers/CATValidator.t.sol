@@ -66,6 +66,13 @@ contract CATValidatorMock is CATValidator {
     ) external {
         return _validatePayment(signer, outcomes);
     }
+
+    function balanceOf(
+        address token,
+        address target
+    ) external view returns (uint256) {
+        return _balanceOf(token, target);
+    }
 }
 
 contract CATValidatorTest is LibExecutionConstraintTest {
@@ -421,5 +428,76 @@ contract CATValidatorTest is LibExecutionConstraintTest {
 
         assertEq(MockERC20(outToken).balanceOf(dest), amount);
         assertEq(MockERC20(outToken).balanceOf(address(validator)), 0);
+    }
+
+    function test_revert_balanceOf_when_token_reverts() external {
+        address token = address(new RevertingBalanceOf());
+        address target = makeAddr("target");
+
+        vm.expectRevert(abi.encodeWithSelector(CATValidator.BalanceOfFailed.selector, token));
+        validator.balanceOf(token, target);
+    }
+
+    function test_revert_validatePayment_when_balanceOf_reverts() external {
+        address signer = makeAddr("signer");
+        address token = address(new RevertingBalanceOf());
+
+        Outcome[] memory outcomes = new Outcome[](1);
+        outcomes[0] = Outcome({ token: token, amount: 0, destination: address(0) });
+
+        vm.expectRevert(abi.encodeWithSelector(CATValidator.BalanceOfFailed.selector, token));
+        validator.validatePayment(signer, outcomes);
+    }
+
+    // Reproduces the attack from issue 6.2.1: a token whose balanceOf() fails,
+    // which under the old Solady balanceOf() would silently return 0.
+    //
+    // Attack path (old behavior):
+    //   1. balanceOf silently returns 0 because the call reverts.
+    //   2. Attacker alters external state so post-execution balanceOf now succeeds.
+    //   3. validatePayment observes a balance ≥ required → fraudulent pass.
+    //
+    // With the fix, the revert propagates via BalanceOfFailed, blocking the attack.
+    function test_issue_6_2_1_failed_balanceOf_cannot_be_exploited() external {
+        address target = makeAddr("target");
+        ToggleableBalanceOf token = new ToggleableBalanceOf();
+
+        uint256 realBalance = 100e18;
+        token.setBalance(target, realBalance);
+        // token starts with failing == true, so balanceOf() reverts
+
+        // balanceOf must revert — attack is blocked before it can progress.
+        vm.expectRevert(abi.encodeWithSelector(CATValidator.BalanceOfFailed.selector, address(token)));
+        validator.balanceOf(address(token), target);
+
+        // Demonstrate that once the token stops failing, balanceOf works correctly.
+        token.setFailing(false);
+        assertEq(validator.balanceOf(address(token), target), realBalance);
+    }
+}
+
+contract RevertingBalanceOf {
+    function balanceOf(address) external pure returns (uint256) {
+        revert("balanceOf reverts");
+    }
+}
+
+/// @dev Token whose balanceOf() can be toggled between failing and succeeding.
+/// Models a token whose behavior depends on external state changeable mid-execution.
+contract ToggleableBalanceOf {
+    bool public failing = true;
+    mapping(address => uint256) private _balances;
+
+    function setBalance(address account, uint256 amount) external {
+        _balances[account] = amount;
+    }
+
+    function setFailing(bool _failing) external {
+        failing = _failing;
+    }
+
+    function balanceOf(address account) external view returns (uint256) {
+        require(!failing, "balanceOf: disabled");
+        return _balances[account];
     }
 }
