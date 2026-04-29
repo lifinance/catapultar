@@ -40,6 +40,8 @@ jobs:
 
       - name: Install Anvil
         uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
 
       - name: Generate lcov
         run: bun run coverage:lcov
