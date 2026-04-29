@@ -3,11 +3,7 @@ pragma solidity ^0.8.30;
 
 import { Test } from "forge-std/src/Test.sol";
 
-import {
-    AllowanceSpend,
-    LibExecutionConstraint,
-    Outcome
-} from "../../../src/libs/LibExecutionConstraint.sol";
+import { AllowanceSpend, LibExecutionConstraint, Outcome } from "../../../src/libs/LibExecutionConstraint.sol";
 
 contract LibExecutionConstraintTest is Test {
     function typehashReference(

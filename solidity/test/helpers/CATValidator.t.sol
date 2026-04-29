@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 pragma solidity ^0.8.30;
 
-import { MockERC20 } from "solady/test/utils/mocks/MockERC20.sol";
 import { SafeTransferLib } from "solady/src/utils/SafeTransferLib.sol";
+import { MockERC20 } from "solady/test/utils/mocks/MockERC20.sol";
 
 import { LibExecutionConstraintTest } from "./libs/LibExecutionConstraint.t.sol";
 
@@ -205,8 +205,7 @@ contract CATValidatorTest is LibExecutionConstraintTest {
         }
         for (uint256 i; i < allowances.length; ++i) {
             vm.expectCall(
-                allowances[i].token,
-                abi.encodeCall(MockERC20.transferFrom, (account, destination, amounts[i] / 2))
+                allowances[i].token, abi.encodeCall(MockERC20.transferFrom, (account, destination, amounts[i] / 2))
             );
         }
         validator.handleAllowances(destination, account, allowances);
@@ -477,7 +476,9 @@ contract CATValidatorTest is LibExecutionConstraintTest {
 }
 
 contract RevertingBalanceOf {
-    function balanceOf(address) external pure returns (uint256) {
+    function balanceOf(
+        address
+    ) external pure returns (uint256) {
         revert("balanceOf reverts");
     }
 }
@@ -488,15 +489,22 @@ contract ToggleableBalanceOf {
     bool public failing = true;
     mapping(address => uint256) private _balances;
 
-    function setBalance(address account, uint256 amount) external {
+    function setBalance(
+        address account,
+        uint256 amount
+    ) external {
         _balances[account] = amount;
     }
 
-    function setFailing(bool _failing) external {
+    function setFailing(
+        bool _failing
+    ) external {
         failing = _failing;
     }
 
-    function balanceOf(address account) external view returns (uint256) {
+    function balanceOf(
+        address account
+    ) external view returns (uint256) {
         require(!failing, "balanceOf: disabled");
         return _balances[account];
     }

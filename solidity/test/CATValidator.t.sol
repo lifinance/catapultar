@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 pragma solidity ^0.8.30;
 
-import { MockERC20 } from "solady/test/utils/mocks/MockERC20.sol";
 import { SafeTransferLib } from "solady/src/utils/SafeTransferLib.sol";
+import { MockERC20 } from "solady/test/utils/mocks/MockERC20.sol";
 
 import { LibExecutionConstraintTest } from "./libs/LibExecutionConstraint.t.sol";
 
@@ -476,7 +476,9 @@ contract CATValidatorTest is LibExecutionConstraintTest {
         sig = abi.encodePacked(r, s, v);
     }
 
-    function _setupEntryFixture(uint256 amount)
+    function _setupEntryFixture(
+        uint256 amount
+    )
         internal
         returns (
             address account,

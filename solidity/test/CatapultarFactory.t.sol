@@ -142,9 +142,9 @@ contract CatapultarFactoryTest is Test {
         keys[1] = bytes32(uint256(2));
 
         bytes32 expectedSalt = keccak256(abi.encodePacked(preSalt, uint8(ktp), uint8(keys.length), keys[0], keys[1]));
-        address expected = LibClone.predictDeterministicAddress_PUSH0(factory.EXECUTOR(), expectedSalt, address(factory));
+        address expected =
+            LibClone.predictDeterministicAddress_PUSH0(factory.EXECUTOR(), expectedSalt, address(factory));
 
         assertEq(factory.predictDeploy(ktp, keys, preSalt), expected);
     }
-
 }

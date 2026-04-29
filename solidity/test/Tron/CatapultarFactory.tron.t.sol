@@ -96,7 +96,9 @@ contract CatapultarFactoryTronTest is Test {
         assertEq(firstCall, secondCall);
     }
 
-    function test_predictDeploy_different_salts(bytes12 extra) external {
+    function test_predictDeploy_different_salts(
+        bytes12 extra
+    ) external {
         address owner = makeAddr("owner");
         bytes32 saltA = bytes32(bytes20(uint160(owner)));
         bytes32 saltB = bytes32(abi.encodePacked(bytes20(uint160(owner)), extra));
@@ -165,7 +167,8 @@ contract CatapultarFactoryTronTest is Test {
         keys[0] = bytes32(uint256(uint160(owner)));
 
         address minimal = factory.predictDeploy(KeyedOwnable.PublicKeyType.ECDSAOrSmartContract, keys, salt);
-        address upgradeable = factory.predictDeployUpgradeable(KeyedOwnable.PublicKeyType.ECDSAOrSmartContract, keys, salt);
+        address upgradeable =
+            factory.predictDeployUpgradeable(KeyedOwnable.PublicKeyType.ECDSAOrSmartContract, keys, salt);
         assertNotEq(minimal, upgradeable);
     }
 
@@ -190,5 +193,4 @@ contract CatapultarFactoryTronTest is Test {
 
         assertEq(factory.predictDeploy(ktp, keys, preSalt), expected);
     }
-
 }

@@ -124,7 +124,10 @@ contract CATValidator is EIP712, ReentrancyGuard {
 
     /// @dev Calls token.balanceOf(account). Reverts with BalanceOfFailed if the call
     /// fails or returns fewer than 32 bytes, instead of silently returning zero.
-    function _safeBalanceOf(address token, address account) private view returns (uint256 bal) {
+    function _safeBalanceOf(
+        address token,
+        address account
+    ) private view returns (uint256 bal) {
         bool implemented;
         (implemented, bal) = SafeTransferLib.checkBalanceOf(token, account);
         if (!implemented) revert BalanceOfFailed(token);
@@ -193,9 +196,8 @@ contract CATValidator is EIP712, ReentrancyGuard {
         for (uint256 i = 0; i < allowances.length; ++i) {
             AllowanceSpend calldata allowance = allowances[i];
 
-            uint256 spend = allowance.spend == SPEND_BALANCE_OF_MAGIC
-                ? _safeBalanceOf(allowance.token, source)
-                : allowance.spend;
+            uint256 spend =
+                allowance.spend == SPEND_BALANCE_OF_MAGIC ? _safeBalanceOf(allowance.token, source) : allowance.spend;
             if (allowance.allocated < spend) revert AllocationTooSmall(allowance.allocated, spend);
 
             SafeTransferLib.safeTransferFrom(allowance.token, source, destination, spend);
