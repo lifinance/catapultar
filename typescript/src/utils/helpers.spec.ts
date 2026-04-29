@@ -1,4 +1,4 @@
-import { padEven, random, saltContainsAddress, asHex } from "./helpers";
+import { padEven, random, asHex } from "./helpers";
 
 describe("Catapultar Helpers", () => {
   it("should pad evenly (padEven)", () => {
@@ -17,34 +17,13 @@ describe("Catapultar Helpers", () => {
   it("should convert to hex (asHex)", () => {
     expect(asHex(32) as string).toBe("20");
     expect(asHex(32, 32) as string).toBe(
-      "0000000000000000000000000000000000000000000000000000000000000020"
+      "0000000000000000000000000000000000000000000000000000000000000020",
     );
     expect(asHex(10000000) as string).toBe("989680");
     expect(asHex(10000000) as string).toBe("989680");
     expect(asHex(200000000) as string).toBe("0bebc200");
     expect(asHex(200000000, 16) as string).toBe(
-      "0000000000000000000000000bebc200"
+      "0000000000000000000000000bebc200",
     );
-  });
-
-  it("should check if address contains salt (saltContainsAddress)", () => {
-    const address = random(20);
-    expect(
-      saltContainsAddress(address, address.padEnd(66, "0") as `0x${string}`)
-    ).toBe(true);
-
-    expect(
-      saltContainsAddress(
-        address,
-        "0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"
-      )
-    ).toBe(false);
-
-    expect(
-      saltContainsAddress(
-        "0xc5d2460186f7233c927e7db2dcc703c0e500b653",
-        "0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"
-      )
-    ).toBe(true);
   });
 });

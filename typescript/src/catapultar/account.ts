@@ -200,21 +200,6 @@ export class CatapultarAccount<
     );
   }
 
-  private static ownerInSalt<AKT extends AccountPublicKeyType>(
-    opt: {
-      salt: `0x${string}`;
-    } & Pubkey<AKT>,
-  ) {
-    const pubkeyArray = pubkeyAsArray(opt);
-    const saltPrefix =
-      opt.keyType === AccountPublicKeyType.ECDSAOrSmartContract
-        ? opt.pubkey
-        : keccak256(encodePacked(["bytes32[]"], [pubkeyArray]));
-
-    const saltSlice = opt.salt.slice(0, 20 * 2 + 2);
-    return BigInt(saltSlice) === 0n || saltSlice === saltPrefix;
-  }
-
   static predict<AKT extends AccountPublicKeyType>(
     opt: {
       salt: `0x${string}`;
@@ -222,8 +207,6 @@ export class CatapultarAccount<
       MaybeFactory &
       ({} | EmbeddedCall),
   ) {
-    if (!CatapultarAccount.ownerInSalt(opt))
-      throw new Error(`Pubkey: ${opt.pubkey} not in salt: ${opt.salt}`);
     const { salt } = opt;
     const { factory, template } = _factory(opt);
     const pubkeyArray = pubkeyAsArray(opt);
@@ -329,7 +312,7 @@ export class CatapultarAccount<
           },
         ],
       );
-      return `${encodedParams}00`; // Use SHA256 hash.
+      return `${encodedParams}00`; // No SHA256 prehash.
     }
   }
 

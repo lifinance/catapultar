@@ -31,18 +31,6 @@ export function asHex<T extends string = "">(
 }
 
 /**
- * Validate whether an a salt value contains a specific address as the initial values.
- */
-export function saltContainsAddress(
-  address: `0x${string}`,
-  salt: `0x${string}`,
-): boolean {
-  const saltSlice = salt.slice(0, 42);
-  if (saltSlice === "0x0000000000000000000000000000000000000000") return true;
-  return saltSlice === address;
-}
-
-/**
  * Returns a random hex value.
  * @param length Number of bytes to get.
  */
