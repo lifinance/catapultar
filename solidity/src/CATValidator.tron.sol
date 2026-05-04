@@ -164,7 +164,7 @@ contract CATValidatorTron is EIP712, ReentrancyGuard {
     ) internal {
         token == address(0)
             ? SafeTransferLib.safeTransferETH(dest, amount)
-            : SafeTransferLibTron.tronSafeTransfer(token, dest, amount);
+            : SafeTransferLibTron.safeTransfer(token, dest, amount);
     }
 
     /**

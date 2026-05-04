@@ -42,7 +42,7 @@ contract MockTokenSenderTron {
         uint256 amount,
         address recipient
     ) external {
-        SafeTransferLibTron.tronSafeTransfer(token, recipient, amount);
+        SafeTransferLibTron.safeTransfer(token, recipient, amount);
     }
 }
 

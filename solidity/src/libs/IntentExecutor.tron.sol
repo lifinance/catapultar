@@ -201,7 +201,7 @@ contract IntentExecutorTron is ReentrancyGuard {
             if (target.recipient == address(0)) revert ZeroRecipient();
             uint256 balance = SafeTransferLib.balanceOf(target.token, address(this));
             if (balance > 0) {
-                SafeTransferLibTron.tronSafeTransfer(target.token, target.recipient, balance);
+                SafeTransferLibTron.safeTransfer(target.token, target.recipient, balance);
                 emit Swept(target.token, target.recipient, balance);
             }
         }

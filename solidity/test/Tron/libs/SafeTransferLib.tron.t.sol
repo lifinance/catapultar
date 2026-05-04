@@ -12,12 +12,12 @@ import { MockTronUSDT } from "../../mocks/MockTronUSDT.sol";
 
 /// @dev Harness to expose library functions for testing.
 contract SafeTransferLibHarness {
-    function tronSafeTransfer(
+    function safeTransfer(
         address token,
         address to,
         uint256 amount
     ) external {
-        SafeTransferLibTron.tronSafeTransfer(token, to, amount);
+        SafeTransferLibTron.safeTransfer(token, to, amount);
     }
 
     function safeTransferFrom(
@@ -67,68 +67,68 @@ contract SafeTransferLibTronTest is Test {
         recipient = makeAddr("recipient");
     }
 
-    // -- tronSafeTransfer with MockTronUSDT (broken transfer) --
+    // -- safeTransfer with MockTronUSDT (broken transfer) --
 
-    function test_tronSafeTransfer_tronUsdt_succeeds() external {
+    function test_safeTransfer_tronUsdt_succeeds() external {
         uint256 amount = 1000e6;
         tronUsdt.mint(address(harness), amount);
 
-        harness.tronSafeTransfer(address(tronUsdt), recipient, amount);
+        harness.safeTransfer(address(tronUsdt), recipient, amount);
 
         assertEq(tronUsdt.balanceOf(recipient), amount);
         assertEq(tronUsdt.balanceOf(address(harness)), 0);
     }
 
-    function test_tronSafeTransfer_tronUsdt_multipleTransfers() external {
+    function test_safeTransfer_tronUsdt_multipleTransfers() external {
         uint256 total = 3000e6;
         tronUsdt.mint(address(harness), total);
 
-        harness.tronSafeTransfer(address(tronUsdt), recipient, 1000e6);
-        harness.tronSafeTransfer(address(tronUsdt), recipient, 1000e6);
-        harness.tronSafeTransfer(address(tronUsdt), recipient, 1000e6);
+        harness.safeTransfer(address(tronUsdt), recipient, 1000e6);
+        harness.safeTransfer(address(tronUsdt), recipient, 1000e6);
+        harness.safeTransfer(address(tronUsdt), recipient, 1000e6);
 
         assertEq(tronUsdt.balanceOf(recipient), total);
         assertEq(tronUsdt.balanceOf(address(harness)), 0);
     }
 
-    function test_fuzz_tronSafeTransfer_tronUsdt(
+    function test_fuzz_safeTransfer_tronUsdt(
         uint256 amount
     ) external {
         vm.assume(amount > 0);
         tronUsdt.mint(address(harness), amount);
 
-        harness.tronSafeTransfer(address(tronUsdt), recipient, amount);
+        harness.safeTransfer(address(tronUsdt), recipient, amount);
 
         assertEq(tronUsdt.balanceOf(recipient), amount);
         assertEq(tronUsdt.balanceOf(address(harness)), 0);
     }
 
-    // -- tronSafeTransfer with standard ERC20 --
+    // -- safeTransfer with standard ERC20 --
 
-    function test_tronSafeTransfer_standardToken_succeeds() external {
+    function test_safeTransfer_standardToken_succeeds() external {
         uint256 amount = 1 ether;
         standardToken.mint(address(harness), amount);
 
-        harness.tronSafeTransfer(address(standardToken), recipient, amount);
+        harness.safeTransfer(address(standardToken), recipient, amount);
 
         assertEq(standardToken.balanceOf(recipient), amount);
         assertEq(standardToken.balanceOf(address(harness)), 0);
     }
 
-    // -- tronSafeTransfer reverts --
+    // -- safeTransfer reverts --
 
-    function test_tronSafeTransfer_revertsOnInsufficientBalance() external {
+    function test_safeTransfer_revertsOnInsufficientBalance() external {
         tronUsdt.mint(address(harness), 100e6);
 
         vm.expectRevert();
-        harness.tronSafeTransfer(address(tronUsdt), recipient, 200e6);
+        harness.safeTransfer(address(tronUsdt), recipient, 200e6);
     }
 
-    function test_tronSafeTransfer_revertsOnNoCode() external {
+    function test_safeTransfer_revertsOnNoCode() external {
         address noCode = makeAddr("noCode");
 
         vm.expectRevert();
-        harness.tronSafeTransfer(noCode, recipient, 1 ether);
+        harness.safeTransfer(noCode, recipient, 1 ether);
     }
 
     // -- safeTransferFrom (Solady original, should work normally) --

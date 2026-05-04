@@ -8,6 +8,8 @@ import { MockERC20 } from "solady/test/utils/mocks/MockERC20.sol";
 
 import { IntentExecutor } from "../../src/libs/IntentExecutor.sol";
 
+import { MockTronUSDT } from "../mocks/MockTronUSDT.sol";
+
 /// @dev USDT-style token: reverts when approving a non-zero amount over an existing non-zero allowance.
 contract MockUSDT is MockERC20 {
     constructor() MockERC20("Tether USD", "USDT", 6) { }
@@ -492,6 +494,24 @@ contract IntentExecutorTest is Test {
         assertEq(tokenA.balanceOf(feeCollector), feeAmount);
         assertEq(tokenB.balanceOf(recipient), swapOutput);
         assertEq(tokenB.balanceOf(address(executor)), 0);
+    }
+
+    // -- Tron USDT regression: safeTransfer reverts on false-returning token --
+
+    /// @dev Confirms that the standard IntentExecutor cannot sweep MockTronUSDT.
+    ///      This is the failure mode that IntentExecutorTron was created to fix.
+    function testRevert_executeAndSweep_tronUsdtBreaksStandardContract() external {
+        MockTronUSDT tronUsdt = new MockTronUSDT();
+        uint256 amount = 1000e6;
+        tronUsdt.mint(address(executor), amount);
+
+        IntentExecutor.Approval[] memory approvals = new IntentExecutor.Approval[](0);
+        IntentExecutor.Call3[] memory calls = new IntentExecutor.Call3[](0);
+        IntentExecutor.SweepTarget[] memory sweeps = new IntentExecutor.SweepTarget[](1);
+        sweeps[0] = IntentExecutor.SweepTarget({ token: address(tronUsdt), recipient: recipient });
+
+        vm.expectRevert();
+        executor.executeAndSweep(approvals, calls, sweeps);
     }
 
     // -- Helpers --
