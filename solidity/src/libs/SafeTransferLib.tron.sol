@@ -8,14 +8,20 @@ import { SafeTransferLib } from "solady/src/utils/SafeTransferLib.sol";
 /// This library replaces transfer() with an approve + transferFrom pattern since those functions
 /// return true correctly on Tron USDT.
 library SafeTransferLibTron {
-    function safeTransfer(address token, address to, uint256 amount) internal {
+    function safeTransfer(
+        address token,
+        address to,
+        uint256 amount
+    ) internal {
         if (_selfAllowance(token) < amount) {
             SafeTransferLib.safeApproveWithRetry(token, address(this), type(uint256).max);
         }
         SafeTransferLib.safeTransferFrom(token, address(this), to, amount);
     }
 
-    function _selfAllowance(address token) private view returns (uint256 result) {
+    function _selfAllowance(
+        address token
+    ) private view returns (uint256 result) {
         assembly ("memory-safe") {
             let m := mload(0x40)
             let self := address()
