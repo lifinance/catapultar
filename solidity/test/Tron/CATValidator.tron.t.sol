@@ -212,34 +212,42 @@ contract CATValidatorTronTest is Test {
         uint256 inAmount = 1000e6;
         uint256 outAmount = 900e6;
 
-        MockERC20 inToken = new MockERC20("In", "IN", 18);
-        inToken.mint(account, inAmount);
-        vm.prank(account);
-        inToken.approve(address(validator), inAmount);
+        address inToken;
+        {
+            MockERC20 token = new MockERC20("In", "IN", 18);
+            inToken = address(token);
+            token.mint(account, inAmount);
+            vm.prank(account);
+            token.approve(address(validator), inAmount);
+        }
 
         MockTokenSenderTron sender = new MockTokenSenderTron();
         tronUsdt.mint(address(sender), outAmount);
 
         AllowanceSpend[] memory allowances = new AllowanceSpend[](1);
-        allowances[0] = AllowanceSpend({ token: address(inToken), allocated: inAmount, spend: inAmount });
+        allowances[0] = AllowanceSpend({ token: inToken, allocated: inAmount, spend: inAmount });
 
         Outcome[] memory outcomes = new Outcome[](1);
         outcomes[0] = Outcome({ token: address(tronUsdt), amount: outAmount, destination: dest });
 
-        bytes32 th = _typehash(allowances, outcomes, executor, 1);
-        bytes32 domainSeparator = validator.DOMAIN_SEPARATOR();
-        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", domainSeparator, th));
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(key, digest);
+        bytes memory sig;
+        {
+            bytes32 digest = keccak256(
+                abi.encodePacked("\x19\x01", validator.DOMAIN_SEPARATOR(), _typehash(allowances, outcomes, executor, 1))
+            );
+            (uint8 v, bytes32 r, bytes32 s) = vm.sign(key, digest);
+            sig = abi.encodePacked(r, s, v);
+        }
 
         bytes memory execPayload =
             abi.encodeCall(MockTokenSenderTron.sendTo, (address(tronUsdt), outAmount, address(validator)));
 
         vm.prank(executor);
-        validator.entry(address(sender), execPayload, account, 1, allowances, outcomes, abi.encodePacked(r, s, v));
+        validator.entry(address(sender), execPayload, account, 1, allowances, outcomes, sig);
 
         assertEq(tronUsdt.balanceOf(dest), outAmount);
         assertEq(tronUsdt.balanceOf(address(validator)), 0);
-        assertEq(inToken.balanceOf(address(executor)), 0);
+        assertEq(MockERC20(inToken).balanceOf(address(executor)), 0);
     }
 
     // -----------------------------------------------------------------------
