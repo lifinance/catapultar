@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.17;
+pragma solidity ^0.8.30;
 
 import { LibBit } from "solady/src/utils/LibBit.sol";
 import { ReentrancyGuard } from "solady/src/utils/ReentrancyGuard.sol";
