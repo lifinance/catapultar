@@ -156,7 +156,7 @@ contract CATValidator is EIP712, ReentrancyGuard {
         address token,
         uint256 amount,
         address dest
-    ) internal {
+    ) internal virtual {
         token == address(0)
             ? SafeTransferLib.safeTransferETH(dest, amount)
             : SafeTransferLib.safeTransfer(token, dest, amount);

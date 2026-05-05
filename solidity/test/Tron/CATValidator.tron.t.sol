@@ -7,7 +7,9 @@ import { MockERC20 } from "solady/test/utils/mocks/MockERC20.sol";
 
 import { SafeTransferLibTron } from "../../src/libs/SafeTransferLib.tron.sol";
 
-import { AllowanceSpend, CATValidatorTron, Outcome } from "../../src/CATValidator.tron.sol";
+import { CATValidator } from "../../src/CATValidator.sol";
+import { CATValidatorTron } from "../../src/CATValidator.tron.sol";
+import { AllowanceSpend, Outcome } from "../../src/libs/LibExecutionConstraint.sol";
 
 import { MockTronUSDT } from "../mocks/MockTronUSDT.sol";
 
@@ -123,7 +125,7 @@ contract CATValidatorTronTest is Test {
         Outcome[] memory outcomes = new Outcome[](1);
         outcomes[0] = Outcome({ token: address(tronUsdt), amount: required, destination: dest });
 
-        vm.expectRevert(abi.encodeWithSelector(CATValidatorTron.InvalidTokenAmount.selector, required, required - 1));
+        vm.expectRevert(abi.encodeWithSelector(CATValidator.InvalidTokenAmount.selector, required, required - 1));
         validator.validatePayment(address(this), outcomes);
     }
 

@@ -5,6 +5,7 @@ import { Test } from "forge-std/src/Test.sol";
 
 import { MockERC20 } from "solady/test/utils/mocks/MockERC20.sol";
 
+import { IntentExecutor } from "../../../src/libs/IntentExecutor.sol";
 import { IntentExecutorTron } from "../../../src/libs/IntentExecutor.tron.sol";
 
 import { MockTronUSDT } from "../../mocks/MockTronUSDT.sol";
@@ -28,13 +29,13 @@ contract IntentExecutorTronTest is Test {
         uint256 amount = 1000e6;
         tronUsdt.mint(address(executor), amount);
 
-        IntentExecutorTron.Approval[] memory approvals = new IntentExecutorTron.Approval[](0);
-        IntentExecutorTron.Call3[] memory calls = new IntentExecutorTron.Call3[](0);
-        IntentExecutorTron.SweepTarget[] memory sweeps = new IntentExecutorTron.SweepTarget[](1);
-        sweeps[0] = IntentExecutorTron.SweepTarget({ token: address(tronUsdt), recipient: recipient });
+        IntentExecutor.Approval[] memory approvals = new IntentExecutor.Approval[](0);
+        IntentExecutor.Call3[] memory calls = new IntentExecutor.Call3[](0);
+        IntentExecutor.SweepTarget[] memory sweeps = new IntentExecutor.SweepTarget[](1);
+        sweeps[0] = IntentExecutor.SweepTarget({ token: address(tronUsdt), recipient: recipient });
 
         vm.expectEmit(true, true, false, true);
-        emit IntentExecutorTron.Swept(address(tronUsdt), recipient, amount);
+        emit IntentExecutor.Swept(address(tronUsdt), recipient, amount);
 
         executor.executeAndSweep(approvals, calls, sweeps);
 
@@ -48,11 +49,11 @@ contract IntentExecutorTronTest is Test {
         tronUsdt.mint(address(executor), usdtAmount);
         standardToken.mint(address(executor), stdAmount);
 
-        IntentExecutorTron.Approval[] memory approvals = new IntentExecutorTron.Approval[](0);
-        IntentExecutorTron.Call3[] memory calls = new IntentExecutorTron.Call3[](0);
-        IntentExecutorTron.SweepTarget[] memory sweeps = new IntentExecutorTron.SweepTarget[](2);
-        sweeps[0] = IntentExecutorTron.SweepTarget({ token: address(tronUsdt), recipient: recipient });
-        sweeps[1] = IntentExecutorTron.SweepTarget({ token: address(standardToken), recipient: recipient });
+        IntentExecutor.Approval[] memory approvals = new IntentExecutor.Approval[](0);
+        IntentExecutor.Call3[] memory calls = new IntentExecutor.Call3[](0);
+        IntentExecutor.SweepTarget[] memory sweeps = new IntentExecutor.SweepTarget[](2);
+        sweeps[0] = IntentExecutor.SweepTarget({ token: address(tronUsdt), recipient: recipient });
+        sweeps[1] = IntentExecutor.SweepTarget({ token: address(standardToken), recipient: recipient });
 
         executor.executeAndSweep(approvals, calls, sweeps);
 
@@ -68,10 +69,10 @@ contract IntentExecutorTronTest is Test {
         vm.assume(amount > 0);
         tronUsdt.mint(address(executor), amount);
 
-        IntentExecutorTron.Approval[] memory approvals = new IntentExecutorTron.Approval[](0);
-        IntentExecutorTron.Call3[] memory calls = new IntentExecutorTron.Call3[](0);
-        IntentExecutorTron.SweepTarget[] memory sweeps = new IntentExecutorTron.SweepTarget[](1);
-        sweeps[0] = IntentExecutorTron.SweepTarget({ token: address(tronUsdt), recipient: recipient });
+        IntentExecutor.Approval[] memory approvals = new IntentExecutor.Approval[](0);
+        IntentExecutor.Call3[] memory calls = new IntentExecutor.Call3[](0);
+        IntentExecutor.SweepTarget[] memory sweeps = new IntentExecutor.SweepTarget[](1);
+        sweeps[0] = IntentExecutor.SweepTarget({ token: address(tronUsdt), recipient: recipient });
 
         executor.executeAndSweep(approvals, calls, sweeps);
 
@@ -87,10 +88,10 @@ contract IntentExecutorTronTest is Test {
         vm.deal(address(executor), nativeAmount);
         tronUsdt.mint(address(executor), tokenAmount);
 
-        IntentExecutorTron.Approval[] memory approvals = new IntentExecutorTron.Approval[](0);
-        IntentExecutorTron.Call3Value[] memory calls = new IntentExecutorTron.Call3Value[](0);
-        IntentExecutorTron.SweepTarget[] memory sweeps = new IntentExecutorTron.SweepTarget[](1);
-        sweeps[0] = IntentExecutorTron.SweepTarget({ token: address(tronUsdt), recipient: recipient });
+        IntentExecutor.Approval[] memory approvals = new IntentExecutor.Approval[](0);
+        IntentExecutor.Call3Value[] memory calls = new IntentExecutor.Call3Value[](0);
+        IntentExecutor.SweepTarget[] memory sweeps = new IntentExecutor.SweepTarget[](1);
+        sweeps[0] = IntentExecutor.SweepTarget({ token: address(tronUsdt), recipient: recipient });
 
         executor.executeAndSweepNative(approvals, calls, sweeps, payable(recipient));
 
@@ -103,11 +104,11 @@ contract IntentExecutorTronTest is Test {
     // -- Approvals still work --
 
     function test_approval_setsMaxAllowance() external {
-        IntentExecutorTron.Approval[] memory approvals = new IntentExecutorTron.Approval[](1);
-        approvals[0] = IntentExecutorTron.Approval({ token: address(tronUsdt), spender: address(this) });
+        IntentExecutor.Approval[] memory approvals = new IntentExecutor.Approval[](1);
+        approvals[0] = IntentExecutor.Approval({ token: address(tronUsdt), spender: address(this) });
 
-        IntentExecutorTron.Call3[] memory calls = new IntentExecutorTron.Call3[](0);
-        IntentExecutorTron.SweepTarget[] memory sweeps = new IntentExecutorTron.SweepTarget[](0);
+        IntentExecutor.Call3[] memory calls = new IntentExecutor.Call3[](0);
+        IntentExecutor.SweepTarget[] memory sweeps = new IntentExecutor.SweepTarget[](0);
 
         executor.executeAndSweep(approvals, calls, sweeps);
 
@@ -121,19 +122,19 @@ contract IntentExecutorTronTest is Test {
         uint256 feeAmount = inputAmount / 100;
         tronUsdt.mint(address(executor), inputAmount);
 
-        IntentExecutorTron.Approval[] memory approvals = new IntentExecutorTron.Approval[](1);
-        approvals[0] = IntentExecutorTron.Approval({ token: address(tronUsdt), spender: address(this) });
+        IntentExecutor.Approval[] memory approvals = new IntentExecutor.Approval[](1);
+        approvals[0] = IntentExecutor.Approval({ token: address(tronUsdt), spender: address(this) });
 
         address feeCollector = makeAddr("feeCollector");
-        IntentExecutorTron.Call3[] memory calls = new IntentExecutorTron.Call3[](1);
-        calls[0] = IntentExecutorTron.Call3({
+        IntentExecutor.Call3[] memory calls = new IntentExecutor.Call3[](1);
+        calls[0] = IntentExecutor.Call3({
             target: address(tronUsdt),
             allowFailure: false,
             callData: abi.encodeCall(MockERC20.transfer, (feeCollector, feeAmount))
         });
 
-        IntentExecutorTron.SweepTarget[] memory sweeps = new IntentExecutorTron.SweepTarget[](1);
-        sweeps[0] = IntentExecutorTron.SweepTarget({ token: address(tronUsdt), recipient: recipient });
+        IntentExecutor.SweepTarget[] memory sweeps = new IntentExecutor.SweepTarget[](1);
+        sweeps[0] = IntentExecutor.SweepTarget({ token: address(tronUsdt), recipient: recipient });
 
         executor.executeAndSweep(approvals, calls, sweeps);
 
@@ -147,12 +148,12 @@ contract IntentExecutorTronTest is Test {
     function testRevert_sweepToZeroAddress() external {
         tronUsdt.mint(address(executor), 1000e6);
 
-        IntentExecutorTron.Approval[] memory approvals = new IntentExecutorTron.Approval[](0);
-        IntentExecutorTron.Call3[] memory calls = new IntentExecutorTron.Call3[](0);
-        IntentExecutorTron.SweepTarget[] memory sweeps = new IntentExecutorTron.SweepTarget[](1);
-        sweeps[0] = IntentExecutorTron.SweepTarget({ token: address(tronUsdt), recipient: address(0) });
+        IntentExecutor.Approval[] memory approvals = new IntentExecutor.Approval[](0);
+        IntentExecutor.Call3[] memory calls = new IntentExecutor.Call3[](0);
+        IntentExecutor.SweepTarget[] memory sweeps = new IntentExecutor.SweepTarget[](1);
+        sweeps[0] = IntentExecutor.SweepTarget({ token: address(tronUsdt), recipient: address(0) });
 
-        vm.expectRevert(abi.encodeWithSelector(IntentExecutorTron.ZeroRecipient.selector));
+        vm.expectRevert(abi.encodeWithSelector(IntentExecutor.ZeroRecipient.selector));
         executor.executeAndSweep(approvals, calls, sweeps);
     }
 
@@ -162,10 +163,10 @@ contract IntentExecutorTronTest is Test {
         uint256 amount = 1 ether;
         standardToken.mint(address(executor), amount);
 
-        IntentExecutorTron.Approval[] memory approvals = new IntentExecutorTron.Approval[](0);
-        IntentExecutorTron.Call3[] memory calls = new IntentExecutorTron.Call3[](0);
-        IntentExecutorTron.SweepTarget[] memory sweeps = new IntentExecutorTron.SweepTarget[](1);
-        sweeps[0] = IntentExecutorTron.SweepTarget({ token: address(standardToken), recipient: recipient });
+        IntentExecutor.Approval[] memory approvals = new IntentExecutor.Approval[](0);
+        IntentExecutor.Call3[] memory calls = new IntentExecutor.Call3[](0);
+        IntentExecutor.SweepTarget[] memory sweeps = new IntentExecutor.SweepTarget[](1);
+        sweeps[0] = IntentExecutor.SweepTarget({ token: address(standardToken), recipient: recipient });
 
         executor.executeAndSweep(approvals, calls, sweeps);
 

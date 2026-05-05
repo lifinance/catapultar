@@ -48,7 +48,7 @@ contract CatapultarFactory {
         bytes32[] calldata owner,
         bytes32 salt
     ) external payable returns (address payable proxy) {
-        proxy = payable(LibClone.cloneDeterministic_PUSH0(EXECUTOR, _salt(salt, ktp, owner)));
+        proxy = payable(_cloneDeterministic(_salt(salt, ktp, owner)));
 
         Catapultar(payable(proxy)).init{ value: msg.value }(ktp, owner);
     }
@@ -60,7 +60,7 @@ contract CatapultarFactory {
         bytes32[] calldata owner,
         bytes32 salt
     ) external view returns (address proxy) {
-        return LibClone.predictDeterministicAddress_PUSH0(EXECUTOR, _salt(salt, ktp, owner), address(this));
+        return _predictCloneAddress(_salt(salt, ktp, owner));
     }
 
     function deployWithDigest(
@@ -78,7 +78,7 @@ contract CatapultarFactory {
             nonce := add(isSignature, 1)
         }
         bytes32 saltWithDigest = EfficientHashLib.hash(_salt(salt, ktp, owner), digest, bytes32(nonce));
-        proxy = payable(LibClone.cloneDeterministic_PUSH0(EXECUTOR, saltWithDigest));
+        proxy = payable(_cloneDeterministic(saltWithDigest));
 
         // forge-lint: disable-next-line(unsafe-typecast)
         // wake-disable-next-line reentrancy
@@ -103,7 +103,7 @@ contract CatapultarFactory {
             nonce := add(isSignature, 1)
         }
         bytes32 saltWithDigest = EfficientHashLib.hash(_salt(salt, ktp, owner), digest, bytes32(nonce));
-        return LibClone.predictDeterministicAddress_PUSH0(EXECUTOR, saltWithDigest, address(this));
+        return _predictCloneAddress(saltWithDigest);
     }
 
     function deployUpgradeable(
@@ -111,7 +111,7 @@ contract CatapultarFactory {
         bytes32[] calldata owner,
         bytes32 salt
     ) external payable returns (address payable proxy) {
-        proxy = payable(LibClone.deployDeterministicERC1967(EXECUTOR, _salt(salt, ktp, owner)));
+        proxy = payable(_deployUpgradeable(_salt(salt, ktp, owner)));
 
         Catapultar(payable(proxy)).init{ value: msg.value }(ktp, owner);
     }
@@ -125,7 +125,31 @@ contract CatapultarFactory {
         bytes32[] calldata owner,
         bytes32 salt
     ) external view returns (address proxy) {
-        return LibClone.predictDeterministicAddressERC1967(EXECUTOR, _salt(salt, ktp, owner), address(this));
+        return _predictUpgradeableAddress(_salt(salt, ktp, owner));
+    }
+
+    function _cloneDeterministic(
+        bytes32 salt
+    ) internal virtual returns (address) {
+        return LibClone.cloneDeterministic_PUSH0(EXECUTOR, salt);
+    }
+
+    function _predictCloneAddress(
+        bytes32 salt
+    ) internal view virtual returns (address) {
+        return LibClone.predictDeterministicAddress_PUSH0(EXECUTOR, salt, address(this));
+    }
+
+    function _deployUpgradeable(
+        bytes32 salt
+    ) internal virtual returns (address) {
+        return LibClone.deployDeterministicERC1967(EXECUTOR, salt);
+    }
+
+    function _predictUpgradeableAddress(
+        bytes32 salt
+    ) internal view virtual returns (address) {
+        return LibClone.predictDeterministicAddressERC1967(EXECUTOR, salt, address(this));
     }
 
     // --- Helpers --- //
