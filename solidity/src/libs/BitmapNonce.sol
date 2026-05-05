@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.30;
+pragma solidity ^0.8.25;
 
 /// @author Uniswap (https://github.com/Uniswap/permit2/blob/main/src/SignatureTransfer.sol)
 abstract contract BitmapNonce {
