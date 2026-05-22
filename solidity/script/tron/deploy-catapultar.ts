@@ -18,23 +18,25 @@
  *   --step CatapultarFactory
  *   --step CATValidator
  *   --step IntentExecutor
- *   --step 1   (same as CatapultarFactory; 2 = CATValidator, 3 = IntentExecutor)
+ *   --step McopyTest   (not deployed by default)
+ *   --step 1   (same as CatapultarFactory; 2 = CATValidator, 3 = IntentExecutor, 4 = McopyTest)
  *   Repeat --step to deploy a subset, e.g. --step 1 --step 3
  */
 
+import { readFile } from 'fs/promises'
 import { resolve } from 'path'
 
 import { consola } from 'consola'
 
 import {
   TronContractDeployer,
-  loadForgeArtifact,
   tronScanTransactionUrl,
   getPrivateKey,
   getTronRpcUrl,
   getTronGridAPIKey,
   TRON_PRO_API_KEY_HEADER,
   promptEnergyRentalReminder,
+  type IForgeArtifact,
   type ITronDeploymentConfig,
   type ITronDeploymentResult,
   type TronTvmNetworkName,
@@ -45,32 +47,79 @@ import {
 const ARTIFACTS_DIR = resolve(import.meta.dir, '../../out')
 const DEPLOYMENTS_FILE = resolve(import.meta.dir, '../../deployments/tron.json')
 
-/** Contracts to deploy in order (no constructor args for any). */
-const CONTRACTS_TO_DEPLOY = [
+async function loadTronArtifact(
+  contractName: string,
+  sourceFile: string
+): Promise<IForgeArtifact> {
+  const artifactPath = resolve(
+    ARTIFACTS_DIR,
+    `${sourceFile}.sol/${contractName}.json`
+  )
+  const artifact = JSON.parse(await readFile(artifactPath, 'utf-8'))
+  if (!artifact.abi || !artifact.bytecode?.object)
+    throw new Error(
+      `Invalid artifact for ${contractName}: missing ABI or bytecode`
+    )
+  consola.info(`Loaded ${contractName} from: ${artifactPath}`)
+  return artifact
+}
+
+/** All known contracts that can be deployed via --step. */
+const ALL_CONTRACTS = [
   'CatapultarFactory',
   'CATValidator',
   'IntentExecutor',
+  'McopyTest',
 ] as const
 
-type DeployStepName = (typeof CONTRACTS_TO_DEPLOY)[number]
+type DeployStepName = (typeof ALL_CONTRACTS)[number]
+
+/** Contracts deployed by default (without --step). */
+const DEFAULT_CONTRACTS: readonly DeployStepName[] = [
+  'CatapultarFactory',
+  'CATValidator',
+  'IntentExecutor',
+]
+
+const TRON_CONTRACT: Record<
+  DeployStepName,
+  { contractName: string; sourceFile: string }
+> = {
+  CatapultarFactory: {
+    contractName: 'CatapultarFactoryTron',
+    sourceFile: 'CatapultarFactory.tron',
+  },
+  CATValidator: {
+    contractName: 'CATValidatorTron',
+    sourceFile: 'CATValidator.tron',
+  },
+  IntentExecutor: {
+    contractName: 'IntentExecutorTron',
+    sourceFile: 'IntentExecutor.tron',
+  },
+  McopyTest: {
+    contractName: 'McopyTestTron',
+    sourceFile: 'McopyTest.tron',
+  },
+}
 
 function resolveStepArg(raw: string): DeployStepName {
   if (/^\d+$/.test(raw)) {
     const n = Number.parseInt(raw, 10)
-    if (n < 1 || n > CONTRACTS_TO_DEPLOY.length) {
+    if (n < 1 || n > ALL_CONTRACTS.length) {
       consola.error(
-        `--step index must be between 1 and ${CONTRACTS_TO_DEPLOY.length} (${CONTRACTS_TO_DEPLOY.join(' → ')})`
+        `--step index must be between 1 and ${ALL_CONTRACTS.length} (${ALL_CONTRACTS.join(' → ')})`
       )
       process.exit(1)
     }
-    return CONTRACTS_TO_DEPLOY[n - 1]!
+    return ALL_CONTRACTS[n - 1]!
   }
-  const match = CONTRACTS_TO_DEPLOY.find(
+  const match = ALL_CONTRACTS.find(
     (c) => c.toLowerCase() === raw.toLowerCase()
   )
   if (!match) {
     consola.error(
-      `Unknown --step "${raw}". Use: ${CONTRACTS_TO_DEPLOY.join(', ')}, or 1–${CONTRACTS_TO_DEPLOY.length}`
+      `Unknown --step "${raw}". Use: ${ALL_CONTRACTS.join(', ')}, or 1–${ALL_CONTRACTS.length}`
     )
     process.exit(1)
   }
@@ -84,7 +133,7 @@ function parseStepFlags(args: string[]): DeployStepName[] | undefined {
     if (args[i] !== '--step') continue
     const raw = args[i + 1]
     if (!raw || raw.startsWith('--')) {
-      consola.error('--step requires a contract name or index (1–3)')
+      consola.error(`--step requires a contract name or index (1–${ALL_CONTRACTS.length})`)
       process.exit(1)
     }
     steps.push(resolveStepArg(raw))
@@ -92,7 +141,7 @@ function parseStepFlags(args: string[]): DeployStepName[] | undefined {
   }
   if (steps.length === 0) return undefined
   const selected = new Set(steps)
-  return CONTRACTS_TO_DEPLOY.filter((c) => selected.has(c))
+  return ALL_CONTRACTS.filter((c) => selected.has(c))
 }
 
 // ── CLI argument parsing ───────────────────────────────────────────────────────
@@ -151,7 +200,7 @@ async function main() {
     steps,
   } = parseArgs()
 
-  const contractsToRun = steps ?? [...CONTRACTS_TO_DEPLOY]
+  const contractsToRun = steps ?? [...DEFAULT_CONTRACTS]
 
   consola.info(`Deploying Catapultar contracts to ${network}...`)
   if (steps) {
@@ -194,10 +243,11 @@ async function main() {
   }> = []
 
   for (const contractName of contractsToRun) {
-    consola.info(`\n--- Deploying ${contractName} ---`)
+    const { contractName: tronName, sourceFile } = TRON_CONTRACT[contractName]
+    consola.info(`\n--- Deploying ${contractName} (${tronName}) ---`)
 
     try {
-      const artifact = await loadForgeArtifact(contractName, ARTIFACTS_DIR)
+      const artifact = await loadTronArtifact(tronName, sourceFile)
       const result = await deployer.deployContract(artifact)
 
       results.push({ contract: contractName, result })
@@ -208,6 +258,10 @@ async function main() {
       consola.info(`  TX: ${tronScanTransactionUrl(network, result.transactionId)}`)
       consola.info(`  Cost: ${result.actualCost.trxCost} TRX`)
     } catch (error: any) {
+      if (dryRun && /insufficient balance/i.test(error.message)) {
+        consola.warn(`${contractName}: ${error.message}`)
+        continue
+      }
       consola.error(`Failed to deploy ${contractName}: ${error.message}`)
       process.exit(1)
     }
