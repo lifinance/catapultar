@@ -4,6 +4,8 @@ pragma solidity ^0.8.30;
 import { SafeTransferLib } from "solady/src/utils/SafeTransferLib.sol";
 import { MockERC20 } from "solady/test/utils/mocks/MockERC20.sol";
 
+import { MockTronUSDT } from "../mocks/MockTronUSDT.sol";
+
 import { LibExecutionConstraintTest } from "./libs/LibExecutionConstraint.t.sol";
 
 import { CATValidator } from "../../src/CATValidator.sol";
@@ -472,6 +474,25 @@ contract CATValidatorTest is LibExecutionConstraintTest {
         // Demonstrate that once the token stops failing, balanceOf works correctly.
         token.setFailing(false);
         assertEq(validator.balanceOf(address(token), target), realBalance);
+    }
+
+    // -----------------------------------------------------------------------
+    // Tron USDT regression: safeTransfer reverts on false-returning token
+    // -----------------------------------------------------------------------
+
+    /// @dev Confirms that the standard CATValidator cannot forward MockTronUSDT as an outcome.
+    ///      This is the failure mode that CATValidatorTron was created to fix.
+    function testRevert_validatePayment_tronUsdtBreaksStandardContract() external {
+        address dest = makeAddr("dest");
+        uint256 amount = 1000e6;
+        MockTronUSDT tronUsdt = new MockTronUSDT();
+        tronUsdt.mint(address(validator), amount);
+
+        Outcome[] memory outcomes = new Outcome[](1);
+        outcomes[0] = Outcome({ token: address(tronUsdt), amount: amount, destination: dest });
+
+        vm.expectRevert();
+        validator.validatePayment(address(this), outcomes);
     }
 }
 

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LGPL-3.0-only
-pragma solidity ^0.8.30;
+pragma solidity ^0.8.25;
 
 import { EIP712 } from "solady/src/utils/EIP712.sol";
 import { ReentrancyGuard } from "solady/src/utils/ReentrancyGuard.sol";
@@ -156,7 +156,7 @@ contract CATValidator is EIP712, ReentrancyGuard {
         address token,
         uint256 amount,
         address dest
-    ) internal {
+    ) internal virtual {
         token == address(0)
             ? SafeTransferLib.safeTransferETH(dest, amount)
             : SafeTransferLib.safeTransfer(token, dest, amount);

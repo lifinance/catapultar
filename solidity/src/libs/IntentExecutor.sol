@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.17;
+pragma solidity ^0.8.25;
 
 import { LibBit } from "solady/src/utils/LibBit.sol";
 import { ReentrancyGuard } from "solady/src/utils/ReentrancyGuard.sol";
@@ -198,10 +198,18 @@ contract IntentExecutor is ReentrancyGuard {
             if (target.recipient == address(0)) revert ZeroRecipient();
             uint256 balance = SafeTransferLib.balanceOf(target.token, address(this));
             if (balance > 0) {
-                SafeTransferLib.safeTransfer(target.token, target.recipient, balance);
+                _transfer(target.token, target.recipient, balance);
                 emit Swept(target.token, target.recipient, balance);
             }
         }
+    }
+
+    function _transfer(
+        address token,
+        address to,
+        uint256 amount
+    ) internal virtual {
+        SafeTransferLib.safeTransfer(token, to, amount);
     }
 
     /// @dev Executes an array of calls without value

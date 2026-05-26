@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: LGPL-3.0-only
-pragma solidity ^0.8.30;
+pragma solidity ^0.8.25;
 
 import { ERC7821 } from "solady/src/accounts/ERC7821.sol";
 import { EfficientHashLib } from "solady/src/utils/EfficientHashLib.sol";
