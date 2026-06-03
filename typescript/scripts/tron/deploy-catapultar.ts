@@ -1,8 +1,9 @@
 /**
- * Deploy Catapultar contracts to Tron.
+ * Deploy Catapultar Tron-variant contracts to Tron.
  *
- * Mirrors the Forge deploy.s.sol but uses TronWeb instead of CREATE2.
- * Deploy order: CatapultarFactory -> CATValidator -> IntentExecutor
+ * Only `.tron.sol` artifacts are deployed. Mirrors the Forge deploy.s.sol but
+ * uses TronWeb instead of CREATE2.
+ * Deploy order: CatapultarFactoryTron -> CATValidatorTron -> IntentExecutorTron
  *
  * Prerequisites:
  *   1. `cd catapultar/solidity && forge build`
@@ -11,15 +12,15 @@
  *      - RPC_URL_TRON (optional, defaults to https://api.trongrid.io)
  *      - TRONGRID_API_KEY (optional)
  *
- * Usage:
- *   bun run solidity/script/tron/deploy-catapultar.ts [--dry-run] [--testnet|--network tronshasta] [--private-key 0x...] [--rpc-url <url>] [--trongrid-api-key <key>]
+ * Usage (run from catapultar/typescript):
+ *   bun run scripts/tron/deploy-catapultar.ts [--dry-run] [--testnet|--network tronshasta] [--private-key 0x...] [--rpc-url <url>] [--trongrid-api-key <key>]
  *
  * Deploy only selected contracts (canonical order is always preserved):
- *   --step CatapultarFactory
- *   --step CATValidator
- *   --step IntentExecutor
- *   --step McopyTest   (not deployed by default)
- *   --step 1   (same as CatapultarFactory; 2 = CATValidator, 3 = IntentExecutor, 4 = McopyTest)
+ *   --step CatapultarFactoryTron
+ *   --step CATValidatorTron
+ *   --step IntentExecutorTron
+ *   --step McopyTestTron   (not deployed by default)
+ *   --step 1   (same as CatapultarFactoryTron; 2 = CATValidatorTron, 3 = IntentExecutorTron, 4 = McopyTestTron)
  *   Repeat --step to deploy a subset, e.g. --step 1 --step 3
  */
 
@@ -44,13 +45,31 @@ import {
 
 // ── Configuration ──────────────────────────────────────────────────────────────
 
-const ARTIFACTS_DIR = resolve(import.meta.dir, '../../out')
-const DEPLOYMENTS_FILE = resolve(import.meta.dir, '../../deployments/tron.json')
+const ARTIFACTS_DIR = resolve(import.meta.dir, '../../../solidity/out')
+const DEPLOYMENTS_FILE = resolve(
+  import.meta.dir,
+  '../../../solidity/deployments/tron.json'
+)
+
+/** Production contracts — deployed when no --step flags are provided. */
+const DEFAULT_CONTRACTS = [
+  'CatapultarFactoryTron',
+  'CATValidatorTron',
+  'IntentExecutorTron',
+] as const
+
+/** Opt-in contracts — only deployed when explicitly requested via --step. */
+const OPTIONAL_CONTRACTS = ['McopyTestTron'] as const
+
+/** Every contract selectable via --step. Must end in "Tron"; the source file is the name minus that suffix + ".tron.sol". */
+const ALL_CONTRACTS = [...DEFAULT_CONTRACTS, ...OPTIONAL_CONTRACTS] as const
+
+type DeployStepName = (typeof ALL_CONTRACTS)[number]
 
 async function loadTronArtifact(
-  contractName: string,
-  sourceFile: string
+  contractName: DeployStepName
 ): Promise<IForgeArtifact> {
+  const sourceFile = `${contractName.replace(/Tron$/, '')}.tron`
   const artifactPath = resolve(
     ARTIFACTS_DIR,
     `${sourceFile}.sol/${contractName}.json`
@@ -62,45 +81,6 @@ async function loadTronArtifact(
     )
   consola.info(`Loaded ${contractName} from: ${artifactPath}`)
   return artifact
-}
-
-/** All known contracts that can be deployed via --step. */
-const ALL_CONTRACTS = [
-  'CatapultarFactory',
-  'CATValidator',
-  'IntentExecutor',
-  'McopyTest',
-] as const
-
-type DeployStepName = (typeof ALL_CONTRACTS)[number]
-
-/** Contracts deployed by default (without --step). */
-const DEFAULT_CONTRACTS: readonly DeployStepName[] = [
-  'CatapultarFactory',
-  'CATValidator',
-  'IntentExecutor',
-]
-
-const TRON_CONTRACT: Record<
-  DeployStepName,
-  { contractName: string; sourceFile: string }
-> = {
-  CatapultarFactory: {
-    contractName: 'CatapultarFactoryTron',
-    sourceFile: 'CatapultarFactory.tron',
-  },
-  CATValidator: {
-    contractName: 'CATValidatorTron',
-    sourceFile: 'CATValidator.tron',
-  },
-  IntentExecutor: {
-    contractName: 'IntentExecutorTron',
-    sourceFile: 'IntentExecutor.tron',
-  },
-  McopyTest: {
-    contractName: 'McopyTestTron',
-    sourceFile: 'McopyTest.tron',
-  },
 }
 
 function resolveStepArg(raw: string): DeployStepName {
@@ -243,11 +223,10 @@ async function main() {
   }> = []
 
   for (const contractName of contractsToRun) {
-    const { contractName: tronName, sourceFile } = TRON_CONTRACT[contractName]
-    consola.info(`\n--- Deploying ${contractName} (${tronName}) ---`)
+    consola.info(`\n--- Deploying ${contractName} ---`)
 
     try {
-      const artifact = await loadTronArtifact(tronName, sourceFile)
+      const artifact = await loadTronArtifact(contractName)
       const result = await deployer.deployContract(artifact)
 
       results.push({ contract: contractName, result })
