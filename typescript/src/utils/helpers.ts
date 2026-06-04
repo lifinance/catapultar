@@ -35,12 +35,9 @@ export function asHex<T extends string = "">(
  * @param length Number of bytes to get.
  */
 export const random = (length: number): `0x${string}` =>
-  `0x${Array.from(
-    crypto.getRandomValues(new Uint8Array(Math.ceil((length * 2) / 2))),
-    (b) => b.toString(16).padStart(2, "0"),
-  )
-    .join("")
-    .slice(0, length * 2)}`;
+  `0x${Array.from(crypto.getRandomValues(new Uint8Array(length)), (b) =>
+    b.toString(16).padStart(2, "0"),
+  ).join("")}`;
 
 /**
  * Takes an pubkey array of a key type and pubkey structure and after validation returns it as an array.

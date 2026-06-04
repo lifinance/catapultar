@@ -33,7 +33,7 @@ export class ConstrainedAssetTransaction {
   }
 
   addAllowances(...allowances: Allowance[]) {
-    this.allowances = [...this.allowances, ...allowances];
+    this.allowances.push(...allowances);
   }
 
   /**
@@ -41,15 +41,12 @@ export class ConstrainedAssetTransaction {
    * To add the smart account as the recipient (address unknown at this stage), set address(0).
    */
   addOutcomes(...outcomes: Outcome[]) {
-    this.outcomes = [...this.outcomes, ...outcomes];
+    this.outcomes.push(...outcomes);
   }
 
   perpetual(state: boolean) {
-    this.constraintNonce = state
-      ? 0n
-      : this.constraintNonce !== 0n
-        ? this.constraintNonce
-        : 1n;
+    if (state) this.constraintNonce = 0n;
+    else if (this.constraintNonce === 0n) this.constraintNonce = 1n;
   }
 
   /**
@@ -88,51 +85,20 @@ export class ConstrainedAssetTransaction {
         });
       }
     }
-    // Set the signature that allows the validator to pull funds.
-    const executionConstraint: ExecutionConstraint = {
-      allowances: this.allowances,
-      outcomes: this.outcomes,
-      executor: executor,
-      nonce: this.constraintNonce,
-    };
-    const typehash = hashTypedData({
-      types: ExecutionConstraintTyped,
-      primaryType: "ExecutionConstraint",
-      message: executionConstraint,
-      domain: {
-        chainId: this.chainId,
-        name: "CAT Validator",
-        version: "1",
-        verifyingContract: validator,
-      },
-    });
-    calls.push({
-      to: zeroAddress,
-      value: 0n,
-      data: encodeFunctionData({
-        abi: CATAPULTAR_V0_1_0_ABI,
-        functionName: "setSignature",
-        args: [typehash, DigestApproval.Signature],
-      }),
-    });
-    // If a refund target has been provided, then we add a 1:1 refund.
-    if (refund) {
-      const refundOutcomes: Outcome[] = this.allowances.map((allowance) => ({
-        destination: refund,
-        amount: allowance.amount,
-        token: allowance.token,
-      }));
-
-      const refundExecutionConstraint: ExecutionConstraint = {
+    // Set the signature that allows the validator to pull funds. The approval is
+    // identical for the main constraint and the optional refund; only `outcomes`
+    // differ between them.
+    const pushConstraintApproval = (outcomes: Outcome[]) => {
+      const executionConstraint: ExecutionConstraint = {
         allowances: this.allowances,
-        outcomes: refundOutcomes,
-        executor: executor,
+        outcomes,
+        executor,
         nonce: this.constraintNonce,
       };
       const typehash = hashTypedData({
         types: ExecutionConstraintTyped,
         primaryType: "ExecutionConstraint",
-        message: refundExecutionConstraint,
+        message: executionConstraint,
         domain: {
           chainId: this.chainId,
           name: "CAT Validator",
@@ -149,6 +115,18 @@ export class ConstrainedAssetTransaction {
           args: [typehash, DigestApproval.Signature],
         }),
       });
+    };
+
+    pushConstraintApproval(this.outcomes);
+
+    // If a refund target has been provided, then we add a 1:1 refund.
+    if (refund) {
+      const refundOutcomes: Outcome[] = this.allowances.map((allowance) => ({
+        destination: refund,
+        amount: allowance.amount,
+        token: allowance.token,
+      }));
+      pushConstraintApproval(refundOutcomes);
     }
 
     const tx = new BaseTransaction();

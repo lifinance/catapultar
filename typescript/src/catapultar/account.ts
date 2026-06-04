@@ -105,27 +105,19 @@ export class CatapultarAccount<
   ): { call: Call; account: CatapultarAccount<V, undefined, AKT> } {
     let callDigest: `0x${string}` | undefined = undefined;
     let isSignature: boolean | undefined = undefined;
-
-    let derivedAddress: `0x${string}`;
-    const { factory, template } = _factory(options);
     if ("callDigest" in options && "isSignature" in options) {
       callDigest = options.callDigest;
       isSignature = options.isSignature;
-
-      derivedAddress = CatapultarAccount.predict({
-        ...options,
-        factory,
-        template,
-        callDigest: callDigest,
-        isSignature: isSignature,
-      });
-    } else {
-      derivedAddress = CatapultarAccount.predict({
-        ...options,
-        factory,
-        template,
-      });
     }
+
+    // predict() performs the same `callDigest`/`isSignature` check internally,
+    // so the spread covers both the embedded-call and plain-deploy cases.
+    const { factory, template } = _factory(options);
+    const derivedAddress = CatapultarAccount.predict({
+      ...options,
+      factory,
+      template,
+    });
 
     const pubkeyArray = pubkeyAsArray(options);
     const call = {
@@ -376,12 +368,13 @@ export class CatapultarAccount<
     let wordPos = startingNonce >> 8n;
     let bitPos = startingNonce % 256n;
     let found = false;
+    const client = this.publicClient();
     for (
       wordPos;
       wordPos < (startingNonce >> 8n) + BigInt(attempts);
       wordPos += 1n
     ) {
-      const spentNonces = await this.publicClient().readContract({
+      const spentNonces = await client.readContract({
         address: this.address,
         abi: this.abi(),
         functionName: "nonceBitmap",
@@ -415,18 +408,25 @@ export class CatapultarAccount<
         throw new Error(`Duplicate Nonce ${nonce}`);
       lookups[wordPos.toString(16)]! |= 1n << bitPos;
     }
-    for (const [upper, word] of Object.entries(lookups)) {
-      const spentNonces = await this.publicClient().readContract({
-        address: this.address,
-        abi: this.abi(),
-        functionName: "nonceBitmap",
-        args: [BigInt(`0x${upper}`)],
-      });
+    const client = this.publicClient();
+    const entries = Object.entries(lookups);
+    const spent = await Promise.all(
+      entries.map(([upper]) =>
+        client.readContract({
+          address: this.address,
+          abi: this.abi(),
+          functionName: "nonceBitmap",
+          args: [BigInt(`0x${upper}`)],
+        }),
+      ),
+    );
+    entries.forEach(([upper, word], i) => {
+      const spentNonces = spent[i]!;
       if (spentNonces & word)
         throw new Error(
           `Nonce collision on ${upper}, words: ${word} and ${spentNonces}`,
         );
-    }
+    });
   }
 
   // TODO: P256.
@@ -476,18 +476,28 @@ export class CatapultarAccount<
     const { signature, hash } = options;
 
     if (this.hasECDSAOrSmartContractKey()) {
-      // Check ECDSA
+      // Check ECDSA. Only attempt recovery for ECDSA-sized signatures (65 bytes,
+      // or a 64-byte EIP-2098 compact signature). Any other length is a
+      // contract-specific signature: skip recovery (which would otherwise throw)
+      // and defer to the ERC-1271 check below. The try/catch also covers
+      // correctly-sized but unrecoverable signatures (e.g. invalid v/yParity).
       let signer: `0x${string}` = "0x";
-      if (signature && signature.length > 2) {
-        signer = (await recoverAddress({
-          hash: hash,
-          signature:
-            signature.length === 64 * 2 + 2
-              ? fromCompactSignature(signature)
-              : signature,
-        })) as `0x${string}`;
+      if (signature.length === 65 * 2 + 2 || signature.length === 64 * 2 + 2) {
+        try {
+          signer = (await recoverAddress({
+            hash: hash,
+            signature:
+              signature.length === 64 * 2 + 2
+                ? fromCompactSignature(signature)
+                : signature,
+          })) as `0x${string}`;
+        } catch {
+          // Not a recoverable ECDSA signature; defer to ERC-1271.
+        }
       }
-      if (this.pubkey === signer) return true;
+      // Normalize case before comparing: recoverAddress returns a checksummed
+      // address while this.pubkey may have been supplied lower-cased.
+      if (this.pubkey.toLowerCase() === signer.toLowerCase()) return true;
       if (!this.hasRpc()) return false;
       const publicClient = this.publicClient();
 
@@ -506,7 +516,8 @@ export class CatapultarAccount<
     if (this.version === "0.0.1") return false;
 
     // Lets run P256 and Webauth. First, lets check the formatting of the signature.
-    if (signature.replace("0x", "").length <= 65 * 2) {
+    const raw = signature.replace("0x", "");
+    if (raw.length <= 65 * 2) {
       return false;
     }
     const pubkey = this.pubkey as [`0x${string}`, `0x${string}`];
@@ -515,8 +526,8 @@ export class CatapultarAccount<
       y: BigInt(pubkey[1]),
     });
     if (this.hasP256Key()) {
-      const r = BigInt("0x" + signature.replace("0x", "").slice(0, 64));
-      const s = BigInt("0x" + signature.replace("0x", "").slice(64, 128));
+      const r = BigInt("0x" + raw.slice(0, 64));
+      const s = BigInt("0x" + raw.slice(64, 128));
       return await P256.verify({
         payload: hash,
         publicKey,

@@ -56,6 +56,7 @@ export class CatapultarTx<
     return {
       account: {
         address: this.account.address,
+        accountPublicKeyType: this.account.accountPublicKeyType,
         chainId: this.account.chainId,
         pubkey: this.account.pubkey,
         name: this.account.name,
@@ -261,20 +262,38 @@ export class MetaCatapultarTx<
     return this;
   }
 
+  /**
+   * Resolves the effective nonce of every sub-call: the explicitly provided
+   * nonce, or the generated `innerNonce + index` when omitted (0n counts as
+   * omitted, matching getSignerData/setNonce which reject nonce 0). Single
+   * source of truth so checkNonces and getCallsAsTxs cannot diverge.
+   */
+  private resolvedNonces(): bigint[] {
+    return this.calls.map((c, i) =>
+      c.nonce ? c.nonce : this.innerNonce + BigInt(i),
+    );
+  }
+
   checkNonces() {
-    const nonces = this.calls.map((tx) => tx.nonce).filter((n) => !!n);
-    if ([...new Set(nonces)].length != nonces.length)
-      throw new Error(`Duplicate nonces were found: ${nonces}`);
+    // Validate the resolved set so an explicit nonce that collides with a
+    // generated `innerNonce + i` value is caught too, not just explicit-vs-explicit.
+    const nonces = this.resolvedNonces();
+    const counts = new Map<bigint, number>();
+    for (const n of nonces) counts.set(n, (counts.get(n) ?? 0) + 1);
+    const duplicates = nonces.filter((n) => counts.get(n)! > 1);
+    if (duplicates.length > 0)
+      throw new Error(`Duplicate nonces were found: ${duplicates}`);
     return this;
   }
 
   getCallsAsTxs() {
+    const nonces = this.resolvedNonces();
     return this.calls.map((c, i) => {
       return new CatapultarTx({
         account: this.account,
       })
         .setMode(c.mode ? c.mode : ExecutionMode.RaiseRevert)
-        .setNonce(c.nonce ? c.nonce : this.innerNonce + BigInt(i))
+        .setNonce(nonces[i]!)
         .addCall(...c.calls);
     });
   }

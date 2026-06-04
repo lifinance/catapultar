@@ -43,14 +43,6 @@ export type KeyedSignature<T extends AccountPublicKeyType> =
 
 export type Version = `0.1.0` | "0.0.1";
 
-export type Executable = Call;
-// export type Signable = {
-//   domain: any,
-//   types: any,
-//   primaryType: string,
-//   message: any,
-// }
-
 export type AccountConstructorParams<
   V,
   RPC,
