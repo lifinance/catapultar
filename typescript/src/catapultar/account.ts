@@ -8,20 +8,20 @@ import {
   parseAbiParameters,
   recoverAddress,
   zeroAddress,
+  type Chain,
   type PublicClient,
 } from "viem";
 import {
   DigestApproval,
   type AccountConstructorParams,
   type Call,
-  type EmbeddedCall,
+  type DeployOptions,
   type KeyedSignature,
-  type MaybeFactory,
   type Owner,
   type OwnerOf,
   type Version,
 } from "../types/types";
-import { getViemChainId } from "../utils/viem";
+import { resolveChain } from "../utils/viem";
 import CATAPULTAR_V0_1_0_ABI from "../abi/catapultarV0.1.0";
 import CATAPULTAR_FACTORY_V0_1_0_ABI from "../abi/catapultarFactoryV0.1.0";
 import {
@@ -33,9 +33,18 @@ import {
 import { factorySalt, factorySaltWithDigest } from "../protocol/factory";
 import {
   fromCompactSignature,
-  normalizeSignature,
+  normalizeSignature as encodeKeyedSignature,
 } from "../protocol/signature";
 import type { CatapultarDomain } from "../protocol/calls";
+import {
+  DuplicateNonceError,
+  InvalidChainError,
+  NonceCollisionError,
+  NonceUnsetError,
+  NonceZeroError,
+  NotConnectedError,
+  OwnerMismatchError,
+} from "../errors";
 import { P256, PublicKey, WebAuthnP256 } from "ox";
 import { _factory } from "../config";
 
@@ -45,8 +54,10 @@ import { _factory } from "../config";
  * The account is identified by its {@link Owner} (an ECDSA address, or a P256 /
  * WebAuthn public key). It is offline by default; attach a viem client with
  * {@link CatapultarAccount.connect} (or {@link CatapultarAccount.connectRpc})
- * to unlock on-chain reads. The `Connected` type parameter records, at compile
- * time, whether a client is attached so read methods are only callable once it is.
+ * to unlock on-chain reads. `connect`/`connectRpc` are non-mutating: they return
+ * a fresh, connected handle — use the returned value. The `Connected` type
+ * parameter records, at compile time, whether a client is attached so read
+ * methods are only callable once it is.
  *
  * @typeParam O The owner variant controlling this account.
  * @typeParam Connected Whether a viem client is attached (read methods require `true`).
@@ -58,7 +69,7 @@ export class CatapultarAccount<
   /** Address of the smart account itself (not the owner key). */
   readonly address: `0x${string}`;
   /** ChainId of the account. Used for the single-chain domain separator. */
-  chainId: number | undefined;
+  readonly chainId: number | undefined;
 
   /** Name of the account. Used for the domainSeparator. */
   readonly name: string;
@@ -69,7 +80,7 @@ export class CatapultarAccount<
   readonly owner: O;
 
   /** Attached viem client used for on-chain reads, if any. */
-  private _client: PublicClient | undefined;
+  private readonly _client: PublicClient | undefined;
 
   /**
    * Phantom marker — never assigned at runtime. It makes `Connected` part of the
@@ -108,43 +119,39 @@ export class CatapultarAccount<
     this.name = name;
     this.version = version;
 
-    // Connectivity (Finding 4): accept a viem client directly, or build one
-    // from an rpc + chainId convenience pair.
-    this.chainId = chainId;
+    // Connectivity: accept a viem client directly, or build one from an
+    // rpc + chainId convenience pair.
     if (client) {
       this._client = client;
-      if (this.chainId === undefined) this.chainId = client.chain?.id;
+      this.chainId = chainId ?? client.chain?.id;
     } else if (rpc) {
+      if (chainId === undefined)
+        throw new InvalidChainError(
+          "An rpc was provided without a chainId; cannot build a client.",
+        );
       this._client = createPublicClient({
-        chain: chainId !== undefined ? getViemChainId(chainId) : undefined,
+        chain: resolveChain({ chainId }),
         transport: http(rpc),
       });
+      this.chainId = chainId;
+    } else {
+      this._client = undefined;
+      this.chainId = chainId;
     }
   }
 
   static deploy<O extends Owner>(
-    options: {
-      salt: `0x${string}`;
-      owner: O;
-    } & MaybeFactory &
-      ({} | EmbeddedCall),
+    options: DeployOptions<O>,
   ): { call: Call; account: CatapultarAccount<O, false> } {
-    let callDigest: `0x${string}` | undefined = undefined;
-    let isSignature: boolean | undefined = undefined;
-    if ("callDigest" in options && "isSignature" in options) {
-      callDigest = options.callDigest;
-      isSignature = options.isSignature;
-    }
-
     const { factory } = _factory(options);
-    // predict() performs the same `callDigest`/`isSignature` check internally.
+    // predict() performs the same digest check internally.
     const derivedAddress = CatapultarAccount.predict(options);
 
     const keyType = ownerTypeToEnum(options.owner.type);
     const keyArray = ownerToKeyArray(options.owner);
     const call: Call = {
       to: factory,
-      data: callDigest
+      data: options.digest
         ? encodeFunctionData({
             abi: CATAPULTAR_FACTORY_V0_1_0_ABI,
             functionName: "deployWithDigest",
@@ -152,8 +159,8 @@ export class CatapultarAccount<
               keyType,
               keyArray,
               options.salt,
-              callDigest,
-              isSignature as boolean,
+              options.digest.hash,
+              options.digest.isSignature,
             ],
           })
         : encodeFunctionData({
@@ -190,13 +197,7 @@ export class CatapultarAccount<
     });
   }
 
-  static predict<O extends Owner>(
-    opt: {
-      salt: `0x${string}`;
-      owner: O;
-    } & MaybeFactory &
-      ({} | EmbeddedCall),
-  ) {
+  static predict<O extends Owner>(opt: DeployOptions<O>) {
     const { salt } = opt;
     const { factory, template } = _factory(opt);
     const keyArray = ownerToKeyArray(opt.owner);
@@ -207,11 +208,11 @@ export class CatapultarAccount<
       keyArray,
     );
 
-    if ("callDigest" in opt && "isSignature" in opt) {
+    if (opt.digest) {
       const finalSalt = factorySaltWithDigest(
         internalSalt,
-        opt.callDigest,
-        opt.isSignature,
+        opt.digest.hash,
+        opt.digest.isSignature,
       );
       return CatapultarAccount.deriveCloneAddress(template, finalSalt, factory);
     }
@@ -222,38 +223,50 @@ export class CatapultarAccount<
     );
   }
 
-  // --- Connectivity (Finding 4) --- //
+  // --- Connectivity --- //
 
   /**
-   * Attach a viem `PublicClient`, enabling on-chain reads. Returns the
-   * account narrowed to the connected type — use the returned value.
+   * Attach a viem `PublicClient`, returning a fresh connected handle (the
+   * original handle stays offline). Use the returned value.
    */
   connect(client: PublicClient): CatapultarAccount<O, true> {
-    this._client = client;
-    if (this.chainId === undefined) this.chainId = client.chain?.id;
-    return this as unknown as CatapultarAccount<O, true>;
+    return new CatapultarAccount<O>({
+      address: this.address,
+      owner: this.owner,
+      name: this.name,
+      version: this.version,
+      chainId: this.chainId ?? client.chain?.id,
+      client,
+    }) as unknown as CatapultarAccount<O, true>;
   }
 
   /**
    * Convenience: build a `PublicClient` from an RPC URL + chainId and attach it.
+   * Pass an explicit `chain` to override chain resolution for unknown networks.
    */
   connectRpc(options: {
     rpc: string;
     chainId: number;
+    chain?: Chain;
   }): CatapultarAccount<O, true> {
-    this.chainId = options.chainId;
-    return this.connect(
-      createPublicClient({
-        chain: getViemChainId(options.chainId),
-        transport: http(options.rpc),
-      }),
-    );
+    const client = createPublicClient({
+      chain: resolveChain({ chainId: options.chainId, chain: options.chain }),
+      transport: http(options.rpc),
+    });
+    return new CatapultarAccount<O>({
+      address: this.address,
+      owner: this.owner,
+      name: this.name,
+      version: this.version,
+      chainId: options.chainId,
+      client,
+    }) as unknown as CatapultarAccount<O, true>;
   }
 
   /** The attached viem client. Throws if the account is not connected. */
   publicClient(this: CatapultarAccount<O, true>): PublicClient {
     if (!this._client)
-      throw new Error(
+      throw new NotConnectedError(
         "No client attached. Call connect() or connectRpc() first.",
       );
     return this._client;
@@ -285,8 +298,8 @@ export class CatapultarAccount<
    * Normalize a keyed signature into the on-chain wire format for this owner.
    * Delegates to the centralized protocol encoder.
    */
-  parseSignature(signature: KeyedSignature<O>): `0x${string}` {
-    return normalizeSignature(this.owner, signature as KeyedSignature<Owner>);
+  normalizeSignature(signature: KeyedSignature<O>): `0x${string}` {
+    return encodeKeyedSignature(this.owner, signature as KeyedSignature<Owner>);
   }
 
   // --- Writing Functions (build calls) --- //
@@ -370,7 +383,7 @@ export class CatapultarAccount<
    * owner (or a self-call).
    * @param nonces Nonces to invalidate.
    */
-  invalidateNonces(...nonces: bigint[]): Call[] {
+  buildInvalidateNoncesCalls(...nonces: bigint[]): Call[] {
     const pairs = new Set(nonces.map((n) => n >> 8n));
     const bitMaps = [...pairs].map((wordPos) => {
       const toInvalidate = nonces.filter((n) => n >> 8n === wordPos);
@@ -396,12 +409,12 @@ export class CatapultarAccount<
 
   /**
    * @param nonce Starting nonce.
-   * @returns Next valid nonce that has not been spent on-chain yet. If no nonce is found in the given attempts, -1 is returned.
+   * @returns Next valid nonce that has not been spent on-chain yet. If no nonce is found in the given attempts, `null` is returned.
    */
   async getNextValidNonce(
     this: CatapultarAccount<O, true>,
     options: { nonce: bigint; attempts?: number },
-  ) {
+  ): Promise<bigint | null> {
     const { nonce: startingNonce, attempts = 10 } = options;
 
     let wordPos = startingNonce >> 8n;
@@ -429,7 +442,7 @@ export class CatapultarAccount<
       if (found === true) break;
       bitPos = 0n;
     }
-    if (!found) return -1n;
+    if (!found) return null;
     return (wordPos << 8n) + bitPos;
   }
 
@@ -444,7 +457,7 @@ export class CatapultarAccount<
       const val = lookups[wordPos.toString(16)];
       if (!val) lookups[wordPos.toString(16)] = 0n;
       if (val && val & (1n << bitPos))
-        throw new Error(`Duplicate Nonce ${nonce}`);
+        throw new DuplicateNonceError(`Duplicate Nonce ${nonce}`);
       lookups[wordPos.toString(16)]! |= 1n << bitPos;
     }
     const client = this.publicClient();
@@ -462,7 +475,7 @@ export class CatapultarAccount<
     entries.forEach(([upper, word], i) => {
       const spentNonces = spent[i]!;
       if (spentNonces & word)
-        throw new Error(
+        throw new NonceCollisionError(
           `Nonce collision on ${upper}, words: ${word} and ${spentNonces}`,
         );
     });
@@ -497,7 +510,7 @@ export class CatapultarAccount<
   }
 
   /** Read the approval flag stored for a digest (`approvedDigest` view). */
-  async isDigestApproved(
+  async getDigestApproval(
     this: CatapultarAccount<O, true>,
     options: { digest: `0x${string}` },
   ): Promise<DigestApproval> {
@@ -541,7 +554,7 @@ export class CatapultarAccount<
 
   /**
    * Return whether a signature is valid.
-   * @dev Does not support P256 prehash-flag handling; it verifies the raw digest.
+   * @dev Verifies the raw digest; does not apply the P256 prehash flag.
    */
   async isSignatureValid(options: {
     signature: `0x${string}`;
@@ -583,10 +596,8 @@ export class CatapultarAccount<
       });
       return result1271 === "0x1626ba7e";
     }
-    // 0.0.1 does not support anymore validations
-    if (this.version === "0.0.1") return false;
 
-    // Lets run P256 and Webauth. First, lets check the formatting of the signature.
+    // Run P256 and WebAuthn. First, check the formatting of the signature.
     const raw = signature.replace("0x", "");
     if (raw.length <= 65 * 2) {
       return false;
@@ -634,7 +645,7 @@ export class CatapultarAccount<
   async validateOwner(this: CatapultarAccount<O, true>) {
     const onchain = await this.getPublicKey();
     if (!ownersEqual(this.owner, onchain))
-      throw new Error(
+      throw new OwnerMismatchError(
         `Expected owner: ${JSON.stringify(this.owner)}, actual owner: ${JSON.stringify(onchain)}`,
       );
     return this;
@@ -648,10 +659,10 @@ export class CatapultarAccount<
   ) {
     const { nonce } = options;
     if (nonce === 0n)
-      throw new Error(
+      throw new NonceZeroError(
         "Nonce 0 is not allowed. It cannot be differentiated from an invalid nonce.",
       );
-    if (!nonce) throw new Error("No nonce has been set");
+    if (!nonce) throw new NonceUnsetError("No nonce has been set");
     await this.validateNonces({ nonces: [nonce] });
     return this;
   }

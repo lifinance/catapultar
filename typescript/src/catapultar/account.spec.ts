@@ -36,8 +36,7 @@ describe("Catapultar Account", () => {
       const owner: Owner = { type: "ecdsa", address };
       return {
         salt: address.padEnd(64 + 2, "0") as `0x${string}`,
-        factory: factories["0.1.0"],
-        template: templates["0.1.0"],
+        factory: { factory: factories["0.1.0"], template: templates["0.1.0"] },
         owner,
       };
     };
@@ -48,7 +47,7 @@ describe("Catapultar Account", () => {
       const keyArray = ownerToKeyArray(options.owner);
 
       const factoryReturned = await publicClient.readContract({
-        address: options.factory,
+        address: options.factory.factory,
         abi: CATAPULTAR_FACTORY_V0_1_0_ABI,
         functionName: "predictDeploy",
         args: [ownerTypeToEnum(options.owner.type), keyArray, options.salt],
@@ -60,21 +59,20 @@ describe("Catapultar Account", () => {
     it("should predict deployed account with digest", async () => {
       const options = {
         ..._getParams(),
-        isSignature: false,
-        callDigest: random(32),
+        digest: { hash: random(32), isSignature: false },
       };
       const predicted = CatapultarAccount.predict(options);
       const keyArray = ownerToKeyArray(options.owner);
       const factoryReturned = await publicClient.readContract({
-        address: options.factory,
+        address: options.factory.factory,
         abi: CATAPULTAR_FACTORY_V0_1_0_ABI,
         functionName: "predictDeployWithDigest",
         args: [
           ownerTypeToEnum(options.owner.type),
           keyArray,
           options.salt,
-          options.callDigest,
-          options.isSignature,
+          options.digest.hash,
+          options.digest.isSignature,
         ],
       });
 
@@ -131,8 +129,7 @@ describe("Catapultar Account", () => {
       const deployCall010 = CatapultarAccount.deploy({
         owner: { type: "ecdsa", address: pubkey.address },
         salt: `0x${asHex(0n, 20)}${random(12).replace("0x", "")}`,
-        factory: factories["0.1.0"],
-        template: templates["0.1.0"],
+        factory: { factory: factories["0.1.0"], template: templates["0.1.0"] },
       });
       deployedAccountV010 = deployCall010.account.connectRpc({
         chainId,
@@ -169,8 +166,7 @@ describe("Catapultar Account", () => {
       const deployCall = CatapultarAccount.deploy({
         owner,
         salt: `0x${asHex(0n, 20)}${random(12).replace("0x", "")}`,
-        factory: factories["0.1.0"],
-        template: templates["0.1.0"],
+        factory: { factory: factories["0.1.0"], template: templates["0.1.0"] },
       });
 
       const p256Account = deployCall.account.connectRpc({
@@ -192,8 +188,7 @@ describe("Catapultar Account", () => {
       const deployCall = CatapultarAccount.deploy({
         owner: { type: "ecdsa", address: pubkey.address },
         salt: `0x${asHex(0n, 20)}${random(12).replace("0x", "")}`,
-        callDigest: digest,
-        isSignature: false,
+        digest: { hash: digest, isSignature: false },
       });
       const tx = await executor.sendTransaction({
         ...deployCall.call,
@@ -206,7 +201,7 @@ describe("Catapultar Account", () => {
         rpc: rpcUrl(),
       });
 
-      const approvalStatus = await smartAccount.isDigestApproved({ digest });
+      const approvalStatus = await smartAccount.getDigestApproval({ digest });
 
       expect(approvalStatus).toBe(1);
     });
@@ -217,10 +212,8 @@ describe("Catapultar Account", () => {
       const deployCall = CatapultarAccount.deploy({
         owner: { type: "ecdsa", address: pubkey.address },
         salt: `0x${asHex(0n, 20)}${random(12).replace("0x", "")}`,
-        factory: factories["0.1.0"],
-        template: templates["0.1.0"],
-        callDigest: digest,
-        isSignature: true,
+        factory: { factory: factories["0.1.0"], template: templates["0.1.0"] },
+        digest: { hash: digest, isSignature: true },
       });
       const tx = await executor.sendTransaction({
         ...deployCall.call,
@@ -233,7 +226,7 @@ describe("Catapultar Account", () => {
         rpc: rpcUrl(),
       });
 
-      const approvalStatus = await smartAccount.isDigestApproved({ digest });
+      const approvalStatus = await smartAccount.getDigestApproval({ digest });
 
       expect(approvalStatus).toBe(2);
     });

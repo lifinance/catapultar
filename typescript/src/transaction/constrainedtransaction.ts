@@ -7,12 +7,31 @@ import {
   type AllowanceSpend,
   type Call,
   type ExecutionConstraint,
+  type Factory,
   type Outcome,
+  type Owner,
 } from "../types/types";
+import { ValidationError } from "../errors";
 import { BaseTransaction } from "./transaction";
 import CATAPULTAR_V0_1_0_ABI from "../abi/catapultarV0.1.0";
 import { CAT_VALIDATOR_ABI } from "../abi/CATValidator";
 import { cat_validator } from "../config";
+
+/** Options for {@link ConstrainedAssetTransaction.asExecuteCall}. */
+export type CatExecuteOptions = {
+  address: `0x${string}`;
+  executionTarget: `0x${string}`;
+  executionPayload: `0x${string}`;
+  spends: bigint[];
+  validator?: `0x${string}`;
+};
+
+/** Options for {@link ConstrainedAssetTransaction.asRefundCall}. */
+export type CatRefundOptions = {
+  address: `0x${string}`;
+  refund: `0x${string}`;
+  validator?: `0x${string}`;
+};
 
 /**
  * Helper class for deploying a Catapultar account with an embedded Constrained Asset Transaction
@@ -32,21 +51,30 @@ export class ConstrainedAssetTransaction {
     this.chainId = chainId;
   }
 
-  addAllowances(...allowances: Allowance[]) {
+  addAllowances(...allowances: Allowance[]): this {
     this.allowances.push(...allowances);
+    return this;
   }
 
   /**
    * Add token outcomes to an asset constraint.
    * To add the smart account as the recipient (address unknown at this stage), set address(0).
    */
-  addOutcomes(...outcomes: Outcome[]) {
+  addOutcomes(...outcomes: Outcome[]): this {
     this.outcomes.push(...outcomes);
+    return this;
   }
 
-  perpetual(state: boolean) {
-    if (state) this.constraintNonce = 0n;
-    else if (this.constraintNonce === 0n) this.constraintNonce = 1n;
+  /** Make the constraint reusable by using nonce 0 (a "perpetual" constraint). */
+  setPerpetual(): this {
+    this.constraintNonce = 0n;
+    return this;
+  }
+
+  /** Set the constraint nonce explicitly. */
+  setConstraintNonce(nonce: bigint): this {
+    this.constraintNonce = nonce;
+    return this;
   }
 
   /**
@@ -62,12 +90,15 @@ export class ConstrainedAssetTransaction {
     refund?: `0x${string}`;
     validator?: `0x${string}`;
     executor?: `0x${string}`;
+    /** Nonce for the embedded BaseTransaction. Default 1. */
+    nonce?: bigint;
   }) {
     const {
       addApprove = true,
       refund,
       validator = cat_validator,
       executor = this.executor,
+      nonce = 1n,
     } = opt ?? {};
 
     const calls: Call[] = [];
@@ -132,23 +163,14 @@ export class ConstrainedAssetTransaction {
     const tx = new BaseTransaction();
     tx.addCall(...calls);
     tx.setMode(ExecutionMode.RaiseRevert);
-    tx.setNonce(1n);
+    tx.setNonce(nonce);
     return tx;
   }
 
   /**
    * The call for execution the validation on the account.
    */
-  asExecuteCall(
-    opt: { address: `0x${string}` } & {
-      executionTarget: `0x${string}`;
-      executionPayload: `0x${string}`;
-      spends: bigint[];
-    } & {
-      refund?: `0x${string}`;
-      validator?: `0x${string}`;
-    },
-  ): Call {
+  asExecuteCall(opt: CatExecuteOptions): Call {
     const {
       validator = cat_validator,
       executionTarget,
@@ -156,7 +178,7 @@ export class ConstrainedAssetTransaction {
     } = opt;
 
     if (opt.spends.length !== this.allowances.length)
-      throw new Error(
+      throw new ValidationError(
         `Spends and allowances not same length: Allowances: ${this.allowances.length}, Spends: ${opt.spends.length}`,
       );
     const allowanceSpends: AllowanceSpend[] = this.allowances.map((a, i) => ({
@@ -185,12 +207,7 @@ export class ConstrainedAssetTransaction {
     return executeCall;
   }
 
-  asRefundCall(
-    opt: { address: `0x${string}` } & {
-      refund: `0x${string}`;
-      validator?: `0x${string}`;
-    },
-  ) {
+  asRefundCall(opt: CatRefundOptions) {
     const { validator = cat_validator } = opt;
 
     const allowanceSpends: AllowanceSpend[] = this.allowances.map((a) => ({
@@ -223,5 +240,32 @@ export class ConstrainedAssetTransaction {
       value: 0n,
     };
     return executeCall;
+  }
+
+  /**
+   * Build the full ordered call sequence for the common flow: deploy the
+   * account with the constraint embedded, run the embedded approval, then
+   * execute the constraint. Returns `[deployCall, actionCall, entryCall]` (in
+   * execution order) plus the account address.
+   */
+  asExecutionBundle(opt: {
+    salt: `0x${string}`;
+    owner: Owner;
+    factory?: Factory;
+    execute: Omit<CatExecuteOptions, "address">;
+  }): {
+    deployCall: Call;
+    actionCall: Call;
+    entryCall: Call;
+    address: `0x${string}`;
+  } {
+    const tx = this.asCatapultarAllowanceTransaction();
+    const { deployCall, actionCall, address } = tx.asAccount({
+      salt: opt.salt,
+      owner: opt.owner,
+      factory: opt.factory,
+    });
+    const entryCall = this.asExecuteCall({ address, ...opt.execute });
+    return { deployCall, actionCall, entryCall, address };
   }
 }

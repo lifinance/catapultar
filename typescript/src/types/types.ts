@@ -47,7 +47,7 @@ export type KeyedSignature<O extends Owner = Owner> = O extends {
   ? WebAuthnSignature
   : `0x${string}`;
 
-export type Version = `0.1.0` | "0.0.1";
+export type Version = "0.1.0";
 
 /**
  * Parameters for constructing a {@link CatapultarAccount}.
@@ -77,6 +77,19 @@ export type Call = {
   to: `0x${string}`;
   value: bigint;
   data: `0x${string}`;
+};
+
+/** A single executable call. viem-compatible; alias of {@link Call}. */
+export type Executable = Call;
+
+/** Return shape of {@link BaseTransaction.asParameters}. */
+export type ExecuteParameters = {
+  mode: ExecutionMode | undefined;
+  executionData: `0x${string}`;
+  metadata: {
+    value: bigint;
+    signature: `0x${string}` | undefined;
+  };
 };
 
 export type Calls = {
@@ -144,14 +157,28 @@ export const ExecutionConstraintTyped = {
 
 //-- Factory pattern types --//
 
-export type EmbeddedCall = {
-  callDigest: `0x${string}`;
-  isSignature: boolean;
-};
-
 export type Factory = {
   factory: `0x${string}`;
   template: `0x${string}`;
 };
 
-export type MaybeFactory = {} | Factory;
+/** A digest embedded into an account at deploy time. */
+export type EmbeddedDigest = {
+  /** The digest to approve: a Calls typehash, or a signing message hash. */
+  hash: `0x${string}`;
+  /** `true` to approve as a signature, `false` to approve as a call. */
+  isSignature: boolean;
+};
+
+/**
+ * Options for {@link CatapultarAccount.deploy} / {@link CatapultarAccount.predict}.
+ * `factory` defaults to the library's well-known factory/template. Provide a
+ * `digest` to embed an approved call/signature at deploy time — because these
+ * are explicit named fields, a misspelled or partial option fails to compile.
+ */
+export type DeployOptions<O extends Owner = Owner> = {
+  salt: `0x${string}`;
+  owner: O;
+  factory?: Factory;
+  digest?: EmbeddedDigest;
+};

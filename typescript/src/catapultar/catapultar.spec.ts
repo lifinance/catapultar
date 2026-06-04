@@ -60,13 +60,13 @@ describe("Catapultar", () => {
           address: "0x1111111111111111111111111111111111111111",
           chainId: 1,
           owner: { type: "ecdsa", address },
-          version: "0.0.1",
+          version: "0.1.0",
         },
       });
 
       const domainSeparator = tx.account.getDomainSeparator();
       expect(domainSeparator.name).toBe("Catapultar");
-      expect(domainSeparator.version).toBe("0.0.1");
+      expect(domainSeparator.version).toBe("0.1.0");
       expect(domainSeparator.chainId).toBe(1);
       expect(domainSeparator.verifyingContract).toBe(
         "0x1111111111111111111111111111111111111111",
@@ -365,8 +365,10 @@ describe("Catapultar", () => {
         const deployCall010 = CatapultarAccount.deploy({
           owner,
           salt: `0x${asHex(0n, 20)}${random(12).replace("0x", "")}`,
-          factory: factories["0.1.0"],
-          template: templates["0.1.0"],
+          factory: {
+            factory: factories["0.1.0"],
+            template: templates["0.1.0"],
+          },
         });
         deployedAccountV010 = deployCall010.account.connectRpc({
           chainId,
@@ -477,7 +479,7 @@ describe("Catapultar", () => {
         expect(nextNonce).toBe(referenceNonce);
 
         // Invalidate the nonce.
-        let invalidateCall = deployedAccountV010.invalidateNonces(
+        let invalidateCall = deployedAccountV010.buildInvalidateNoncesCalls(
           referenceNonce,
           referenceNonce + 1n,
         );
@@ -498,7 +500,7 @@ describe("Catapultar", () => {
         expect(nextNonce).toBe(referenceNonce + 2n);
 
         // Invalidate more nonces.
-        invalidateCall = deployedAccountV010.invalidateNonces(
+        invalidateCall = deployedAccountV010.buildInvalidateNoncesCalls(
           ...[...Array(1001).keys()].map((i) => BigInt(i) + referenceNonce),
         );
         calldata = await (
@@ -517,6 +519,61 @@ describe("Catapultar", () => {
         expect(nextNonce).toBe(referenceNonce + 1001n);
       });
     });
+
+  describe("execute() one-call send", () => {
+    const publicClient = createPublicClient({
+      chain: anvil,
+      transport: http(rpcUrl()),
+    });
+    const deployer = privateKeyToAccount(PUBLIC_DEFAULT_ANVIL_ACCOUNT_0);
+    const executor = createWalletClient({
+      account: deployer,
+      chain: anvil,
+      transport: http(rpcUrl()),
+    });
+
+    it.serial("signs and sends via a viem WalletClient", async () => {
+      const ownerAccount = privateKeyToAccount(random(32));
+      const owner: Owner = { type: "ecdsa", address: ownerAccount.address };
+
+      const deployCall = CatapultarAccount.deploy({
+        owner,
+        salt: `0x${asHex(0n, 20)}${random(12).replace("0x", "")}`,
+        factory: { factory: factories["0.1.0"], template: templates["0.1.0"] },
+      });
+      const account = deployCall.account.connectRpc({ chainId, rpc: rpcUrl() });
+      await waitForTransaction(
+        await executor.sendTransaction({ ...deployCall.call }),
+      );
+
+      // Fund the owner EOA (for gas) and the smart account (value to forward).
+      const value = 1000000000000000000n;
+      await waitForTransaction(
+        await executor.sendTransaction({ to: ownerAccount.address, value }),
+      );
+      await waitForTransaction(
+        await executor.sendTransaction({ to: account.address, value }),
+      );
+
+      const target = random(20);
+      expect(await publicClient.getBalance({ address: target })).toBe(0n);
+
+      // The owner's own wallet signs AND broadcasts in one call.
+      const ownerWallet = createWalletClient({
+        account: ownerAccount,
+        chain: anvil,
+        transport: http(rpcUrl()),
+      });
+      const tx = new CatapultarTx({ account })
+        .setRandomNonce()
+        .setMode(ExecutionMode.RaiseRevert)
+        .addCall({ to: target, value, data: "0x" });
+      const hash = await tx.execute(ownerWallet);
+      await waitForTransaction(hash);
+
+      expect(await publicClient.getBalance({ address: target })).toBe(value);
+    });
+  });
 
   integrationTest("ecdsa");
   integrationTest("p256");

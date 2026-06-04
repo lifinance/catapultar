@@ -1,3 +1,4 @@
+import type { Account, Hex, WalletClient } from "viem";
 import { random } from "../utils/helpers";
 import {
   ExecutionMode,
@@ -8,6 +9,11 @@ import {
 } from "../types/types";
 import { callsDigest, callsTypedData } from "../protocol/calls";
 import { assertCalls, assertMode, assertNonce } from "../protocol/validation";
+import {
+  DuplicateNonceError,
+  InvalidSignatureError,
+  ValidationError,
+} from "../errors";
 import { CatapultarAccount } from "./account";
 import { BaseTransaction } from "../transaction/transaction";
 
@@ -69,8 +75,9 @@ export class CatapultarTx<
   /**
    * Sets a signature along with its type. If non-ecdsa signatures are being set, this provides additional aids with encoding
    */
-  setSignature(signature: KeyedSignature<O>) {
-    this.signature = this.account.parseSignature(signature);
+  setSignature(signature: KeyedSignature<O>): this {
+    this.signature = this.account.normalizeSignature(signature);
+    return this;
   }
 
   /**
@@ -86,7 +93,9 @@ export class CatapultarTx<
   ) {
     const signerData = this.getSignerData(options);
 
-    this.signature = this.account.parseSignature(await callback(signerData));
+    this.signature = this.account.normalizeSignature(
+      await callback(signerData),
+    );
     return this;
   }
 
@@ -105,7 +114,7 @@ export class CatapultarTx<
 
   async validateSignature(options?: { noSignatureIsValid?: boolean }) {
     if (!(await this.hasValidSignature(options)))
-      throw new Error(`Invalid Signer`);
+      throw new InvalidSignatureError(`Invalid Signer`);
     return this;
   }
 
@@ -152,6 +161,45 @@ export class CatapultarTx<
       ...this.asCallData(),
       to: this.account.address,
     };
+  }
+
+  /**
+   * Sign (if needed) and broadcast in one call via a viem `WalletClient`.
+   *
+   * If a signature is already set (e.g. from a relayer or a manual `sign()`),
+   * re-signing is skipped and the transaction is just sent. The signing account
+   * defaults to the wallet client's account; override it via `options.account`.
+   * Returns the transaction hash. For an external signer, keep using `sign()`.
+   */
+  async execute(
+    walletClient: WalletClient,
+    options?: { account?: Account | Hex; ignoreNoCalls?: boolean },
+  ): Promise<Hex> {
+    const account = options?.account ?? walletClient.account;
+    if (!account)
+      throw new ValidationError(
+        "execute() requires an account on the WalletClient or in options.account.",
+      );
+    if (this.signature === undefined) {
+      // A WalletClient produces an ECDSA hex signature, so this path is for
+      // ECDSA/EOA owners. The signature is normalized for the account's owner.
+      const data = this.getSignerData({
+        ignoreNoCalls: options?.ignoreNoCalls,
+      });
+      const signature = await walletClient.signTypedData({
+        account,
+        ...data,
+      } as Parameters<typeof walletClient.signTypedData>[0]);
+      this.signature = this.account.normalizeSignature(
+        signature as KeyedSignature<O>,
+      );
+    }
+    const call = await this.asCall();
+    return walletClient.sendTransaction({
+      account,
+      chain: walletClient.chain,
+      ...call,
+    } as Parameters<typeof walletClient.sendTransaction>[0]);
   }
 }
 
@@ -238,7 +286,9 @@ export class MetaCatapultarTx<
     for (const n of nonces) counts.set(n, (counts.get(n) ?? 0) + 1);
     const duplicates = nonces.filter((n) => counts.get(n)! > 1);
     if (duplicates.length > 0)
-      throw new Error(`Duplicate nonces were found: ${duplicates}`);
+      throw new DuplicateNonceError(
+        `Duplicate nonces were found: ${duplicates}`,
+      );
     return this;
   }
 

@@ -85,3 +85,10 @@ export function isMultichainMode(mode: ExecutionMode | undefined): boolean {
     mode === ExecutionMode.SkipRevertMultiChain
   );
 }
+
+/**
+ * The viem-shaped EIP-712 typed-data object Catapultar asks a signer to sign.
+ * This is exactly what {@link CatapultarTx.getSignerData} returns, so an
+ * external signer/relayer can type its callback against it.
+ */
+export type Signable = ReturnType<typeof callsTypedData>;

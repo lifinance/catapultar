@@ -3,6 +3,7 @@
 Catapultar is a compact TypeScript library for managing Catapultar smart accounts. It provides a reliable and portable wrapper around account and transaction flows to build, sign, and execute account-level operations reliably.
 
 ## Key Features
+
 - Utilities for interacting with the Catapultar smart account
 - Ethers and viem compatibility.
 - Natural language transaction creation.
@@ -11,6 +12,7 @@ Catapultar is a compact TypeScript library for managing Catapultar smart account
 ### Library Structure
 
 4 Main classes are exported:
+
 - **BaseTransaction** — Minimal transaction interface without validation.
 - **CatapultarAccount** — Catapultar Smart Account management.
 - **CatapultarTx** — Creating transaction for existing smart accounts.
@@ -22,60 +24,77 @@ Depending on your use case, you may prefer either a high level or low level tran
 - **MetaCatapultarTx** depends on **CatapultarTx**
 
 ## Installation
+
 This repository uses Bun. From the project root, install dependencies with:
 
 ```bash
 bun install
 ```
 
+The package ships dual **ESM and CJS** builds with type declarations; `import` and `require` both resolve the same API (only the root `catapultar` entry is published).
+
 ## Usage (Overview)
-Catapultar is offline by default — it can build, hash, and sign everything without network access. Attach a viem client to unlock on-chain features. Either bring your own client with `account.connect(publicClient)`, or use the `account.connectRpc({ rpc, chainId })` convenience to build one from an RPC URL. Once connected, the following become available:
+
+Catapultar is offline by default — it can build, hash, and sign everything without network access. Attach a viem client to unlock on-chain features. Either bring your own client with `account.connect(publicClient)`, or use the `account.connectRpc({ rpc, chainId })` convenience to build one from an RPC URL (pass `chain` to override resolution for an unlisted network). Once connected, the following become available:
+
 - Nonce validation
-- Account version selection
 - Simulation
 - EIP-1271 signature validation
 - Reading owner / approved digests / upgradeability from the account.
 
-Catapultar is versioned, meaning accounts can be versioned to their respective version. Unless an RPC is provided to the library, it is important that the version of the account is provided to explicitly enable or disable flows.
+Accounts target the `0.1.0` Catapultar contract.
 
 ### Actionables (Signables and Executables)
+
 While Catapultar uses viem under-the-hood, you need to bring your own execution and signing service / library. Catapultar exports actionable objects as either `Signable`-ish or `Executable` which are directly compatible with viem and almost directly compatible into Ethers. If you are using external signers, you need to port these objects.
 
 Signable objects are exported as:
+
 ```typescript
 type Signable = {
   domain: {
-      name: string;
-      version: string;
-      chainId?: bigint;
-      verifyingContract: `0x${string}`;
+    name: string;
+    version: string;
+    chainId?: bigint;
+    verifyingContract: `0x${string}`;
   };
-  types: { /** Universal typed const */ };
+  types: {
+    /** Universal typed const */
+  };
   primaryType: string;
-  message: { /** Typed Message */};
-}
+  message: {
+    /** Typed Message */
+  };
+};
 ```
+
 Note that Ether's "`Signable`" looks like:
+
 ```typescript
 type EthersSignable = {
   domain: {
-      name: string;
-      version: string;
-      chainId?: bigint;
-      verifyingContract: `0x${string}`;
+    name: string;
+    version: string;
+    chainId?: bigint;
+    verifyingContract: `0x${string}`;
   };
-  types: { /** Universal typed const */ };
-  data: { /** Typed Message */};
-}
+  types: {
+    /** Universal typed const */
+  };
+  data: {
+    /** Typed Message */
+  };
+};
 ```
 
-Executable objects are exported as: 
+Executable objects are exported as:
+
 ```typescript
 type Executable = {
   to: `0x${string}`;
   value: bigint;
   data: `0x${string}`;
-}
+};
 ```
 
 ### Owners
@@ -85,8 +104,8 @@ Every account is controlled by an `owner`, a discriminated union — the `type` 
 ```typescript
 import type { Owner } from "catapultar";
 
-const ecdsa: Owner = { type: "ecdsa", address: "0x..." };       // EOA or ERC-1271 contract
-const p256: Owner = { type: "p256", x: "0x...", y: "0x..." };    // raw P256 key
+const ecdsa: Owner = { type: "ecdsa", address: "0x..." }; // EOA or ERC-1271 contract
+const p256: Owner = { type: "p256", x: "0x...", y: "0x..." }; // raw P256 key
 const passkey: Owner = { type: "webauthn-p256", x: "0x...", y: "0x..." }; // WebAuthn passkey
 ```
 
@@ -147,14 +166,17 @@ Catapultar can be configured for this use case by embedding a call (or signature
 To create embedded accounts, use **BaseTransaction**.
 
 ```typescript
-const embeddedCalls: {to: `0x${string}`, data: `0x${string}`, value: bigint}[];
+const embeddedCalls: {
+  to: `0x${string}`;
+  data: `0x${string}`;
+  value: bigint;
+}[];
 
 const tx = new BaseTransaction();
 
 tx.setRandomNonce();
 tx.setMode(ExecutionMode.RaiseRevert);
 tx.addCall(...embeddedCalls);
-
 
 const context = tx.asAccount({ salt, owner: { type: "ecdsa", address } });
 // {
@@ -173,24 +195,33 @@ To create a CAT use **ConstrainedAssetTransaction**. You can then convert it to 
 
 ```typescript
 const executor: `0x${string}`;
-const allowances: { token: `0x${string}`; amount: bigint; }[];
-const outcomes: { token: `0x${string}`; amount: bigint; destination: `0x${string}` }[];
+const allowances: { token: `0x${string}`; amount: bigint }[];
+const outcomes: {
+  token: `0x${string}`;
+  amount: bigint;
+  destination: `0x${string}`;
+}[];
 
-const cat = new ConstrainedAssetTransaction({ executor, chainId });
-cat.addAllowances(...allowances);
-cat.addOutcomes(...outcomes);
+const cat = new ConstrainedAssetTransaction({ executor, chainId })
+  .addAllowances(...allowances)
+  .addOutcomes(...outcomes);
 
-const tx = cat.asCatapultarAllowanceTransaction();
-const context = tx.asAccount(...);
+// `asExecutionBundle` builds the full ordered sequence in one call:
+const { deployCall, actionCall, entryCall, address } = cat.asExecutionBundle({
+  salt,
+  owner: { type: "ecdsa", address: ownerAddress },
+  execute: { executionTarget, executionPayload, spends },
+});
 
-const entryCall = tx.asExecuteCall({address: context.address, ...})
-
-// then you need to execute [context.deployCall, context.actionCall, entryCall]
+// Execute in order: [deployCall, actionCall, entryCall]
 ```
+
+For finer control, the lower-level pieces are still available: `cat.asCatapultarAllowanceTransaction()` → `BaseTransaction`, `tx.asAccount({ salt, owner })` for the account context, and `cat.asExecuteCall({ address, ... })` for the entry call.
 
 See `src/transaction/constrainedtransaction.spec.ts::create account and execute contained constraints` for an example.
 
 ## Project Layout
+
 - `src/catapultar/` — core account and factory logic
 - `src/transaction/` — low level transaction logic
 - `src/abi/` — Contract ABIs

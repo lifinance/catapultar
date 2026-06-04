@@ -30,19 +30,17 @@ async function waitForTransaction(hash: `0x${string}`) {
 
 describe("ConstrainedAssetTransaction", () => {
   describe("unit", () => {
-    it("should set nonce 0 if perpetual", () => {
+    it("should set the constraint nonce", () => {
       const catx = new ConstrainedAssetTransaction({
         executor: zeroAddress,
         chainId: 1,
       });
       expect(catx.constraintNonce).toBe(1n);
-      catx.perpetual(true);
+      catx.setPerpetual();
       expect(catx.constraintNonce).toBe(0n);
-      catx.perpetual(false);
+      catx.setConstraintNonce(1n);
       expect(catx.constraintNonce).toBe(1n);
-
-      catx.constraintNonce = 10n;
-      catx.perpetual(false);
+      catx.setConstraintNonce(10n);
       expect(catx.constraintNonce).toBe(10n);
     });
   });
@@ -78,7 +76,6 @@ describe("ConstrainedAssetTransaction", () => {
           amount: amount2,
           destination: oftenTargetAddress,
         });
-        catx.perpetual(false);
 
         // Generate account.
         const tx = catx.asCatapultarAllowanceTransaction();
@@ -169,7 +166,6 @@ describe("ConstrainedAssetTransaction", () => {
         amount: amount2,
         destination: oftenTargetAddress,
       });
-      catx.perpetual(false);
 
       // Generate account.
       const tx = catx.asCatapultarAllowanceTransaction({

@@ -2,7 +2,8 @@ import { encodeFunctionData } from "viem";
 import {
   ExecutionMode,
   type Call,
-  type MaybeFactory,
+  type ExecuteParameters,
+  type Factory,
   type Owner,
 } from "../types/types";
 import { random } from "../utils/helpers";
@@ -17,6 +18,7 @@ import {
   assertMode,
   assertNonce,
 } from "../protocol/validation";
+import { NonceZeroError, ValidationError } from "../errors";
 import CATAPULTAR_FACTORY_V0_1_0_ABI from "../abi/catapultarFactoryV0.1.0";
 import CATAPULTAR_V0_1_0_ABI from "../abi/catapultarV0.1.0";
 import { _factory } from "../config";
@@ -50,7 +52,7 @@ export class BaseTransaction {
    * Set the transaction nonce for the Catapultar transaction. Only 1 transaction can ever be executed for each nonce.
    */
   setNonce(nonce: bigint) {
-    if (nonce === 0n) throw new Error(NONCE_ZERO_ERROR);
+    if (nonce === 0n) throw new NonceZeroError(NONCE_ZERO_ERROR);
     this.nonce = nonce;
     return this;
   }
@@ -110,7 +112,7 @@ export class BaseTransaction {
    */
   asCompactSignature(signature?: `0x${string}`): `0x${string}` {
     const sig = signature ?? this.signature;
-    if (!sig) throw new Error("A signature has to be provided");
+    if (!sig) throw new ValidationError("A signature has to be provided");
     return compactSignature(sig);
   }
 
@@ -135,7 +137,7 @@ export class BaseTransaction {
   // --- Convert the transaction object into actionable items --- //
 
   /** @return As parameters for an execute call. */
-  asParameters() {
+  asParameters(): ExecuteParameters {
     return {
       mode: this.mode,
       executionData: this.getExecutionData(),
@@ -174,18 +176,12 @@ export class BaseTransaction {
   }
 
   /** Generate an account with this action embedded. */
-  asAccount(
-    opt: {
-      salt: `0x${string}`;
-      owner: Owner;
-    } & MaybeFactory,
-  ) {
+  asAccount(opt: { salt: `0x${string}`; owner: Owner; factory?: Factory }) {
     const callDigest = this.asDigest();
     const { factory } = _factory(opt);
     const address = CatapultarAccount.predict({
       ...opt,
-      callDigest,
-      isSignature: false,
+      digest: { hash: callDigest, isSignature: false },
     });
 
     const keyType = ownerTypeToEnum(opt.owner.type);
