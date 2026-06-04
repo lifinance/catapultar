@@ -32,6 +32,7 @@
     ".": {
       "types": "./_types/index.d.ts",
       "import": "./_esm/index.js",
+      "require": "./_cjs/index.js",
       "default": "./_cjs/index.js"
     }
   },

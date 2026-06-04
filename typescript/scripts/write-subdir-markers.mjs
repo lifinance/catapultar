@@ -7,6 +7,11 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 
+// `sideEffects: false` on the _esm marker is NOT redundant with the root
+// package.json: bundlers resolve `sideEffects` from the package.json *nearest*
+// to a module, and modules under _esm/ find this marker, not the root. It is
+// what enables tree-shaking of the ESM build. The _cjs marker omits it (CJS is
+// not tree-shaken). This mirrors ox/viem exactly.
 const markers = [
   ["_esm", { type: "module", sideEffects: false }],
   ["_cjs", { type: "commonjs" }],

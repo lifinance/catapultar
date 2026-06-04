@@ -17,6 +17,11 @@ const isExternal = (id) =>
   depNames.some((dep) => id === dep || id.startsWith(`${dep}/`));
 
 export default {
+  // Single entry point: `preserveModules` walks the import graph from here and
+  // emits one output file per reachable source module (path-preserved). Only
+  // the `.` export is published today, so this is sufficient. If subpath
+  // exports are added later (`catapultar/abi`, …), add their entry modules here
+  // and extend the `exports` map in package.json accordingly.
   input: "src/index.ts",
   external: isExternal,
   output: [
@@ -42,6 +47,10 @@ export default {
   ],
   plugins: [
     esbuild({
+      // Keep in sync with `target` in tsconfig.base.json. esbuild does NOT read
+      // `target` from a tsconfig (esbuild's `tsconfigRaw` only honours a subset
+      // of options, and `target` is not among them), so it must be set here
+      // explicitly — tsc and rollup are two independent knobs on the same value.
       target: "es2021",
       sourceMap: true,
       tsconfig: "tsconfig.base.json",
