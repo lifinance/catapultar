@@ -29,14 +29,14 @@ bun install
 ```
 
 ## Usage (Overview)
-Catapultar is RPC-less by default. If an RPC is provided to the library, validation will be enhanced with on-chain information including:
+Catapultar is offline by default — it can build, hash, and sign everything without network access. Attach a viem client to unlock on-chain features. Either bring your own client with `account.connect(publicClient)`, or use the `account.connectRpc({ rpc, chainId })` convenience to build one from an RPC URL. Once connected, the following become available:
 - Nonce validation
 - Account version selection
 - Simulation
 - EIP-1271 signature validation
-- Get deployed transactions in transaction.
+- Reading owner / approved digests / upgradeability from the account.
 
-Catapultar is verioned, meaning accounts can be versioned to their respective version. Unless an RPC is provided to the library, it is important that the version of the account is provided to explicitly enable or disable flows.
+Catapultar is versioned, meaning accounts can be versioned to their respective version. Unless an RPC is provided to the library, it is important that the version of the account is provided to explicitly enable or disable flows.
 
 ### Actionables (Signables and Executables)
 While Catapultar uses viem under-the-hood, you need to bring your own execution and signing service / library. Catapultar exports actionable objects as either `Signable`-ish or `Executable` which are directly compatible with viem and almost directly compatible into Ethers. If you are using external signers, you need to port these objects.
@@ -78,27 +78,64 @@ type Executable = {
 }
 ```
 
+### Owners
+
+Every account is controlled by an `owner`, a discriminated union — the `type` tag tells the library which key it is, so you don't pass protocol enums around:
+
+```typescript
+import type { Owner } from "catapultar";
+
+const ecdsa: Owner = { type: "ecdsa", address: "0x..." };       // EOA or ERC-1271 contract
+const p256: Owner = { type: "p256", x: "0x...", y: "0x..." };    // raw P256 key
+const passkey: Owner = { type: "webauthn-p256", x: "0x...", y: "0x..." }; // WebAuthn passkey
+```
+
 ### Account deploy
 
-TODO
+`CatapultarAccount.deploy` returns the deploy `call` and the `account` object. The account address is deterministic (CREATE2), so it is known before the deploy lands.
+
+```typescript
+import { CatapultarAccount } from "catapultar";
+
+const { call, account } = CatapultarAccount.deploy({
+  owner: { type: "ecdsa", address: ownerAddress },
+  salt, // 32-byte salt
+});
+
+// Send the deploy call with your own wallet/relayer.
+await viemWalletClient.sendTransaction(call);
+
+// Attach a client for on-chain reads (returns a connected account — use the result).
+const connected = account.connect(viemPublicClient);
+await connected.validateOwner();
+```
+
+You can predict the address without building a call via `CatapultarAccount.predict({ owner, salt })`.
 
 ### Transaction Creation
 
 ```typescript
-import { CatapultarTx } from "catapultar";
+import { CatapultarTx, ExecutionMode } from "catapultar";
 
-const account = {
-  address,
-  chainId,
-  owner,
-}
+const tx = new CatapultarTx({
+  account: {
+    address: smartAccountAddress,
+    chainId: 1,
+    owner: { type: "ecdsa", address: ownerAddress },
+  },
+});
 
-const tx = new CatapultarTx({account});
-const call = (await tx.addCalls(...calls).sign((v) => viemWalletClient.signTypedData({account, ...v}))).asCall();
+const signed = await tx
+  .setMode(ExecutionMode.RaiseRevert)
+  .setRandomNonce()
+  .addCall(...calls)
+  .sign((data) => viemWalletClient.signTypedData({ account, ...data }));
 
-viemWalletClient.sendTransaction({
+const call = await signed.asCall();
+
+await viemWalletClient.sendTransaction({
   account,
-  ...call // unpack call into viem. 
+  ...call, // unpack call into viem.
 });
 ```
 
@@ -116,10 +153,10 @@ const tx = new BaseTransaction();
 
 tx.setRandomNonce();
 tx.setMode(ExecutionMode.RaiseRevert);
-tx.addCalls(...embeddedCalls);
+tx.addCall(...embeddedCalls);
 
 
-const context = tx.asAccount(...);
+const context = tx.asAccount({ salt, owner: { type: "ecdsa", address } });
 // {
 //   deployCall // Call to deploy the account. Save, if lost account may not be recoverable.
 //   actionCall, // Call to call on the account.
@@ -139,7 +176,7 @@ const executor: `0x${string}`;
 const allowances: { token: `0x${string}`; amount: bigint; }[];
 const outcomes: { token: `0x${string}`; amount: bigint; destination: `0x${string}` }[];
 
-const cat = new ConstrainedAssetTransaction({executor});
+const cat = new ConstrainedAssetTransaction({ executor, chainId });
 cat.addAllowances(...allowances);
 cat.addOutcomes(...outcomes);
 

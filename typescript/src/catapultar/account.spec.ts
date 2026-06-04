@@ -2,9 +2,10 @@ import { createPublicClient, createWalletClient, http } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { anvil } from "viem/chains";
 import { CatapultarAccount } from "./account";
-import { random, asHex, pubkeyAsArray } from "../utils/helpers";
+import { random, asHex } from "../utils/helpers";
+import { ownerToKeyArray, ownerTypeToEnum } from "../protocol/owner";
 import { rpcUrl } from "../../test/setup";
-import { AccountPublicKeyType, type Version } from "../types/types";
+import type { Owner } from "../types/types";
 import { factories, templates } from "../config";
 import CATAPULTAR_FACTORY_V0_1_0_ABI from "../abi/catapultarFactoryV0.1.0";
 import { P256 } from "ox";
@@ -31,30 +32,26 @@ describe("Catapultar Account", () => {
 
   describe("Primitives", () => {
     const _getParams = () => {
-      const owner = random(20);
+      const address = random(20);
+      const owner: Owner = { type: "ecdsa", address };
       return {
-        salt: owner.padEnd(64 + 2, "0") as `0x${string}`,
+        salt: address.padEnd(64 + 2, "0") as `0x${string}`,
         factory: factories["0.1.0"],
         template: templates["0.1.0"],
-        keyType: AccountPublicKeyType.ECDSAOrSmartContract,
-        pubkey: owner,
+        owner,
       };
     };
 
     it("should predict deployed account", async () => {
       const options = _getParams();
       const predicted = CatapultarAccount.predict(options);
-      const pubkeyArray = pubkeyAsArray(options);
+      const keyArray = ownerToKeyArray(options.owner);
 
       const factoryReturned = await publicClient.readContract({
         address: options.factory,
         abi: CATAPULTAR_FACTORY_V0_1_0_ABI,
         functionName: "predictDeploy",
-        args: [
-          options.keyType as AccountPublicKeyType,
-          pubkeyArray,
-          options.salt,
-        ],
+        args: [ownerTypeToEnum(options.owner.type), keyArray, options.salt],
       });
 
       expect(predicted).toBe(factoryReturned);
@@ -67,14 +64,14 @@ describe("Catapultar Account", () => {
         callDigest: random(32),
       };
       const predicted = CatapultarAccount.predict(options);
-      const pubkeyArray = pubkeyAsArray(options);
+      const keyArray = ownerToKeyArray(options.owner);
       const factoryReturned = await publicClient.readContract({
         address: options.factory,
         abi: CATAPULTAR_FACTORY_V0_1_0_ABI,
         functionName: "predictDeployWithDigest",
         args: [
-          options.keyType as AccountPublicKeyType,
-          pubkeyArray,
+          ownerTypeToEnum(options.owner.type),
+          keyArray,
           options.salt,
           options.callDigest,
           options.isSignature,
@@ -82,6 +79,39 @@ describe("Catapultar Account", () => {
       });
 
       expect(predicted).toBe(factoryReturned);
+    });
+  });
+
+  describe("owner wrappers", () => {
+    const account = new CatapultarAccount({
+      address: "0x1111111111111111111111111111111111111111",
+      owner: {
+        type: "ecdsa",
+        address: "0x2222222222222222222222222222222222222222",
+      },
+    });
+
+    it("uses the transferOwnership(uint8,bytes32[]) overload for a normal transfer", () => {
+      const call = account.buildTransferOwnershipCall({
+        newOwner: {
+          type: "ecdsa",
+          address: "0x3333333333333333333333333333333333333333",
+        },
+      });
+      // selector of transferOwnership(uint8,bytes32[])
+      expect(call.data.startsWith("0xe3c21638")).toBe(true);
+      expect(call.to).toBe(account.address);
+    });
+
+    it("uses the transferOwnership(address) overload to resign to the zero address", () => {
+      const call = account.buildTransferOwnershipCall({
+        newOwner: {
+          type: "ecdsa",
+          address: "0x0000000000000000000000000000000000000000",
+        },
+      });
+      // selector of transferOwnership(address)
+      expect(call.data.startsWith("0xf2fde38b")).toBe(true);
     });
   });
 
@@ -95,21 +125,16 @@ describe("Catapultar Account", () => {
       transport: http(rpcUrl()),
     });
 
-    let deployedAccountV010: CatapultarAccount<
-      Version,
-      string,
-      AccountPublicKeyType
-    >;
+    let deployedAccountV010: CatapultarAccount<Owner, true>;
 
     beforeAll(async () => {
-      const deployCall010 = await CatapultarAccount.deploy({
-        keyType: AccountPublicKeyType.ECDSAOrSmartContract,
-        pubkey: pubkey.address,
+      const deployCall010 = CatapultarAccount.deploy({
+        owner: { type: "ecdsa", address: pubkey.address },
         salt: `0x${asHex(0n, 20)}${random(12).replace("0x", "")}`,
         factory: factories["0.1.0"],
         template: templates["0.1.0"],
       });
-      deployedAccountV010 = deployCall010.account.attachRpc({
+      deployedAccountV010 = deployCall010.account.connectRpc({
         chainId,
         rpc: rpcUrl(),
       });
@@ -120,7 +145,7 @@ describe("Catapultar Account", () => {
       await waitForTransaction(tx);
     });
 
-    it.serial("should deploy with set pubkey", async () => {
+    it.serial("should deploy with set owner", async () => {
       const publicClientOwner = await publicClient.readContract({
         address: deployedAccountV010.address,
         abi: deployedAccountV010.abi(),
@@ -135,20 +160,20 @@ describe("Catapultar Account", () => {
     it.serial("should validate owner for p256 accounts", async () => {
       const p256PrivateKey = P256.randomPrivateKey();
       const { x, y } = P256.getPublicKey({ privateKey: p256PrivateKey });
-      const p256Pubkey = [asHex(x, 32, "0x"), asHex(y, 32, "0x")] as [
-        `0x${string}`,
-        `0x${string}`,
-      ];
+      const owner: Owner = {
+        type: "p256",
+        x: asHex(x, 32, "0x"),
+        y: asHex(y, 32, "0x"),
+      };
 
-      const deployCall = await CatapultarAccount.deploy({
-        keyType: AccountPublicKeyType.P256,
-        pubkey: p256Pubkey,
+      const deployCall = CatapultarAccount.deploy({
+        owner,
         salt: `0x${asHex(0n, 20)}${random(12).replace("0x", "")}`,
         factory: factories["0.1.0"],
         template: templates["0.1.0"],
       });
 
-      const p256Account = deployCall.account.attachRpc({
+      const p256Account = deployCall.account.connectRpc({
         chainId,
         rpc: rpcUrl(),
       });
@@ -164,9 +189,8 @@ describe("Catapultar Account", () => {
     it.serial("should deploy with digest call", async () => {
       const digest = random(32);
 
-      const deployCall = await CatapultarAccount.deploy({
-        keyType: AccountPublicKeyType.ECDSAOrSmartContract,
-        pubkey: pubkey.address,
+      const deployCall = CatapultarAccount.deploy({
+        owner: { type: "ecdsa", address: pubkey.address },
         salt: `0x${asHex(0n, 20)}${random(12).replace("0x", "")}`,
         callDigest: digest,
         isSignature: false,
@@ -177,17 +201,12 @@ describe("Catapultar Account", () => {
       // We need to wait for the transaction to be finalised.
       await waitForTransaction(tx);
 
-      const smartAccount = deployCall.account.attachRpc({
+      const smartAccount = deployCall.account.connectRpc({
         chainId,
         rpc: rpcUrl(),
       });
 
-      const approvalStatus = await publicClient.readContract({
-        address: smartAccount.address,
-        abi: smartAccount.abi(),
-        functionName: "approvedDigest",
-        args: [digest],
-      });
+      const approvalStatus = await smartAccount.isDigestApproved({ digest });
 
       expect(approvalStatus).toBe(1);
     });
@@ -195,9 +214,8 @@ describe("Catapultar Account", () => {
     it.serial("should deploy with digest signature", async () => {
       const digest = random(32);
 
-      const deployCall = await CatapultarAccount.deploy({
-        keyType: AccountPublicKeyType.ECDSAOrSmartContract,
-        pubkey: pubkey.address,
+      const deployCall = CatapultarAccount.deploy({
+        owner: { type: "ecdsa", address: pubkey.address },
         salt: `0x${asHex(0n, 20)}${random(12).replace("0x", "")}`,
         factory: factories["0.1.0"],
         template: templates["0.1.0"],
@@ -210,17 +228,12 @@ describe("Catapultar Account", () => {
       // We need to wait for the transaction to be finalised.
       await waitForTransaction(tx);
 
-      const smartAccount = deployCall.account.attachRpc({
+      const smartAccount = deployCall.account.connectRpc({
         chainId,
         rpc: rpcUrl(),
       });
 
-      const approvalStatus = await publicClient.readContract({
-        address: smartAccount.address,
-        abi: smartAccount.abi(),
-        functionName: "approvedDigest",
-        args: [digest],
-      });
+      const approvalStatus = await smartAccount.isDigestApproved({ digest });
 
       expect(approvalStatus).toBe(2);
     });

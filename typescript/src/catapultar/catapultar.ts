@@ -1,50 +1,48 @@
-import { hashTypedData } from "viem";
 import { random } from "../utils/helpers";
 import {
-  AccountPublicKeyType,
-  CallsTyped,
   ExecutionMode,
   type AccountConstructorParams,
   type Call,
   type KeyedSignature,
-  type Version,
+  type Owner,
 } from "../types/types";
+import { callsDigest, callsTypedData } from "../protocol/calls";
+import { assertCalls, assertMode, assertNonce } from "../protocol/validation";
 import { CatapultarAccount } from "./account";
 import { BaseTransaction } from "../transaction/transaction";
 
 /**
  * A Catapultar transaction wrapper. Is intended to be used to convert a list of calls into a single Catapultar batch.
  * @dev The class is intended to be used through modifiers, meaning each property should be set iteratively on the object:
- * const tx = new CatapultarTx(options).setMode(ExecutionMode.RaiseRevert).setNonce(12n).addCalls(...[]).sign(() => ...).asParameters();
+ * const tx = new CatapultarTx(options).setMode(ExecutionMode.RaiseRevert).setNonce(12n).addCall(...[]).sign(() => ...).asParameters();
  * To batch batches, multiple sub CatapultarTx can be created and then converted into calls like:
- * calls.push(new CatapultarTx(options).addCalls(...[]).asCall());
- * new CatapultarTx(options).addCalls(...calls).sign(() => ...).asParameters();
+ * calls.push(await new CatapultarTx(options).addCall(...[]).asCall());
+ * new CatapultarTx(options).addCall(...calls).sign(() => ...).asParameters();
  */
 export class CatapultarTx<
-  V extends Version,
-  RPC extends string | undefined = undefined,
-  AKT extends AccountPublicKeyType = AccountPublicKeyType.ECDSAOrSmartContract,
+  O extends Owner = Owner,
+  Connected extends boolean = false,
 > extends BaseTransaction {
-  account: CatapultarAccount<V, RPC, AKT>;
+  account: CatapultarAccount<O, Connected>;
 
   /**
    * Create a new Catapultar transaction batch.
    */
   constructor(options: {
-    account:
-      | AccountConstructorParams<V, RPC, AKT>
-      | CatapultarAccount<V, RPC, AKT>;
+    account: AccountConstructorParams<O> | CatapultarAccount<O, Connected>;
     mode?: ExecutionMode;
     nonce?: bigint;
     calls?: Call[];
     signature?: `0x${string}`;
-    // provider?: Provider;
   }) {
     super(options);
-    // TODO: If given an object, assign object instead of recreating account.
-    this.account = new CatapultarAccount<V, RPC, AKT>(
-      options.account as AccountConstructorParams<V, RPC, AKT>,
-    );
+    this.account =
+      options.account instanceof CatapultarAccount
+        ? options.account
+        : (new CatapultarAccount<O>(options.account) as CatapultarAccount<
+            O,
+            Connected
+          >);
   }
 
   // --- Export the transaction for saving --- //
@@ -56,9 +54,8 @@ export class CatapultarTx<
     return {
       account: {
         address: this.account.address,
-        accountPublicKeyType: this.account.accountPublicKeyType,
+        owner: this.account.owner,
         chainId: this.account.chainId,
-        pubkey: this.account.pubkey,
         name: this.account.name,
         version: this.account.version,
       },
@@ -72,8 +69,8 @@ export class CatapultarTx<
   /**
    * Sets a signature along with its type. If non-ecdsa signatures are being set, this provides additional aids with encoding
    */
-  setSignature(signature: KeyedSignature<AKT>) {
-    this.signature = this.account.parseSignature(signature)!;
+  setSignature(signature: KeyedSignature<O>) {
+    this.signature = this.account.parseSignature(signature);
   }
 
   /**
@@ -84,7 +81,7 @@ export class CatapultarTx<
   async sign(
     callback: (
       options: ReturnType<typeof this.getSignerData>,
-    ) => Promise<KeyedSignature<AKT>>,
+    ) => Promise<KeyedSignature<O>>,
     options?: { ignoreNoCalls?: boolean },
   ) {
     const signerData = this.getSignerData(options);
@@ -112,7 +109,7 @@ export class CatapultarTx<
     return this;
   }
 
-  async validateUsingProvider(this: CatapultarTx<V, string>) {
+  async validateUsingProvider(this: CatapultarTx<O, true>) {
     await this.account.validateNonce({ nonce: this.nonce });
     await this.account.validateOwner();
 
@@ -127,62 +124,22 @@ export class CatapultarTx<
    */
   getSignerData(options?: { ignoreNoCalls?: boolean }) {
     const { ignoreNoCalls = false } = options ?? {};
-    if (this.nonce === 0n)
-      throw new Error(
-        `Nonce 0 is not allowed. It cannot be differentiated from an invalid nonce.`,
-      );
-    if (!this.nonce) throw new Error("Nonce has not been set");
-    if (!this.mode || !this.hasValidMode())
-      throw new Error("Mode has not been set");
-    if (!ignoreNoCalls && this.calls.length === 0)
-      throw new Error("Calls have not been set");
+    const { nonce, mode, calls } = this;
+    assertNonce(nonce);
+    assertMode(mode);
+    if (!ignoreNoCalls) assertCalls(calls);
 
-    return {
-      domain: this.account.getDomainSeparator({
+    return callsTypedData(
+      this.account.getDomainSeparator({
         chain: !this.hasMultichainMode(),
       }),
-      types: CallsTyped,
-      primaryType: "Calls",
-      message: {
-        nonce: this.nonce,
-        mode: this.mode,
-        calls: this.calls,
-      },
-    } as const;
+      { nonce, mode, calls },
+    );
   }
 
   getTypeHashDigest(options?: { ignoreNoCalls?: boolean }) {
     const signerData = this.getSignerData(options);
-
-    return hashTypedData(signerData);
-  }
-
-  /**
-   * Returns the signature as a on-chain compatible signature with an indicator byte.
-   * For ECDSA / Smart contracts returns as is.
-   * For P256, pads to 65. Then adds 00.
-   *
-   * @param Signature If provided, will act on the provided signature instead.
-   */
-  asCompatibleSignature(signature?: `0x${string}`): `0x${string}` {
-    const sig = signature ?? this.signature;
-    if (!sig) throw new Error("A signature has to be provided");
-    if (
-      this.account.accountPublicKeyType ===
-      AccountPublicKeyType.ECDSAOrSmartContract
-    )
-      return sig;
-
-    if (
-      this.account.accountPublicKeyType === AccountPublicKeyType.P256 ||
-      this.account.accountPublicKeyType === AccountPublicKeyType.WebAuthnP256
-    ) {
-      // If length >= 66, return as is.
-      if (sig.replace("0x", "").length >= 66 * 2) return sig;
-      // Pad end to 65. Then add 00.
-      return `0x${sig.replace("0x", "").padEnd(65 * 2, "0")}00`;
-    }
-    throw new Error(`Unknown key scheme ${this.account.accountPublicKeyType}`);
+    return callsDigest(signerData.domain, signerData.message);
   }
 
   // --- Convert the transaction object into actionable items --- //
@@ -191,9 +148,8 @@ export class CatapultarTx<
    * @return As a call for further scheduling or manual transaction signing. If used for manual transaction.
    */
   async asCall(): Promise<Call> {
-    // TODO: validation
     return {
-      ...(await this.asCallData()),
+      ...this.asCallData(),
       to: this.account.address,
     };
   }
@@ -204,9 +160,8 @@ export class CatapultarTx<
  * Intended usecase: Wrapping multiple transactions (that can later be retried) into a single batch.
  */
 export class MetaCatapultarTx<
-  V extends Version,
-  RPC extends string | undefined = undefined,
-  AKT extends AccountPublicKeyType = AccountPublicKeyType.ECDSAOrSmartContract,
+  O extends Owner = Owner,
+  Connected extends boolean = false,
 > {
   mode?: ExecutionMode;
   nonce?: bigint;
@@ -215,22 +170,23 @@ export class MetaCatapultarTx<
   outerNonce: bigint;
   innerNonce: bigint;
 
-  account: CatapultarAccount<V, RPC, AKT>;
+  account: CatapultarAccount<O, Connected>;
 
   constructor(options: {
-    account:
-      | AccountConstructorParams<V, RPC, AKT>
-      | CatapultarAccount<V, RPC, AKT>;
+    account: AccountConstructorParams<O> | CatapultarAccount<O, Connected>;
     mode?: ExecutionMode;
     nonce?: bigint;
     signature?: `0x${string}`;
     outerNonce?: bigint;
     innerNonce?: bigint;
   }) {
-    // TODO: If given an object, assign object instead of recreating account.
-    this.account = new CatapultarAccount<V, RPC, AKT>(
-      options.account as AccountConstructorParams<V, RPC, AKT>,
-    );
+    this.account =
+      options.account instanceof CatapultarAccount
+        ? options.account
+        : (new CatapultarAccount<O>(options.account) as CatapultarAccount<
+            O,
+            Connected
+          >);
     // Random bytes with rightmost byte empty.
     const randomNonce = BigInt(random(31)) << 8n;
     const {

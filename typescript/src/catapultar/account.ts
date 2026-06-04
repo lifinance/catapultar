@@ -1,108 +1,134 @@
 import {
   createPublicClient,
   decodeAbiParameters,
-  encodeAbiParameters,
   encodeFunctionData,
-  encodePacked,
   getCreate2Address,
   http,
   keccak256,
   parseAbiParameters,
   recoverAddress,
+  zeroAddress,
   type PublicClient,
 } from "viem";
 import {
-  type Version,
-  type Call,
-  AccountPublicKeyType,
-  type AccountPublicVar,
+  DigestApproval,
   type AccountConstructorParams,
-  type KeyedSignature,
+  type Call,
   type EmbeddedCall,
-  type Pubkey,
+  type KeyedSignature,
   type MaybeFactory,
+  type Owner,
+  type OwnerOf,
+  type Version,
 } from "../types/types";
 import { getViemChainId } from "../utils/viem";
 import CATAPULTAR_V0_1_0_ABI from "../abi/catapultarV0.1.0";
 import CATAPULTAR_FACTORY_V0_1_0_ABI from "../abi/catapultarFactoryV0.1.0";
-import { pubkeyAsArray } from "../utils/helpers";
-// import { CATAPULTAR_V0_0_1_ABI } from "../abi/catapultarV0.0.1";
+import {
+  keyArrayToOwner,
+  ownersEqual,
+  ownerToKeyArray,
+  ownerTypeToEnum,
+} from "../protocol/owner";
+import { factorySalt, factorySaltWithDigest } from "../protocol/factory";
+import {
+  fromCompactSignature,
+  normalizeSignature,
+} from "../protocol/signature";
+import type { CatapultarDomain } from "../protocol/calls";
 import { P256, PublicKey, WebAuthnP256 } from "ox";
-import { fromCompactSignature } from "../utils/signature";
 import { _factory } from "../config";
 
+/**
+ * A Catapultar smart account.
+ *
+ * The account is identified by its {@link Owner} (an ECDSA address, or a P256 /
+ * WebAuthn public key). It is offline by default; attach a viem client with
+ * {@link CatapultarAccount.connect} (or {@link CatapultarAccount.connectRpc})
+ * to unlock on-chain reads. The `Connected` type parameter records, at compile
+ * time, whether a client is attached so read methods are only callable once it is.
+ *
+ * @typeParam O The owner variant controlling this account.
+ * @typeParam Connected Whether a viem client is attached (read methods require `true`).
+ */
 export class CatapultarAccount<
-  V extends Version = "0.1.0",
-  RPC extends string | undefined = undefined,
-  AKT extends AccountPublicKeyType = AccountPublicKeyType.ECDSAOrSmartContract,
+  O extends Owner = Owner,
+  Connected extends boolean = false,
 > {
-  /** This is not the pubkey of the account, this is the smart account itself. */
+  /** Address of the smart account itself (not the owner key). */
   readonly address: `0x${string}`;
-  /** ChainId of the account. */
-  chainId: undefined extends RPC ? number | undefined : number;
+  /** ChainId of the account. Used for the single-chain domain separator. */
+  chainId: number | undefined;
 
   /** Name of the account. Used for the domainSeparator. */
   readonly name: string;
   /** Version of the account. Used for the domainSeparator. */
-  readonly version: V;
+  readonly version: Version;
 
-  rpc: RPC | undefined;
+  /** Owner of the account (ECDSA address or P256/WebAuthn public key). */
+  readonly owner: O;
 
-  /** Account to validate account signatures against. */
-  pubkey: AccountPublicVar<AKT>;
-  accountPublicKeyType: AKT;
+  /** Attached viem client used for on-chain reads, if any. */
+  private _client: PublicClient | undefined;
 
-  constructor(options: AccountConstructorParams<V, RPC, AKT>) {
+  /**
+   * Phantom marker — never assigned at runtime. It makes `Connected` part of the
+   * structural type so `CatapultarAccount<O, false>` and `CatapultarAccount<O, true>`
+   * are not interchangeable, which is what lets the `this: CatapultarAccount<O, true>`
+   * annotations actually reject reads on a not-yet-connected account.
+   */
+  declare readonly __connected: Connected;
+
+  constructor(options: AccountConstructorParams<O>) {
     const {
       address,
-      accountPublicKeyType = AccountPublicKeyType.ECDSAOrSmartContract as AKT,
+      owner,
       chainId,
-      pubkey,
       name = "Catapultar",
       version = "0.1.0",
+      client,
       rpc,
     } = options;
 
-    // Account definition
+    // Owner definition / validation. The discriminated union already guarantees
+    // the field shapes, so this only guards against malformed runtime values.
+    if (owner.type === "ecdsa") {
+      if (!owner.address) throw new Error("ecdsa owner requires an address");
+    } else if (owner.type === "p256" || owner.type === "webauthn-p256") {
+      if (!owner.x || !owner.y)
+        throw new Error(`${owner.type} owner requires x and y coordinates`);
+    } else {
+      throw new Error(
+        `Unknown owner type: ${(owner as { type: string }).type}`,
+      );
+    }
+
     this.address = address;
-    this.chainId = chainId as undefined extends RPC
-      ? number | undefined
-      : number;
-
-    // Validation
-    if (
-      accountPublicKeyType === AccountPublicKeyType.ECDSAOrSmartContract &&
-      Array.isArray(pubkey)
-    )
-      throw new Error(
-        `Only one key allowed for ECDSA or SmartContract: ${pubkey}`,
-      );
-    if (
-      [AccountPublicKeyType.P256, AccountPublicKeyType.WebAuthnP256].includes(
-        accountPublicKeyType,
-      ) &&
-      !Array.isArray(pubkey)
-    )
-      throw new Error(
-        `P256 signatures requires the pubkey as exactly 2 points: ${pubkey}`,
-      );
-    this.pubkey = pubkey;
-    this.accountPublicKeyType = accountPublicKeyType;
-
-    this.rpc = rpc;
-
-    // Custom domainSeparator
+    this.owner = owner;
     this.name = name;
-    this.version = version as V;
+    this.version = version;
+
+    // Connectivity (Finding 4): accept a viem client directly, or build one
+    // from an rpc + chainId convenience pair.
+    this.chainId = chainId;
+    if (client) {
+      this._client = client;
+      if (this.chainId === undefined) this.chainId = client.chain?.id;
+    } else if (rpc) {
+      this._client = createPublicClient({
+        chain: chainId !== undefined ? getViemChainId(chainId) : undefined,
+        transport: http(rpc),
+      });
+    }
   }
 
-  static deploy<V extends Version, AKT extends AccountPublicKeyType>(
+  static deploy<O extends Owner>(
     options: {
       salt: `0x${string}`;
-    } & Pubkey<AKT> &
-      MaybeFactory &
+      owner: O;
+    } & MaybeFactory &
       ({} | EmbeddedCall),
-  ): { call: Call; account: CatapultarAccount<V, undefined, AKT> } {
+  ): { call: Call; account: CatapultarAccount<O, false> } {
     let callDigest: `0x${string}` | undefined = undefined;
     let isSignature: boolean | undefined = undefined;
     if ("callDigest" in options && "isSignature" in options) {
@@ -110,25 +136,21 @@ export class CatapultarAccount<
       isSignature = options.isSignature;
     }
 
-    // predict() performs the same `callDigest`/`isSignature` check internally,
-    // so the spread covers both the embedded-call and plain-deploy cases.
-    const { factory, template } = _factory(options);
-    const derivedAddress = CatapultarAccount.predict({
-      ...options,
-      factory,
-      template,
-    });
+    const { factory } = _factory(options);
+    // predict() performs the same `callDigest`/`isSignature` check internally.
+    const derivedAddress = CatapultarAccount.predict(options);
 
-    const pubkeyArray = pubkeyAsArray(options);
-    const call = {
+    const keyType = ownerTypeToEnum(options.owner.type);
+    const keyArray = ownerToKeyArray(options.owner);
+    const call: Call = {
       to: factory,
       data: callDigest
         ? encodeFunctionData({
             abi: CATAPULTAR_FACTORY_V0_1_0_ABI,
             functionName: "deployWithDigest",
             args: [
-              options.keyType,
-              pubkeyArray,
+              keyType,
+              keyArray,
               options.salt,
               callDigest,
               isSignature as boolean,
@@ -137,17 +159,16 @@ export class CatapultarAccount<
         : encodeFunctionData({
             abi: CATAPULTAR_FACTORY_V0_1_0_ABI,
             functionName: "deploy",
-            args: [options.keyType, pubkeyArray, options.salt],
+            args: [keyType, keyArray, options.salt],
           }),
       value: 0n,
     };
 
     return {
       call,
-      account: new CatapultarAccount({
+      account: new CatapultarAccount<O, false>({
         address: derivedAddress,
-        accountPublicKeyType: options.keyType,
-        pubkey: options.pubkey,
+        owner: options.owner,
       }),
     };
   }
@@ -169,53 +190,28 @@ export class CatapultarAccount<
     });
   }
 
-  // Mirrors CatapultarFactory._salt(preSalt, ktp, owner):
-  // keccak256(preSalt || ktp (1 byte) || numOwners (1 byte) || owner[0] || ... || owner[n])
-  private static _factorySalt<AKT extends AccountPublicKeyType>(
-    preSalt: `0x${string}`,
-    ktp: AKT,
-    pubkeyArray: `0x${string}`[],
-  ): `0x${string}` {
-    const numOwners = pubkeyArray.length;
-    const types = [
-      "bytes32",
-      "uint8",
-      "uint8",
-      ...pubkeyArray.map((): "bytes32" => "bytes32"),
-    ] as const;
-    const values = [preSalt, ktp as number, numOwners, ...pubkeyArray] as const;
-    return keccak256(
-      encodePacked(
-        types as unknown as string[],
-        values as unknown as unknown[],
-      ),
-    );
-  }
-
-  static predict<AKT extends AccountPublicKeyType>(
+  static predict<O extends Owner>(
     opt: {
       salt: `0x${string}`;
-    } & Pubkey<AKT> &
-      MaybeFactory &
+      owner: O;
+    } & MaybeFactory &
       ({} | EmbeddedCall),
   ) {
     const { salt } = opt;
     const { factory, template } = _factory(opt);
-    const pubkeyArray = pubkeyAsArray(opt);
+    const keyArray = ownerToKeyArray(opt.owner);
 
-    const internalSalt = CatapultarAccount._factorySalt(
+    const internalSalt = factorySalt(
       salt,
-      opt.keyType,
-      pubkeyArray,
+      ownerTypeToEnum(opt.owner.type),
+      keyArray,
     );
 
     if ("callDigest" in opt && "isSignature" in opt) {
-      const { callDigest, isSignature } = opt;
-      const finalSalt = keccak256(
-        encodePacked(
-          ["bytes32", "bytes32", "uint256"],
-          [internalSalt, callDigest, isSignature ? 2n : 1n],
-        ),
+      const finalSalt = factorySaltWithDigest(
+        internalSalt,
+        opt.callDigest,
+        opt.isSignature,
       );
       return CatapultarAccount.deriveCloneAddress(template, finalSalt, factory);
     }
@@ -226,109 +222,155 @@ export class CatapultarAccount<
     );
   }
 
-  publicClient(this: CatapultarAccount<any, string, any>): PublicClient {
-    const viemChain = getViemChainId(this.chainId);
-    return createPublicClient({
-      chain: viemChain,
-      transport: http(this.rpc),
-    });
+  // --- Connectivity (Finding 4) --- //
+
+  /**
+   * Attach a viem `PublicClient`, enabling on-chain reads. Returns the
+   * account narrowed to the connected type — use the returned value.
+   */
+  connect(client: PublicClient): CatapultarAccount<O, true> {
+    this._client = client;
+    if (this.chainId === undefined) this.chainId = client.chain?.id;
+    return this as unknown as CatapultarAccount<O, true>;
   }
 
-  abi(this: CatapultarAccount<V, any, any>): typeof CATAPULTAR_V0_1_0_ABI {
-    return CATAPULTAR_V0_1_0_ABI;
-  }
-
-  hasRpc(): this is CatapultarAccount<any, string, any> {
-    return typeof this.rpc === "string" && this.rpc.length > 0;
-  }
-
-  hasECDSAOrSmartContractKey(): this is CatapultarAccount<
-    any,
-    any,
-    AccountPublicKeyType.ECDSAOrSmartContract
-  > {
-    return (
-      this.accountPublicKeyType === AccountPublicKeyType.ECDSAOrSmartContract
+  /**
+   * Convenience: build a `PublicClient` from an RPC URL + chainId and attach it.
+   */
+  connectRpc(options: {
+    rpc: string;
+    chainId: number;
+  }): CatapultarAccount<O, true> {
+    this.chainId = options.chainId;
+    return this.connect(
+      createPublicClient({
+        chain: getViemChainId(options.chainId),
+        transport: http(options.rpc),
+      }),
     );
   }
 
-  hasP256Key(): this is CatapultarAccount<any, any, AccountPublicKeyType.P256> {
-    return this.accountPublicKeyType === AccountPublicKeyType.P256;
-  }
-
-  hasWebAuthnP256Key(): this is CatapultarAccount<
-    any,
-    any,
-    AccountPublicKeyType.WebAuthnP256
-  > {
-    return this.accountPublicKeyType === AccountPublicKeyType.WebAuthnP256;
-  }
-
-  attachRpc(opt: {
-    rpc: string;
-    chainId: number;
-  }): CatapultarAccount<V, string, AKT> {
-    this.rpc = opt.rpc as RPC;
-    this.chainId = opt.chainId;
-    return this as this & CatapultarAccount<V, string, AKT>;
-  }
-
-  parseSignature(signature: KeyedSignature<AKT>): `0x${string}` | undefined {
-    if (this.hasECDSAOrSmartContractKey())
-      return signature as KeyedSignature<AccountPublicKeyType.ECDSAOrSmartContract>;
-    if (this.hasP256Key()) {
-      let rawSignature = (
-        signature as KeyedSignature<AccountPublicKeyType.P256>
-      ).replace("0x", "");
-      // If the signature is 64 bytes long (default) or 65 (mistake?)
-      // then add 0000 to the signature. This indicate an additional SHA256 hash.
-      if (rawSignature.length <= 65 * 2) {
-        rawSignature = `${rawSignature.padEnd(65 * 2, "0")}${"00"}`;
-      }
-      return `0x${rawSignature}`;
-    }
-    if (this.hasWebAuthnP256Key()) {
-      const sig =
-        signature as KeyedSignature<AccountPublicKeyType.WebAuthnP256>;
-      // const abiencode the directory.
-      const encodedParams = encodeAbiParameters(
-        parseAbiParameters([
-          "WebAuthnAuth auth",
-          "struct WebAuthnAuth { bytes authenticatorData; string clientDataJSON; uint256 challengeIndex; uint256 typeIndex; uint256 r; uint256 s;}",
-        ]),
-        [
-          {
-            ...sig,
-            typeIndex: BigInt(sig.typeIndex),
-            challengeIndex: BigInt(sig.challengeIndex),
-          },
-        ],
+  /** The attached viem client. Throws if the account is not connected. */
+  publicClient(this: CatapultarAccount<O, true>): PublicClient {
+    if (!this._client)
+      throw new Error(
+        "No client attached. Call connect() or connectRpc() first.",
       );
-      return `${encodedParams}00`; // No SHA256 prehash.
-    }
+    return this._client;
   }
 
-  // --- Writing Functions --- //
+  abi(): typeof CATAPULTAR_V0_1_0_ABI {
+    return CATAPULTAR_V0_1_0_ABI;
+  }
 
-  //  upgrade(options: {
-  //   target: `0x${string}`;
-  //   implementation: `0x${string}`;
-  //   data?: `0x${string}`;
-  // }) {
-  //   let { data } = options;
-  //   if (!data) data = `0x`;
-  // target.upgradeToAndCall
-  // }
+  // --- Type guards --- //
 
-  // TransferOwnership
+  isConnected(): this is CatapultarAccount<O, true> {
+    return this._client !== undefined;
+  }
 
-  // spend nonces.
+  isEcdsa(): this is CatapultarAccount<OwnerOf<"ecdsa">, Connected> {
+    return this.owner.type === "ecdsa";
+  }
+
+  isP256(): this is CatapultarAccount<OwnerOf<"p256">, Connected> {
+    return this.owner.type === "p256";
+  }
+
+  isWebAuthn(): this is CatapultarAccount<OwnerOf<"webauthn-p256">, Connected> {
+    return this.owner.type === "webauthn-p256";
+  }
 
   /**
-   * Invalidates a set of nonces. Batches nonces that can be invalidated in a single call.
-   * @param nonces Nonces to invalidate
+   * Normalize a keyed signature into the on-chain wire format for this owner.
+   * Delegates to the centralized protocol encoder.
    */
-  async getSpendNoncesCalls(...nonces: bigint[]): Promise<Call[]> {
+  parseSignature(signature: KeyedSignature<O>): `0x${string}` {
+    return normalizeSignature(this.owner, signature as KeyedSignature<Owner>);
+  }
+
+  // --- Writing Functions (build calls) --- //
+
+  /**
+   * Build a call that approves a digest on the account (`setSignature`). Use
+   * {@link DigestApproval.Call} for an embedded call digest or
+   * {@link DigestApproval.Signature} for a pre-approved message hash.
+   *
+   * Requires the account owner (or a self-call inside an executed batch).
+   */
+  buildApproveDigestCall(options: {
+    digest: `0x${string}`;
+    approval: DigestApproval;
+  }): Call {
+    return {
+      to: this.address,
+      value: 0n,
+      data: encodeFunctionData({
+        abi: CATAPULTAR_V0_1_0_ABI,
+        functionName: "setSignature",
+        args: [options.digest, options.approval],
+      }),
+    };
+  }
+
+  /**
+   * Build a call that transfers ownership to a new {@link Owner}. Requires the
+   * current owner (or a self-call inside an executed batch).
+   *
+   * Normal handovers use the `transferOwnership(uint8, bytes32[])` overload so
+   * every key type flows through one path. To resign ownership, pass
+   * `{ type: "ecdsa", address: <zero address> }` — that is routed through the
+   * `transferOwnership(address)` overload, the only on-chain path that accepts a
+   * zero owner (the keyed overload would revert `InvalidKey`).
+   */
+  buildTransferOwnershipCall(options: { newOwner: Owner }): Call {
+    const { newOwner } = options;
+    const data =
+      newOwner.type === "ecdsa" && BigInt(newOwner.address) === 0n
+        ? encodeFunctionData({
+            abi: CATAPULTAR_V0_1_0_ABI,
+            functionName: "transferOwnership",
+            args: [zeroAddress],
+          })
+        : encodeFunctionData({
+            abi: CATAPULTAR_V0_1_0_ABI,
+            functionName: "transferOwnership",
+            args: [ownerTypeToEnum(newOwner.type), ownerToKeyArray(newOwner)],
+          });
+    return {
+      to: this.address,
+      value: 0n,
+      data,
+    };
+  }
+
+  /**
+   * Build a call that upgrades the account implementation (`upgradeToAndCall`).
+   * Only meaningful for upgradeable-proxy clones (see {@link isUpgradeable}).
+   * Requires the owner (or a self-call).
+   */
+  buildUpgradeCall(options: {
+    implementation: `0x${string}`;
+    data?: `0x${string}`;
+  }): Call {
+    return {
+      to: this.address,
+      value: 0n,
+      data: encodeFunctionData({
+        abi: CATAPULTAR_V0_1_0_ABI,
+        functionName: "upgradeToAndCall",
+        args: [options.implementation, options.data ?? "0x"],
+      }),
+    };
+  }
+
+  /**
+   * Build the calls that invalidate a set of nonces, batching nonces that share
+   * a bitmap word into a single `invalidateUnorderedNonces` call. Requires the
+   * owner (or a self-call).
+   * @param nonces Nonces to invalidate.
+   */
+  invalidateNonces(...nonces: bigint[]): Call[] {
     const pairs = new Set(nonces.map((n) => n >> 8n));
     const bitMaps = [...pairs].map((wordPos) => {
       const toInvalidate = nonces.filter((n) => n >> 8n === wordPos);
@@ -339,28 +381,25 @@ export class CatapultarAccount<
       }
       return [wordPos, mask] as [bigint, bigint];
     });
-    return bitMaps.map(([wordPos, mask]) => {
-      const data = encodeFunctionData({
+    return bitMaps.map(([wordPos, mask]) => ({
+      to: this.address,
+      value: 0n,
+      data: encodeFunctionData({
         abi: CATAPULTAR_V0_1_0_ABI,
         functionName: "invalidateUnorderedNonces",
         args: [wordPos, mask],
-      });
-      return {
-        to: this.address,
-        value: 0n,
-        data: data,
-      };
-    });
+      }),
+    }));
   }
 
-  // --- Helper functions for the account --- //
+  // --- Reading Functions (require a client) --- //
 
   /**
    * @param nonce Starting nonce.
    * @returns Next valid nonce that has not been spent on-chain yet. If no nonce is found in the given attempts, -1 is returned.
    */
   async getNextValidNonce(
-    this: CatapultarAccount<any, string, any>,
+    this: CatapultarAccount<O, true>,
     options: { nonce: bigint; attempts?: number },
   ) {
     const { nonce: startingNonce, attempts = 10 } = options;
@@ -395,7 +434,7 @@ export class CatapultarAccount<
   }
 
   async validateNonces(
-    this: CatapultarAccount<any, string, any>,
+    this: CatapultarAccount<O, true>,
     options: { nonces: bigint[] },
   ) {
     const lookups: { [upper: string]: bigint } = {};
@@ -429,8 +468,8 @@ export class CatapultarAccount<
     });
   }
 
-  // TODO: P256.
-  async getAccountOwner(this: CatapultarAccount<V, string, any>) {
+  /** Read the raw ECDSA owner address (`owner()` view). */
+  async getAccountOwner(this: CatapultarAccount<O, true>) {
     return this.publicClient().readContract({
       address: this.address,
       abi: this.abi(),
@@ -438,12 +477,47 @@ export class CatapultarAccount<
     });
   }
 
+  /** Read the on-chain owner and decode it into an {@link Owner}. */
+  async getPublicKey(this: CatapultarAccount<O, true>): Promise<Owner> {
+    const [keyType, key] = await this.publicClient().readContract({
+      address: this.address,
+      abi: this.abi(),
+      functionName: "getPublicKey",
+    });
+    return keyArrayToOwner(Number(keyType), key as `0x${string}`[]);
+  }
+
+  /** Whether the account is an upgradeable-proxy clone (`upgradeable()` view). */
+  async isUpgradeable(this: CatapultarAccount<O, true>): Promise<boolean> {
+    return this.publicClient().readContract({
+      address: this.address,
+      abi: this.abi(),
+      functionName: "upgradeable",
+    });
+  }
+
+  /** Read the approval flag stored for a digest (`approvedDigest` view). */
+  async isDigestApproved(
+    this: CatapultarAccount<O, true>,
+    options: { digest: `0x${string}` },
+  ): Promise<DigestApproval> {
+    const flag = await this.publicClient().readContract({
+      address: this.address,
+      abi: this.abi(),
+      functionName: "approvedDigest",
+      args: [options.digest],
+    });
+    return Number(flag) as DigestApproval;
+  }
+
   // --- Get Functions --- //
 
   /**
    * @returns EIP-712 Domain Separator for the account.
    */
-  getDomainSeparator(options: { chain: boolean } = { chain: true }) {
+  getDomainSeparator(
+    options: { chain: boolean } = { chain: true },
+  ): CatapultarDomain {
     const { chain } = options;
     if (chain) {
       if (!this.chainId)
@@ -467,7 +541,7 @@ export class CatapultarAccount<
 
   /**
    * Return whether a signature is valid.
-   * @dev Does not support P256 signatures
+   * @dev Does not support P256 prehash-flag handling; it verifies the raw digest.
    */
   async isSignatureValid(options: {
     signature: `0x${string}`;
@@ -475,7 +549,7 @@ export class CatapultarAccount<
   }): Promise<boolean> {
     const { signature, hash } = options;
 
-    if (this.hasECDSAOrSmartContractKey()) {
+    if (this.isEcdsa()) {
       // Check ECDSA. Only attempt recovery for ECDSA-sized signatures (65 bytes,
       // or a 64-byte EIP-2098 compact signature). Any other length is a
       // contract-specific signature: skip recovery (which would otherwise throw)
@@ -496,21 +570,18 @@ export class CatapultarAccount<
         }
       }
       // Normalize case before comparing: recoverAddress returns a checksummed
-      // address while this.pubkey may have been supplied lower-cased.
-      if (this.pubkey.toLowerCase() === signer.toLowerCase()) return true;
-      if (!this.hasRpc()) return false;
-      const publicClient = this.publicClient();
+      // address while this.owner.address may have been supplied lower-cased.
+      if (this.owner.address.toLowerCase() === signer.toLowerCase())
+        return true;
+      if (!this.isConnected()) return false;
 
-      const result1271 = await publicClient.readContract({
-        address: this.pubkey,
+      const result1271 = await this.publicClient().readContract({
+        address: this.owner.address,
         abi: this.abi(),
         functionName: "isValidSignature",
         args: [hash, signature],
       });
-      if (result1271 === "0x1626ba7e") {
-        return true;
-      }
-      return false;
+      return result1271 === "0x1626ba7e";
     }
     // 0.0.1 does not support anymore validations
     if (this.version === "0.0.1") return false;
@@ -520,21 +591,20 @@ export class CatapultarAccount<
     if (raw.length <= 65 * 2) {
       return false;
     }
-    const pubkey = this.pubkey as [`0x${string}`, `0x${string}`];
-    const publicKey = PublicKey.from({
-      x: BigInt(pubkey[0]),
-      y: BigInt(pubkey[1]),
-    });
-    if (this.hasP256Key()) {
-      const r = BigInt("0x" + raw.slice(0, 64));
-      const s = BigInt("0x" + raw.slice(64, 128));
-      return await P256.verify({
-        payload: hash,
-        publicKey,
-        signature: { r, s },
+    if (this.isP256() || this.isWebAuthn()) {
+      const publicKey = PublicKey.from({
+        x: BigInt(this.owner.x),
+        y: BigInt(this.owner.y),
       });
-    }
-    if (this.hasWebAuthnP256Key()) {
+      if (this.isP256()) {
+        const r = BigInt("0x" + raw.slice(0, 64));
+        const s = BigInt("0x" + raw.slice(64, 128));
+        return await P256.verify({
+          payload: hash,
+          publicKey,
+          signature: { r, s },
+        });
+      }
       const unpackedSig = decodeAbiParameters(
         parseAbiParameters([
           "WebAuthnAuth auth",
@@ -560,47 +630,18 @@ export class CatapultarAccount<
 
   // --- Validation --- //
 
-  async validateOwner(this: CatapultarAccount<any, string, any>) {
-    if (
-      this.accountPublicKeyType === AccountPublicKeyType.ECDSAOrSmartContract
-    ) {
-      const actualAccountOwner = await this.getAccountOwner();
-      const expectedPubkey = (this.pubkey as `0x${string}`).toLowerCase();
-      const normalizedAccountOwner = actualAccountOwner.toLowerCase();
-      if (expectedPubkey !== normalizedAccountOwner)
-        throw new Error(
-          `Expected pubkey: ${this.pubkey}, actual owner: ${actualAccountOwner}`,
-        );
-      return this;
-    }
-
-    const [actualKeyType, actualKey] = await this.publicClient().readContract({
-      address: this.address,
-      abi: this.abi(),
-      functionName: "getPublicKey",
-    });
-    if (actualKeyType !== this.accountPublicKeyType) {
+  /** Validate that the on-chain owner matches this account's configured owner. */
+  async validateOwner(this: CatapultarAccount<O, true>) {
+    const onchain = await this.getPublicKey();
+    if (!ownersEqual(this.owner, onchain))
       throw new Error(
-        `Expected keyType: ${this.accountPublicKeyType}, actual keyType: ${actualKeyType}`,
+        `Expected owner: ${JSON.stringify(this.owner)}, actual owner: ${JSON.stringify(onchain)}`,
       );
-    }
-
-    const expectedPubkey = this.pubkey as [`0x${string}`, `0x${string}`];
-    const normalizeHex = (value: `0x${string}`) => value.toLowerCase();
-    const [expectedX, expectedY] = expectedPubkey.map(normalizeHex);
-    const [actualX, actualY] = (
-      actualKey as [`0x${string}`, `0x${string}`]
-    ).map(normalizeHex);
-    if (expectedX !== actualX || expectedY !== actualY) {
-      throw new Error(
-        `Expected pubkey: ${expectedPubkey}, actual pubkey: ${actualKey}`,
-      );
-    }
     return this;
   }
 
   async validateNonce(
-    this: CatapultarAccount<any, string, any>,
+    this: CatapultarAccount<O, true>,
     options: {
       nonce: bigint | undefined;
     },

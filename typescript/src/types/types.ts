@@ -1,3 +1,15 @@
+import type { PublicClient } from "viem";
+import type { Owner } from "../protocol/owner";
+
+export type {
+  Owner,
+  OwnerType,
+  OwnerOf,
+  EcdsaOwner,
+  P256Owner,
+  WebAuthnOwner,
+} from "../protocol/owner";
+
 /**
  * @param RaiseRevert If a call fails, raise the revert message and do not spend the nonce.
  * @param SkipRevert If a call fails, skip the call, emit an event. The nonce will be spent if the transaction does not run out of gas.
@@ -8,22 +20,12 @@ export enum ExecutionMode {
   RaiseRevertMultiChain = "0x0100010000007821000100000000000000000000000000000000000000000000",
   SkipRevertMultiChain = "0x0101010000007821000100000000000000000000000000000000000000000000",
 }
-export enum AccountPublicKeyType {
-  ECDSAOrSmartContract = 0,
-  P256 = 1,
-  WebAuthnP256 = 2,
-}
+
 export enum DigestApproval {
   Unset = 0,
   Call = 1,
   Signature = 2,
 }
-
-export type P256Points = [`0x${string}`, `0x${string}`];
-export type AccountPublicVar<T extends AccountPublicKeyType> =
-  T extends AccountPublicKeyType.ECDSAOrSmartContract
-    ? `0x${string}`
-    : P256Points;
 
 export type WebAuthnSignature = {
   authenticatorData: `0x${string}`;
@@ -34,34 +36,38 @@ export type WebAuthnSignature = {
   s: bigint;
 };
 
-export type KeyedSignature<T extends AccountPublicKeyType> =
-  T extends AccountPublicKeyType.ECDSAOrSmartContract
-    ? `0x${string}`
-    : T extends AccountPublicKeyType.P256
-      ? `0x${string}`
-      : WebAuthnSignature;
+/**
+ * The output a signer must produce for a given {@link Owner}. ECDSA and P256
+ * keys deliver a raw hex signature; WebAuthn delivers a structured object that
+ * Catapultar encodes for you.
+ */
+export type KeyedSignature<O extends Owner = Owner> = O extends {
+  type: "webauthn-p256";
+}
+  ? WebAuthnSignature
+  : `0x${string}`;
 
 export type Version = `0.1.0` | "0.0.1";
 
-export type AccountConstructorParams<
-  V,
-  RPC,
-  AKT extends AccountPublicKeyType,
-> = {
+/**
+ * Parameters for constructing a {@link CatapultarAccount}.
+ *
+ * Connectivity is optional: pass a viem `client` (or an `rpc` + `chainId`
+ * convenience pair) to enable on-chain reads, or leave them off for a purely
+ * offline account. `chainId` on its own is enough to build single-chain
+ * EIP-712 domains without a client.
+ */
+export type AccountConstructorParams<O extends Owner = Owner> = {
   address: `0x${string}`;
-  accountPublicKeyType?: AKT;
-  pubkey: AccountPublicVar<AKT>;
+  owner: O;
   name?: string;
-  version?: V;
-} & (undefined extends RPC
-  ? {
-      rpc?: RPC;
-      chainId?: number;
-    }
-  : {
-      rpc: RPC;
-      chainId: number;
-    });
+  version?: Version;
+  chainId?: number;
+  /** Bring-your-own viem client used for on-chain reads. */
+  client?: PublicClient;
+  /** Convenience: an RPC URL Catapultar uses to build a client (needs `chainId`). */
+  rpc?: string;
+};
 
 //-- Typehashed Objects --//
 
@@ -149,8 +155,3 @@ export type Factory = {
 };
 
 export type MaybeFactory = {} | Factory;
-
-export type Pubkey<AKT extends AccountPublicKeyType> = {
-  keyType: AKT;
-  pubkey: AccountPublicVar<AKT>;
-};

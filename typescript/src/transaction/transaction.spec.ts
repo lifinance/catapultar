@@ -1,14 +1,10 @@
 import { createPublicClient, createWalletClient, http } from "viem";
-import { AccountPublicKeyType, ExecutionMode, type Call } from "../types/types";
+import { ExecutionMode, type Call } from "../types/types";
 import { random } from "../utils/helpers";
 import { BaseTransaction } from "./transaction";
 import { rpcUrl } from "../../test/setup";
 import { anvil } from "viem/chains";
-import {
-  factories,
-  PUBLIC_DEFAULT_ANVIL_ACCOUNT_0,
-  templates,
-} from "../config";
+import { PUBLIC_DEFAULT_ANVIL_ACCOUNT_0 } from "../config";
 import { privateKeyToAccount } from "viem/accounts";
 import CATAPULTAR_V0_1_0_ABI from "../abi/catapultarV0.1.0";
 
@@ -175,8 +171,7 @@ describe("Base Transaction", () => {
 
       const txAcct = tx.asAccount({
         salt,
-        pubkey: accountOwner.address,
-        keyType: AccountPublicKeyType.ECDSAOrSmartContract,
+        owner: { type: "ecdsa", address: accountOwner.address },
       });
 
       // No account deployed:

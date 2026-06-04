@@ -1,4 +1,4 @@
-import { padEven, random, asHex } from "./helpers";
+import { padEven, asHex } from "./helpers";
 
 describe("Catapultar Helpers", () => {
   it("should pad evenly (padEven)", () => {

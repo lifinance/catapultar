@@ -5,7 +5,6 @@ import {
   http,
   zeroAddress,
 } from "viem";
-import { AccountPublicKeyType } from "../types/types";
 import { ConstrainedAssetTransaction } from "./constrainedtransaction";
 import { anvil } from "viem/chains";
 import { rpcUrl } from "../../test/setup";
@@ -86,8 +85,7 @@ describe("ConstrainedAssetTransaction", () => {
         const accountSalt = oftenTargetAddress.padEnd(66, "0") as `0x${string}`;
         const account = tx.asAccount({
           salt: accountSalt,
-          keyType: AccountPublicKeyType.ECDSAOrSmartContract,
-          pubkey: oftenTargetAddress,
+          owner: { type: "ecdsa", address: oftenTargetAddress },
         });
 
         // Fund the SA account with token1. This simulates the on-board tx.
@@ -180,8 +178,7 @@ describe("ConstrainedAssetTransaction", () => {
       const accountSalt = oftenTargetAddress.padEnd(66, "0") as `0x${string}`;
       const account = tx.asAccount({
         salt: accountSalt,
-        keyType: AccountPublicKeyType.ECDSAOrSmartContract,
-        pubkey: oftenTargetAddress,
+        owner: { type: "ecdsa", address: oftenTargetAddress },
       });
 
       // Fund the SA account with token1. This simulates the on-board tx.

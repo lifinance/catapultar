@@ -2,10 +2,9 @@ import { privateKeyToAccount, type PrivateKeyAccount } from "viem/accounts";
 import { random, asHex } from "../utils/helpers";
 import { CatapultarTx, MetaCatapultarTx } from "./catapultar";
 import {
-  AccountPublicKeyType,
   ExecutionMode,
-  type P256Points,
-  type Version,
+  type Owner,
+  type OwnerType,
   type WebAuthnSignature,
 } from "../types/types";
 import { anvil } from "viem/chains";
@@ -41,12 +40,12 @@ async function waitForTransaction(hash: `0x${string}`) {
 describe("Catapultar", () => {
   describe("Transaction", () => {
     it.concurrent("should disallow nonce 0", () => {
-      const pubkey = "0x1111111111111111111111111111111111111110";
+      const address = "0x1111111111111111111111111111111111111110";
       const tx = new CatapultarTx({
         account: {
           address: "0x1111111111111111111111111111111111111111",
           chainId: 1,
-          pubkey,
+          owner: { type: "ecdsa", address },
         },
       });
       const nonce0Error = `Nonce 0 is not allowed. It cannot be differentiated from an invalid nonce.`;
@@ -55,12 +54,12 @@ describe("Catapultar", () => {
     });
 
     it.concurrent("should return a valid domain separator", () => {
-      const pubkey = "0x1111111111111111111111111111111111111110";
+      const address = "0x1111111111111111111111111111111111111110";
       const tx = new CatapultarTx({
         account: {
           address: "0x1111111111111111111111111111111111111111",
           chainId: 1,
-          pubkey,
+          owner: { type: "ecdsa", address },
           version: "0.0.1",
         },
       });
@@ -77,7 +76,7 @@ describe("Catapultar", () => {
         account: {
           address: "0x1111111111111111111111111111111111111112",
           chainId: 2,
-          pubkey,
+          owner: { type: "ecdsa", address },
           version: "0.1.0",
           name: "Catapulting",
         },
@@ -102,7 +101,7 @@ describe("Catapultar", () => {
           account: {
             address: "0x1111111111111111111111111111111111111111",
             chainId: 1,
-            pubkey: account.address,
+            owner: { type: "ecdsa", address: account.address },
           },
         })
           .setMode(ExecutionMode.RaiseRevert)
@@ -142,7 +141,7 @@ describe("Catapultar", () => {
         account: {
           address: "0x1111111111111111111111111111111111111111",
           chainId: 1,
-          pubkey: account.address,
+          owner: { type: "ecdsa", address: account.address },
         },
       })
         .setMode(ExecutionMode.RaiseRevert)
@@ -185,7 +184,7 @@ describe("Catapultar", () => {
         account: {
           address: "0x1111111111111111111111111111111111111111",
           chainId: 1,
-          pubkey: account.address as `0x${string}`,
+          owner: { type: "ecdsa", address: account.address },
         },
         nonce: 1n,
       }).setMode(ExecutionMode.RaiseRevert);
@@ -239,7 +238,7 @@ describe("Catapultar", () => {
         account: {
           address,
           chainId: 1,
-          pubkey: address,
+          owner: { type: "ecdsa", address },
         },
         outerNonce,
         innerNonce,
@@ -271,7 +270,7 @@ describe("Catapultar", () => {
         { ...call, nonce: 5n },
       ];
       const mTx = new MetaCatapultarTx({
-        account: { address, chainId: 1, pubkey: address },
+        account: { address, chainId: 1, owner: { type: "ecdsa", address } },
       });
       mTx.addCalls(...calls);
       expect(() => mTx.checkNonces()).toThrow(
@@ -326,37 +325,30 @@ describe("Catapultar", () => {
     };
   }
 
-  const integrationTest = (
-    keyType:
-      | AccountPublicKeyType.ECDSAOrSmartContract
-      | AccountPublicKeyType.P256
-      | AccountPublicKeyType.WebAuthnP256,
-  ) =>
-    describe(`Integration ${keyType}`, () => {
+  const integrationTest = (ownerType: OwnerType) =>
+    describe(`Integration ${ownerType}`, () => {
       const publicClient = createPublicClient({
         chain: anvil,
         transport: http(rpcUrl()),
       });
 
       const privateKey =
-        keyType === AccountPublicKeyType.ECDSAOrSmartContract
-          ? random(32)
-          : P256.randomPrivateKey();
+        ownerType === "ecdsa" ? random(32) : P256.randomPrivateKey();
       const p256PubKey = (privateKey: `0x${string}`) => {
         const { x, y } = P256.getPublicKey({ privateKey });
-        return [asHex(x, 32, "0x"), asHex(y, 32, "0x")] as P256Points;
+        return { x: asHex(x, 32, "0x"), y: asHex(y, 32, "0x") };
       };
-      const pubkey =
-        keyType === AccountPublicKeyType.ECDSAOrSmartContract
+      const signer =
+        ownerType === "ecdsa"
           ? privateKeyToAccount(privateKey)
-          : keyType === AccountPublicKeyType.P256
+          : ownerType === "p256"
             ? { signTypedData: p256signFunction(privateKey) }
             : { signTypedData: webAuthnSignFunction(privateKey) };
 
-      const publicKey =
-        keyType === AccountPublicKeyType.ECDSAOrSmartContract
-          ? (pubkey as PrivateKeyAccount).address
-          : p256PubKey(privateKey);
+      const owner: Owner =
+        ownerType === "ecdsa"
+          ? { type: "ecdsa", address: (signer as PrivateKeyAccount).address }
+          : { type: ownerType, ...p256PubKey(privateKey) };
 
       const oftenTargetAddress = random(20); // This is acting as a random address.
 
@@ -367,21 +359,16 @@ describe("Catapultar", () => {
         transport: http(rpcUrl()),
       });
 
-      let deployedAccountV010: CatapultarAccount<
-        Version,
-        string,
-        typeof keyType
-      >;
+      let deployedAccountV010: CatapultarAccount<Owner, true>;
 
       beforeEach(async () => {
-        const deployCall010 = await CatapultarAccount.deploy({
-          keyType: keyType,
-          pubkey: publicKey,
+        const deployCall010 = CatapultarAccount.deploy({
+          owner,
           salt: `0x${asHex(0n, 20)}${random(12).replace("0x", "")}`,
           factory: factories["0.1.0"],
           template: templates["0.1.0"],
         });
-        deployedAccountV010 = deployCall010.account.attachRpc({
+        deployedAccountV010 = deployCall010.account.connectRpc({
           chainId,
           rpc: rpcUrl(),
         });
@@ -419,7 +406,7 @@ describe("Catapultar", () => {
               value,
               data: "0x",
             })
-            .sign((...args) => pubkey.signTypedData(...args))
+            .sign((...args) => signer.signTypedData(...args))
         ).asCall();
 
         const executionTransaction = await executor.sendTransaction(calldata);
@@ -467,7 +454,7 @@ describe("Catapultar", () => {
             .setMode(ExecutionMode.SkipRevert)
             .addCalls(...calls)
             .asCatapultarTx()
-        ).sign((...args) => pubkey.signTypedData(...args));
+        ).sign((...args) => signer.signTypedData(...args));
 
         await executor.sendTransaction(await signedTx.asCall());
         // await waitForTransaction(executionTransaction);
@@ -490,7 +477,7 @@ describe("Catapultar", () => {
         expect(nextNonce).toBe(referenceNonce);
 
         // Invalidate the nonce.
-        let invalidateCall = await deployedAccountV010.getSpendNoncesCalls(
+        let invalidateCall = deployedAccountV010.invalidateNonces(
           referenceNonce,
           referenceNonce + 1n,
         );
@@ -500,7 +487,7 @@ describe("Catapultar", () => {
             .setRandomNonce()
             .setMode(ExecutionMode.RaiseRevert)
             .addCall(...invalidateCall)
-            .sign((...args) => pubkey.signTypedData(...args))
+            .sign((...args) => signer.signTypedData(...args))
         ).asCall();
         let executionTransaction = await executor.sendTransaction(calldata);
         await waitForTransaction(executionTransaction);
@@ -511,7 +498,7 @@ describe("Catapultar", () => {
         expect(nextNonce).toBe(referenceNonce + 2n);
 
         // Invalidate more nonces.
-        invalidateCall = await deployedAccountV010.getSpendNoncesCalls(
+        invalidateCall = deployedAccountV010.invalidateNonces(
           ...[...Array(1001).keys()].map((i) => BigInt(i) + referenceNonce),
         );
         calldata = await (
@@ -519,7 +506,7 @@ describe("Catapultar", () => {
             .setRandomNonce()
             .setMode(ExecutionMode.RaiseRevert)
             .addCall(...invalidateCall)
-            .sign((...args) => pubkey.signTypedData(...args))
+            .sign((...args) => signer.signTypedData(...args))
         ).asCall();
         executionTransaction = await executor.sendTransaction(calldata);
         await waitForTransaction(executionTransaction);
@@ -531,7 +518,7 @@ describe("Catapultar", () => {
       });
     });
 
-  integrationTest(AccountPublicKeyType.ECDSAOrSmartContract);
-  integrationTest(AccountPublicKeyType.P256);
-  integrationTest(AccountPublicKeyType.WebAuthnP256);
+  integrationTest("ecdsa");
+  integrationTest("p256");
+  integrationTest("webauthn-p256");
 });
