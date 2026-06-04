@@ -4,6 +4,9 @@ node_modules
 # output
 out
 dist
+_cjs
+_esm
+_types
 *.tgz
 
 # code coverage
