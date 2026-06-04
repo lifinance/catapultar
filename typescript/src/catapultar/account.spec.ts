@@ -1,7 +1,14 @@
-import { createPublicClient, createWalletClient, http } from "viem";
+import {
+  concatHex,
+  createPublicClient,
+  createWalletClient,
+  http,
+  keccak256,
+  pad,
+} from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { anvil } from "viem/chains";
-import { CatapultarAccount } from "./account";
+import { CatapultarAccount, REPLAY_PROTECTION } from "./account";
 import { random, asHex } from "../utils/helpers";
 import { ownerToKeyArray, ownerTypeToEnum } from "../protocol/owner";
 import { rpcUrl } from "../../test/setup";
@@ -77,6 +84,46 @@ describe("Catapultar Account", () => {
       });
 
       expect(predicted).toBe(factoryReturned);
+    });
+
+    it("should predict an upgradeable account (matches predictDeployUpgradeable)", async () => {
+      const base = _getParams();
+      const options = { ...base, upgradeable: true } as const;
+      const predicted = CatapultarAccount.predict(options);
+      const keyArray = ownerToKeyArray(options.owner);
+      const factoryReturned = await publicClient.readContract({
+        address: options.factory.factory,
+        abi: CATAPULTAR_FACTORY_V0_1_0_ABI,
+        functionName: "predictDeployUpgradeable",
+        args: [ownerTypeToEnum(options.owner.type), keyArray, options.salt],
+      });
+      expect(predicted).toBe(factoryReturned);
+      // The upgradeable address must differ from the immutable clone address
+      // for identical owner/salt/factory.
+      expect(predicted).not.toBe(CatapultarAccount.predict(base));
+    });
+
+    it("computes the ERC-1271 replay-protected digest", () => {
+      const account = new CatapultarAccount({
+        address: "0x1111111111111111111111111111111111111111",
+        owner: {
+          type: "ecdsa",
+          address: "0x2222222222222222222222222222222222222222",
+        },
+      });
+      const payload = random(32);
+      // Independent reconstruction: keccak256(tag || bytes32(address) || payload).
+      const expected = keccak256(
+        concatHex([REPLAY_PROTECTION, pad(account.address), payload]),
+      );
+      expect(account.getReplayProtectedDigest(payload)).toBe(expected);
+
+      // Binding to the account address: a different account → different digest.
+      const other = new CatapultarAccount({
+        address: "0x3333333333333333333333333333333333333333",
+        owner: account.owner,
+      });
+      expect(other.getReplayProtectedDigest(payload)).not.toBe(expected);
     });
   });
 

@@ -1,3 +1,4 @@
+import { hashTypedData, zeroAddress } from "viem";
 import {
   enumToOwnerType,
   keyArrayToOwner,
@@ -9,7 +10,23 @@ import {
 import { buildOpData } from "./opdata";
 import { callsDigest } from "./calls";
 import { compactSignature, normalizeP256 } from "./signature";
-import { ExecutionMode } from "../types/types";
+import {
+  erc1967CloneInitCode,
+  predictCloneAddress,
+  pushZeroCloneInitCode,
+} from "./factory";
+import {
+  constraintDigest,
+  constraintDomain,
+  OUTCOME_TO_SIGNER,
+  SPEND_FULL_BALANCE,
+} from "./constraint";
+import {
+  ExecutionConstraintTyped,
+  ExecutionMode,
+  type ExecutionConstraint,
+} from "../types/types";
+import { factories, templates } from "../config";
 
 describe("protocol/owner", () => {
   it("maps owner types to the on-chain enum and back", () => {
@@ -150,6 +167,71 @@ describe("protocol/signature", () => {
     expect(compactSignature(sig)).toBe(sig);
     const already64 = `0x${"cd".repeat(64)}` as `0x${string}`;
     expect(compactSignature(already64)).toBe(already64);
+  });
+});
+
+describe("protocol/factory", () => {
+  const template = templates["0.1.0"];
+  const factory = factories["0.1.0"];
+  // bytes32(uint256(123))
+  const salt = `0x${"0".repeat(62)}7b` as `0x${string}`;
+
+  it("derives PUSH0 and ERC-1967 init code with the right shape", () => {
+    const push0 = pushZeroCloneInitCode(template);
+    const erc1967 = erc1967CloneInitCode(template);
+    expect(push0.startsWith("0x602d5f8160095f39f3")).toBe(true);
+    expect(erc1967.startsWith("0x603d3d8160223d3973")).toBe(true);
+    // ERC-1967 minimal proxy init code is 95 bytes.
+    expect(erc1967.replace("0x", "").length).toBe(95 * 2);
+    expect(push0.toLowerCase()).toContain(template.slice(2).toLowerCase());
+    expect(erc1967.toLowerCase()).toContain(template.slice(2).toLowerCase());
+  });
+
+  it("predicts the ERC-1967 clone address (golden, verified vs Solady LibClone)", () => {
+    // Cross-checked against LibClone.predictDeterministicAddressERC1967 in the
+    // Foundry suite for (template, bytes32(123), factory).
+    expect(
+      predictCloneAddress({ template, salt, factory, kind: "upgradeable" }),
+    ).toBe("0xaf12f58BdF9d8FcdBd94D2D0d3A1Eb297dAA5e92");
+  });
+
+  it("predicts a different address for clone vs upgradeable", () => {
+    const clone = predictCloneAddress({ template, salt, factory });
+    const upgradeable = predictCloneAddress({
+      template,
+      salt,
+      factory,
+      kind: "upgradeable",
+    });
+    expect(clone).not.toBe(upgradeable);
+  });
+});
+
+describe("protocol/constraint", () => {
+  it("exposes the on-chain magic values", () => {
+    expect(SPEND_FULL_BALANCE).toBe(1n << 255n);
+    expect(OUTCOME_TO_SIGNER).toBe(zeroAddress);
+  });
+
+  it("matches a hand-built EIP-712 digest (centralized encoder is correct)", () => {
+    const validator = "0xf44cBb09C5b32cdFC1049464ba632B59E25EC00E" as const;
+    const token = "0x2279B7A0a67DB372996a5FaB50D91eAA73d2eBe6" as const;
+    const constraint: ExecutionConstraint = {
+      allowances: [{ token, amount: 1000n }],
+      outcomes: [{ token, amount: 900n, destination: OUTCOME_TO_SIGNER }],
+      executor: "0x3333333333333333333333333333333333333333",
+      nonce: 1n,
+    };
+    const domain = { chainId: 31337, verifyingContract: validator };
+
+    const fromEncoder = constraintDigest(domain, constraint);
+    const handBuilt = hashTypedData({
+      domain: constraintDomain(domain),
+      types: ExecutionConstraintTyped,
+      primaryType: "ExecutionConstraint",
+      message: constraint,
+    });
+    expect(fromEncoder).toBe(handBuilt);
   });
 });
 

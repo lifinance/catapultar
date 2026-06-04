@@ -172,13 +172,22 @@ export type EmbeddedDigest = {
 
 /**
  * Options for {@link CatapultarAccount.deploy} / {@link CatapultarAccount.predict}.
+ *
  * `factory` defaults to the library's well-known factory/template. Provide a
  * `digest` to embed an approved call/signature at deploy time — because these
  * are explicit named fields, a misspelled or partial option fails to compile.
+ *
+ * `upgradeable` selects the clone strategy: omitted/`false` mints the cheap
+ * immutable PUSH0 clone, `true` mints a durable ERC-1967 proxy the owner can
+ * later `upgrade`. The union below makes `{ upgradeable: true, digest }` a
+ * compile error — the factory's `deployWithDigest` only mints PUSH0 clones, so
+ * an embedded digest and upgradeability are mutually exclusive on-chain.
  */
 export type DeployOptions<O extends Owner = Owner> = {
   salt: `0x${string}`;
   owner: O;
   factory?: Factory;
-  digest?: EmbeddedDigest;
-};
+} & (
+  | { upgradeable?: false; digest?: EmbeddedDigest }
+  | { upgradeable: true; digest?: never }
+);

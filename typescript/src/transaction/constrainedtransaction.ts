@@ -1,7 +1,6 @@
-import { encodeFunctionData, erc20Abi, hashTypedData, zeroAddress } from "viem";
+import { encodeFunctionData, erc20Abi, zeroAddress } from "viem";
 import {
   DigestApproval,
-  ExecutionConstraintTyped,
   ExecutionMode,
   type Allowance,
   type AllowanceSpend,
@@ -16,6 +15,7 @@ import { BaseTransaction } from "./transaction";
 import CATAPULTAR_V0_1_0_ABI from "../abi/catapultarV0.1.0";
 import { CAT_VALIDATOR_ABI } from "../abi/CATValidator";
 import { cat_validator } from "../config";
+import { constraintDigest } from "../protocol/constraint";
 
 /** Options for {@link ConstrainedAssetTransaction.asExecuteCall}. */
 export type CatExecuteOptions = {
@@ -126,24 +126,20 @@ export class ConstrainedAssetTransaction {
         executor,
         nonce: this.constraintNonce,
       };
-      const typehash = hashTypedData({
-        types: ExecutionConstraintTyped,
-        primaryType: "ExecutionConstraint",
-        message: executionConstraint,
-        domain: {
-          chainId: this.chainId,
-          name: "CAT Validator",
-          version: "1",
-          verifyingContract: validator,
-        },
-      });
+      const digest = constraintDigest(
+        { chainId: this.chainId, verifyingContract: validator },
+        executionConstraint,
+      );
+      // `to: zeroAddress` is the ERC-7821 self-call convention — the executor
+      // (Solady's `_get`) substitutes `address(this)`, so this approves the
+      // constraint digest on the account itself during the embedded batch.
       calls.push({
         to: zeroAddress,
         value: 0n,
         data: encodeFunctionData({
           abi: CATAPULTAR_V0_1_0_ABI,
           functionName: "setSignature",
-          args: [typehash, DigestApproval.Signature],
+          args: [digest, DigestApproval.Signature],
         }),
       });
     };

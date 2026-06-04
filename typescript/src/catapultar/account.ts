@@ -2,11 +2,12 @@ import {
   createPublicClient,
   decodeAbiParameters,
   encodeFunctionData,
-  getCreate2Address,
+  encodePacked,
   http,
   keccak256,
   parseAbiParameters,
   recoverAddress,
+  toBytes,
   zeroAddress,
   type Chain,
   type PublicClient,
@@ -30,7 +31,11 @@ import {
   ownerToKeyArray,
   ownerTypeToEnum,
 } from "../protocol/owner";
-import { factorySalt, factorySaltWithDigest } from "../protocol/factory";
+import {
+  factorySalt,
+  factorySaltWithDigest,
+  predictCloneAddress,
+} from "../protocol/factory";
 import {
   fromCompactSignature,
   normalizeSignature as encodeKeyedSignature,
@@ -47,6 +52,19 @@ import {
 } from "../errors";
 import { P256, PublicKey, WebAuthnP256 } from "ox";
 import { _factory } from "../config";
+
+/**
+ * `keccak256("Replay(address account,bytes32 payload)")` — the envelope tag the
+ * account prepends when validating an ERC-1271 message (mirrors
+ * `Catapultar.REPLAY_PROTECTION`). Exposed so callers can reproduce the digest
+ * a Catapultar account attests to off-chain.
+ */
+export const REPLAY_PROTECTION = keccak256(
+  toBytes("Replay(address account,bytes32 payload)"),
+);
+
+/** ERC-1271 magic value returned by `isValidSignature` for a valid signature. */
+export const ERC1271_MAGIC_VALUE = "0x1626ba7e" as const;
 
 /**
  * A Catapultar smart account.
@@ -140,39 +158,54 @@ export class CatapultarAccount<
     }
   }
 
+  /**
+   * Build the factory call that deploys this account and return the call paired
+   * with the (offline) account handle at its deterministic CREATE2 address.
+   *
+   * The factory function is selected from {@link DeployOptions}:
+   * - `upgradeable: true` -> `deployUpgradeable` (durable ERC-1967 proxy).
+   * - `digest` present -> `deployWithDigest` (PUSH0 clone with an embedded
+   *   call/signature digest approved at init).
+   * - otherwise -> `deploy` (cheap immutable PUSH0 clone).
+   */
   static deploy<O extends Owner>(
     options: DeployOptions<O>,
   ): { call: Call; account: CatapultarAccount<O, false> } {
     const { factory } = _factory(options);
-    // predict() performs the same digest check internally.
+    // predict() performs the same digest/kind derivation internally.
     const derivedAddress = CatapultarAccount.predict(options);
 
     const keyType = ownerTypeToEnum(options.owner.type);
     const keyArray = ownerToKeyArray(options.owner);
-    const call: Call = {
-      to: factory,
-      data: options.digest
-        ? encodeFunctionData({
-            abi: CATAPULTAR_FACTORY_V0_1_0_ABI,
-            functionName: "deployWithDigest",
-            args: [
-              keyType,
-              keyArray,
-              options.salt,
-              options.digest.hash,
-              options.digest.isSignature,
-            ],
-          })
-        : encodeFunctionData({
-            abi: CATAPULTAR_FACTORY_V0_1_0_ABI,
-            functionName: "deploy",
-            args: [keyType, keyArray, options.salt],
-          }),
-      value: 0n,
-    };
+    let data: `0x${string}`;
+    if (options.upgradeable) {
+      data = encodeFunctionData({
+        abi: CATAPULTAR_FACTORY_V0_1_0_ABI,
+        functionName: "deployUpgradeable",
+        args: [keyType, keyArray, options.salt],
+      });
+    } else if (options.digest) {
+      data = encodeFunctionData({
+        abi: CATAPULTAR_FACTORY_V0_1_0_ABI,
+        functionName: "deployWithDigest",
+        args: [
+          keyType,
+          keyArray,
+          options.salt,
+          options.digest.hash,
+          options.digest.isSignature,
+        ],
+      });
+    } else {
+      data = encodeFunctionData({
+        abi: CATAPULTAR_FACTORY_V0_1_0_ABI,
+        functionName: "deploy",
+        args: [keyType, keyArray, options.salt],
+      });
+    }
 
     return {
-      call,
+      call: { to: factory, data, value: 0n },
       account: new CatapultarAccount<O, false>({
         address: derivedAddress,
         owner: options.owner,
@@ -180,24 +213,13 @@ export class CatapultarAccount<
     };
   }
 
-  private static deriveCloneAddress(
-    executor: `0x${string}`,
-    salt: `0x${string}`,
-    factory: `0x${string}`,
-  ) {
-    // https://github.com/Vectorized/solady/blob/90db92ce173856605d24a554969f2c67cadbc7e9/src/utils/LibClone.sol#L366-L368
-    const initCode = ("0x602d5f8160095f39f35f5f365f5f37365f73" +
-      executor.replace("0x", "") +
-      "5af43d5f5f3e6029573d5ffd5b3d5ff3") as `0x${string}`;
-    const initCodeHash = keccak256(initCode);
-    return getCreate2Address({
-      bytecodeHash: initCodeHash,
-      salt,
-      from: factory,
-    });
-  }
-
-  static predict<O extends Owner>(opt: DeployOptions<O>) {
+  /**
+   * Predict the deterministic CREATE2 address for the given deploy options,
+   * without building a call. The kind (PUSH0 clone vs ERC-1967 proxy) and any
+   * embedded digest are mirrored exactly from `CatapultarFactory`, so the
+   * returned address matches what {@link deploy} would produce.
+   */
+  static predict<O extends Owner>(opt: DeployOptions<O>): `0x${string}` {
     const { salt } = opt;
     const { factory, template } = _factory(opt);
     const keyArray = ownerToKeyArray(opt.owner);
@@ -208,19 +230,25 @@ export class CatapultarAccount<
       keyArray,
     );
 
-    if (opt.digest) {
-      const finalSalt = factorySaltWithDigest(
-        internalSalt,
-        opt.digest.hash,
-        opt.digest.isSignature,
-      );
-      return CatapultarAccount.deriveCloneAddress(template, finalSalt, factory);
+    // Upgradeable proxies use a distinct init code; they never carry a digest
+    // (guarded at the type level by DeployOptions).
+    if (opt.upgradeable) {
+      return predictCloneAddress({
+        template,
+        salt: internalSalt,
+        factory,
+        kind: "upgradeable",
+      });
     }
-    return CatapultarAccount.deriveCloneAddress(
-      template,
-      internalSalt,
-      factory,
-    );
+
+    const finalSalt = opt.digest
+      ? factorySaltWithDigest(
+          internalSalt,
+          opt.digest.hash,
+          opt.digest.isSignature,
+        )
+      : internalSalt;
+    return predictCloneAddress({ template, salt: finalSalt, factory });
   }
 
   // --- Connectivity --- //
@@ -637,6 +665,56 @@ export class CatapultarAccount<
       });
     }
     return false;
+  }
+
+  // --- ERC-1271 (account as a signer) --- //
+
+  /**
+   * The digest the account's owner must actually sign for the account to attest
+   * to `payloadHash` via ERC-1271 (`isValidSignature(payloadHash, sig)`).
+   *
+   * Mirrors `Catapultar.isValidSignature`, which rehashes inside a replay
+   * envelope so a signature is bound to this specific account:
+   * `keccak256(REPLAY_PROTECTION || bytes32(address(this)) || payloadHash)`.
+   *
+   * Use this when a third-party protocol asks the Catapultar account (as a
+   * smart-contract signer) to sign some `payloadHash`: sign the value returned
+   * here with the owner key, then hand the original `payloadHash` + signature to
+   * the verifier.
+   */
+  getReplayProtectedDigest(payloadHash: `0x${string}`): `0x${string}` {
+    return keccak256(
+      encodePacked(
+        ["bytes32", "bytes32", "bytes32"],
+        [
+          REPLAY_PROTECTION,
+          // address(this) left-padded to 32 bytes (matches asUnsafeBytes32).
+          `0x${this.address.replace("0x", "").toLowerCase().padStart(64, "0")}`,
+          payloadHash,
+        ],
+      ),
+    );
+  }
+
+  /**
+   * Verify a signature against the deployed account via its on-chain ERC-1271
+   * `isValidSignature` view (the account rehashes `payloadHash` internally, so
+   * pass the original payload hash — not {@link getReplayProtectedDigest}).
+   *
+   * This differs from {@link isSignatureValid}, which checks a raw digest
+   * against the owner key directly. Requires a connected account.
+   */
+  async isValidAccountSignature(
+    this: CatapultarAccount<O, true>,
+    options: { payloadHash: `0x${string}`; signature: `0x${string}` },
+  ): Promise<boolean> {
+    const result = await this.publicClient().readContract({
+      address: this.address,
+      abi: this.abi(),
+      functionName: "isValidSignature",
+      args: [options.payloadHash, options.signature],
+    });
+    return result === ERC1271_MAGIC_VALUE;
   }
 
   // --- Validation --- //

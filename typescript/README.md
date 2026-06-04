@@ -11,17 +11,33 @@ Catapultar is a compact TypeScript library for managing Catapultar smart account
 
 ### Library Structure
 
-4 Main classes are exported:
+The library is split into a high-level and a low-level surface. Pick the layer
+that matches how much control you need; bring your own signing and broadcasting
+at either level.
+
+**High level** (`src/catapultar`) — account-aware, validated flows:
+
+- **CatapultarAccount** — Catapultar Smart Account management (deploy/predict,
+  on-chain reads, owner/nonce/upgrade/ERC-1271 call builders).
+- **CatapultarTx** — Build, sign, and execute a batch for an existing account.
+- **MetaCatapultarTx** — Batch-of-batches (retryable sub-batches).
+
+**Low level** (`src/transaction`) — minimal building blocks without account
+context:
 
 - **BaseTransaction** — Minimal transaction interface without validation.
-- **CatapultarAccount** — Catapultar Smart Account management.
-- **CatapultarTx** — Creating transaction for existing smart accounts.
-- **MetaCatapultarTx** — High level batch transactions.
+- **ConstrainedAssetTransaction** — Constrained Asset Transactions (CAT validator).
 
-Depending on your use case, you may prefer either a high level or low level transaction creation.
+Beneath both sit the pure protocol primitives (`src/protocol`) — encoders such as
+`callsDigest`, `constraintDigest`, `predictCloneAddress`, `factorySalt`,
+`buildOpData`, and the signature/owner codecs — plus the contract ABIs
+(`catapultarAbi`, `catapultarFactoryAbi`, `catValidatorAbi`). Use these directly
+to integrate without any of the classes.
+
+Dependency direction:
 
 - **CatapultarTx** depends on **BaseTransaction** and **CatapultarAccount**.
-- **MetaCatapultarTx** depends on **CatapultarTx**
+- **MetaCatapultarTx** depends on **CatapultarTx**.
 
 ## Installation
 
@@ -43,6 +59,9 @@ Catapultar is offline by default — it can build, hash, and sign everything wit
 - Reading owner / approved digests / upgradeability from the account.
 
 Accounts target the `0.1.0` Catapultar contract.
+
+For the common single-wallet case, `CatapultarTx` already signs and broadcasts a
+batch in one call via `tx.execute(walletClient)` (see [Transaction Creation](#transaction-creation)).
 
 ### Actionables (Signables and Executables)
 
@@ -131,6 +150,48 @@ await connected.validateOwner();
 
 You can predict the address without building a call via `CatapultarAccount.predict({ owner, salt })`.
 
+#### Clone strategies (immutable vs upgradeable)
+
+By default the factory mints the cheap, immutable PUSH0 minimal clone. Pass
+`upgradeable: true` to mint a durable ERC-1967 proxy the owner can later upgrade
+via `upgradeToAndCall` (see `account.buildUpgradeCall` / `client.upgrade`). The
+predicted address differs between the two strategies, and an embedded `digest`
+is only available for the immutable clone (the type system rejects
+`{ upgradeable: true, digest }`).
+
+```typescript
+const { call, account } = CatapultarAccount.deploy({
+  owner: { type: "ecdsa", address: ownerAddress },
+  salt,
+  upgradeable: true, // ERC-1967 proxy instead of the PUSH0 clone
+});
+
+await connectedAccount.isUpgradeable(); // true once deployed
+```
+
+### Sign as account (ERC-1271)
+
+A Catapultar account can act as a smart-contract signer for other protocols. The
+account rehashes the payload in a replay envelope bound to its own address
+before validating, so reproduce that digest with `getReplayProtectedDigest` and
+have the owner sign it. Then hand the verifier the **original** payload hash plus
+the signature.
+
+```typescript
+// Owner signs the replay-protected digest; verifier calls isValidSignature(hash, sig).
+const digest = account.getReplayProtectedDigest(payloadHash);
+const signature = await ownerLocalAccount.sign({ hash: digest });
+
+// Or via the client (ECDSA owners with a local signer):
+const signature2 = await client.signMessageAsAccount(payloadHash);
+
+// Verify against the deployed account's on-chain ERC-1271 view:
+const ok = await connectedAccount.isValidAccountSignature({
+  payloadHash,
+  signature,
+});
+```
+
 ### Transaction Creation
 
 ```typescript
@@ -218,12 +279,37 @@ const { deployCall, actionCall, entryCall, address } = cat.asExecutionBundle({
 
 For finer control, the lower-level pieces are still available: `cat.asCatapultarAllowanceTransaction()` → `BaseTransaction`, `tx.asAccount({ salt, owner })` for the account context, and `cat.asExecuteCall({ address, ... })` for the entry call.
 
+Two on-chain sentinels are exported for advanced constraints:
+
+- `SPEND_FULL_BALANCE` (`1 << 255`) — use as a `spend` to pull the signer's full
+  current token balance instead of a fixed amount (e.g. DCA / sweep flows).
+- `OUTCOME_TO_SIGNER` (`address(0)`) — use as an outcome `destination` to route
+  the outcome back to the signer.
+
+The constraint digest itself is available via `constraintDigest({ chainId, verifyingContract }, constraint)`, and `isConstraintNonceSpent(publicClient, { validator, account, nonce })` reads whether a constraint nonce was already consumed.
+
 See `src/transaction/constrainedtransaction.spec.ts::create account and execute contained constraints` for an example.
+
+## Protocol primitives (unopinionated)
+
+Every class is a thin wrapper over pure, side-effect-free encoders that mirror
+the on-chain libraries byte-for-byte. They are exported directly so you can
+integrate without any of the classes:
+
+- Calls / EIP-712: `callsDigest`, `callsStructHash`, `callsTypedData`, `isMultichainMode`, `CALL_TYPE_HASH`, `CALLS_TYPE_HASH`, `CallsTyped`.
+- Factory / CREATE2: `predictCloneAddress`, `factorySalt`, `factorySaltWithDigest`, `pushZeroCloneInitCode`, `erc1967CloneInitCode`.
+- Execution data: `buildOpData`, `buildExecutionData`.
+- Signatures: `normalizeSignature`, `compactSignature`, `toCompactSignature`, `fromCompactSignature`, `encodeWebAuthnAuth`, `normalizeP256`.
+- Owners: `ownerToKeyArray`, `keyArrayToOwner`, `ownersEqual`, `ownerTypeToEnum`, `enumToOwnerType`, `keyTypeLength`.
+- Constraints: `constraintDigest`, `constraintTypedData`, `constraintDomain`.
+
+Contract ABIs are exported as `catapultarAbi`, `catapultarFactoryAbi`, and `catValidatorAbi`; deployment addresses as `factories`, `templates`, and `cat_validator`.
 
 ## Project Layout
 
-- `src/catapultar/` — core account and factory logic
-- `src/transaction/` — low level transaction logic
+- `src/catapultar/` — high-level account and transaction logic
+- `src/transaction/` — low-level transaction logic
+- `src/protocol/` — pure protocol encoders (calls, factory, opdata, signatures, owners, constraints)
 - `src/abi/` — Contract ABIs
 - `src/types/` — shared TypeScript types
 - `src/utils/` — helper utilities

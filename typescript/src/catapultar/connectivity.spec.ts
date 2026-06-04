@@ -64,4 +64,15 @@ export async function _connectivityTypeGates() {
     owner: OWNER,
     digest: { hash: SALT, isSignature: false },
   });
+
+  // Upgradeable accounts cannot also embed a digest (the factory's
+  // deployWithDigest only mints PUSH0 clones).
+  CatapultarAccount.predict({ salt: SALT, owner: OWNER, upgradeable: true });
+  CatapultarAccount.predict({
+    salt: SALT,
+    owner: OWNER,
+    upgradeable: true,
+    // @ts-expect-error upgradeable accounts cannot carry an embedded digest
+    digest: { hash: SALT, isSignature: false },
+  });
 }
