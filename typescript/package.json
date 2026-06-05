@@ -1,7 +1,7 @@
 {
   "name": "catapultar",
   "description": "Interface for the Catapultar Smart Account",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "license": "LGPL-3.0-only",
   "repository": {
     "type": "git",
@@ -31,6 +31,7 @@
   "exports": {
     ".": {
       "types": "./_types/index.d.ts",
+      "node": "./_cjs/index.js",
       "import": "./_esm/index.js",
       "require": "./_cjs/index.js",
       "default": "./_cjs/index.js"
