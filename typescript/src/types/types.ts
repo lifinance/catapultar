@@ -11,22 +11,38 @@ export type {
 } from "../protocol/owner";
 
 /**
- * @param RaiseRevert If a call fails, raise the revert message and do not spend the nonce.
- * @param SkipRevert If a call fails, skip the call, emit an event. The nonce will be spent if the transaction does not run out of gas.
+ * ERC-7821 execution mode, encoded as the `bytes32` mode word the account
+ * decodes. Controls revert behavior and whether the batch is signed for a single
+ * chain or across chains.
+ *
+ * The `MultiChain` variants are signed without a `chainId` in the EIP-712 domain
+ * (see {@link isMultichainMode}), so the same signature is valid on every chain.
  */
 export enum ExecutionMode {
+  /** If a call fails, bubble up the revert and do not spend the nonce. */
   RaiseRevert = "0x0100000000007821000100000000000000000000000000000000000000000000",
+  /** If a call fails, skip it and emit an event; the nonce is still spent (unless out of gas). */
   SkipRevert = "0x0101000000007821000100000000000000000000000000000000000000000000",
+  /** {@link RaiseRevert} signed chain-agnostically (multichain domain). */
   RaiseRevertMultiChain = "0x0100010000007821000100000000000000000000000000000000000000000000",
+  /** {@link SkipRevert} signed chain-agnostically (multichain domain). */
   SkipRevertMultiChain = "0x0101010000007821000100000000000000000000000000000000000000000000",
 }
 
+/** Approval flag stored against a digest on the account (`approvedDigest` view). */
 export enum DigestApproval {
+  /** No approval recorded. */
   Unset = 0,
+  /** The digest is an approved `Calls` hash (an embedded call). */
   Call = 1,
+  /** The digest is an approved message hash (a pre-approved signature). */
   Signature = 2,
 }
 
+/**
+ * A WebAuthn (passkey) assertion, as produced by an authenticator. Catapultar
+ * ABI-encodes this into the `WebAuthnAuth` struct the account expects.
+ */
 export type WebAuthnSignature = {
   authenticatorData: `0x${string}`;
   clientDataJSON: string;
@@ -47,8 +63,6 @@ export type KeyedSignature<O extends Owner = Owner> = O extends {
   ? WebAuthnSignature
   : `0x${string}`;
 
-export type Version = "0.1.0";
-
 /**
  * Parameters for constructing a {@link CatapultarAccount}.
  *
@@ -61,7 +75,8 @@ export type AccountConstructorParams<O extends Owner = Owner> = {
   address: `0x${string}`;
   owner: O;
   name?: string;
-  version?: Version;
+  /** EIP-712 domain version. Defaults to `0.1.0` (the deployed contract's domain). */
+  version?: string;
   chainId?: number;
   /** Bring-your-own viem client used for on-chain reads. */
   client?: PublicClient;
@@ -73,6 +88,7 @@ export type AccountConstructorParams<O extends Owner = Owner> = {
 
 // Typehashed Calls
 
+/** A single low-level call: target, native value, and calldata. */
 export type Call = {
   to: `0x${string}`;
   value: bigint;
@@ -92,12 +108,14 @@ export type ExecuteParameters = {
   };
 };
 
+/** A nonced batch of {@link Call}s executed under one {@link ExecutionMode}. */
 export type Calls = {
   nonce: bigint;
   mode: `0x${string}`;
   calls: Call[];
 };
 
+/** EIP-712 type table for {@link Calls} / {@link Call} (mirrors `LibCalls`). */
 export const CallsTyped = {
   Calls: [
     { name: "nonce", type: "uint256" },
@@ -113,23 +131,36 @@ export const CallsTyped = {
 
 // Typehashed ExecutionConstraint
 
+/** A token + maximum amount the constraint's executor may pull. */
 export type Allowance = {
   token: `0x${string}`;
   amount: bigint;
 };
 
+/**
+ * A spend resolved at execution time: the originally `allocated` allowance and
+ * the actual `spend` (use {@link SPEND_FULL_BALANCE} to spend the full balance).
+ */
 export type AllowanceSpend = {
   token: `0x${string}`;
   allocated: bigint;
   spend: bigint;
 };
 
+/**
+ * A token amount that must be delivered to `destination` for the constraint to
+ * pass. Use {@link OUTCOME_TO_SIGNER} (`address(0)`) to route back to the signer.
+ */
 export type Outcome = {
   token: `0x${string}`;
   amount: bigint;
   destination: `0x${string}`;
 };
 
+/**
+ * The CAT Validator constraint: allowances the `executor` may spend in exchange
+ * for delivering `outcomes`, bound to a `nonce` (0 = perpetual/reusable).
+ */
 export type ExecutionConstraint = {
   allowances: Allowance[];
   outcomes: Outcome[];
@@ -137,6 +168,7 @@ export type ExecutionConstraint = {
   nonce: bigint;
 };
 
+/** EIP-712 type table for {@link ExecutionConstraint} (mirrors `LibExecutionConstraint`). */
 export const ExecutionConstraintTyped = {
   ExecutionConstraint: [
     { name: "allowances", type: "Allowance[]" },
@@ -157,6 +189,11 @@ export const ExecutionConstraintTyped = {
 
 //-- Factory pattern types --//
 
+/**
+ * A factory/template pair used for deployment and CREATE2 address derivation:
+ * the `factory` is the deploying contract, the `template` is the implementation
+ * cloned from it. Defaults to the library's well-known pair (see `_factory`).
+ */
 export type Factory = {
   factory: `0x${string}`;
   template: `0x${string}`;

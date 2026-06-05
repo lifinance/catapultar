@@ -26,7 +26,7 @@ import {
   ExecutionMode,
   type ExecutionConstraint,
 } from "../types/types";
-import { factories, templates } from "../config";
+import { defaultFactory } from "../config";
 
 describe("protocol/owner", () => {
   it("maps owner types to the on-chain enum and back", () => {
@@ -171,8 +171,8 @@ describe("protocol/signature", () => {
 });
 
 describe("protocol/factory", () => {
-  const template = templates["0.1.0"];
-  const factory = factories["0.1.0"];
+  const template = defaultFactory.template;
+  const factory = defaultFactory.factory;
   // bytes32(uint256(123))
   const salt = `0x${"0".repeat(62)}7b` as `0x${string}`;
 

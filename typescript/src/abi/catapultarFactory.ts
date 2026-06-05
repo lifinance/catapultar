@@ -1,4 +1,5 @@
-const CATAPULTAR_FACTORY_V0_1_0_ABI = [
+/** ABI of the CatapultarFactory. Re-exported as `catapultarFactoryAbi`. */
+const CATAPULTAR_FACTORY_ABI = [
   {
     type: "constructor",
     inputs: [],
@@ -226,4 +227,4 @@ const CATAPULTAR_FACTORY_V0_1_0_ABI = [
   },
 ] as const;
 
-export default CATAPULTAR_FACTORY_V0_1_0_ABI;
+export default CATAPULTAR_FACTORY_ABI;

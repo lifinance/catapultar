@@ -1,4 +1,5 @@
-const CATAPULTAR_V0_1_0_ABI = [
+/** ABI of the Catapultar smart account. Re-exported as `catapultarAbi`. */
+const CATAPULTAR_ABI = [
   {
     type: "constructor",
     inputs: [],
@@ -525,4 +526,4 @@ const CATAPULTAR_V0_1_0_ABI = [
   },
 ] as const;
 
-export default CATAPULTAR_V0_1_0_ABI;
+export default CATAPULTAR_ABI;

@@ -19,11 +19,7 @@ import {
 import { Base64, P256 } from "ox";
 import { CatapultarAccount } from "./account";
 import { rpcUrl } from "../../test/setup";
-import {
-  factories,
-  PUBLIC_DEFAULT_ANVIL_ACCOUNT_0,
-  templates,
-} from "../config";
+import { defaultFactory, PUBLIC_DEFAULT_ANVIL_ACCOUNT_0 } from "../config";
 
 const chainId = 31337;
 
@@ -365,10 +361,7 @@ describe("Catapultar", () => {
         const deployCall010 = CatapultarAccount.deploy({
           owner,
           salt: `0x${asHex(0n, 20)}${random(12).replace("0x", "")}`,
-          factory: {
-            factory: factories["0.1.0"],
-            template: templates["0.1.0"],
-          },
+          factory: defaultFactory,
         });
         deployedAccountV010 = deployCall010.account.connectRpc({
           chainId,
@@ -539,7 +532,7 @@ describe("Catapultar", () => {
       const deployCall = CatapultarAccount.deploy({
         owner,
         salt: `0x${asHex(0n, 20)}${random(12).replace("0x", "")}`,
-        factory: { factory: factories["0.1.0"], template: templates["0.1.0"] },
+        factory: defaultFactory,
       });
       const account = deployCall.account.connectRpc({ chainId, rpc: rpcUrl() });
       await waitForTransaction(

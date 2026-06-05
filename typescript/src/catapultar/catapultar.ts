@@ -18,17 +18,42 @@ import { CatapultarAccount } from "./account";
 import { BaseTransaction } from "../transaction/transaction";
 
 /**
- * A Catapultar transaction wrapper. Is intended to be used to convert a list of calls into a single Catapultar batch.
- * @dev The class is intended to be used through modifiers, meaning each property should be set iteratively on the object:
- * const tx = new CatapultarTx(options).setMode(ExecutionMode.RaiseRevert).setNonce(12n).addCall(...[]).sign(() => ...).asParameters();
- * To batch batches, multiple sub CatapultarTx can be created and then converted into calls like:
- * calls.push(await new CatapultarTx(options).addCall(...[]).asCall());
- * new CatapultarTx(options).addCall(...calls).sign(() => ...).asParameters();
+ * Account-aware transaction builder: turns a list of {@link Call}s into a single
+ * signed Catapultar batch for a specific account.
+ *
+ * It extends {@link BaseTransaction} with the account context needed to build the
+ * EIP-712 domain, normalize signatures for the owner's key type, and (when
+ * connected) validate the nonce/owner/signature on-chain.
+ *
+ * The builder is fluent — each setter mutates and returns `this`, so calls
+ * chain:
+ *
+ * ```typescript
+ * const signed = await new CatapultarTx({ account })
+ *   .setMode(ExecutionMode.RaiseRevert)
+ *   .setNonce(12n)
+ *   .addCall(...calls)
+ *   .sign((data) => walletClient.signTypedData({ account, ...data }));
+ * const call = await signed.asCall();
+ * ```
+ *
+ * To batch batches, build sub-transactions, convert each to a call, and add them
+ * to an outer transaction (or use {@link MetaCatapultarTx}):
+ *
+ * ```typescript
+ * const inner = await new CatapultarTx({ account }).addCall(...).asCall();
+ * await new CatapultarTx({ account }).addCall(inner).sign(...);
+ * ```
+ *
+ * @typeParam O The owner variant controlling the account (drives signature shape).
+ * @typeParam Connected Whether the underlying account has a viem client attached
+ *   (required for {@link validateUsingProvider}).
  */
 export class CatapultarTx<
   O extends Owner = Owner,
   Connected extends boolean = false,
 > extends BaseTransaction {
+  /** The account this batch is built for (offline or connected). */
   account: CatapultarAccount<O, Connected>;
 
   /**
@@ -101,6 +126,17 @@ export class CatapultarTx<
 
   // --- Validation --- //
 
+  /**
+   * Whether the currently-set signature is valid for this batch's digest.
+   *
+   * Checks the set signature against the account owner (ECDSA recovery, or P256 /
+   * WebAuthn verification; an ERC-1271 contract owner is checked on-chain when the
+   * account is connected). The digest is computed with `ignoreNoCalls: true`, so
+   * an empty batch can still be checked.
+   *
+   * @param options.noSignatureIsValid Value to return when no signature has been
+   *   set yet. Default `false`.
+   */
   async hasValidSignature(options?: {
     noSignatureIsValid?: boolean;
   }): Promise<boolean> {
@@ -112,12 +148,24 @@ export class CatapultarTx<
     });
   }
 
+  /**
+   * Assert the set signature is valid (see {@link hasValidSignature}), returning
+   * `this` for chaining.
+   * @throws {InvalidSignatureError} If the signature does not verify.
+   */
   async validateSignature(options?: { noSignatureIsValid?: boolean }) {
     if (!(await this.hasValidSignature(options)))
       throw new InvalidSignatureError(`Invalid Signer`);
     return this;
   }
 
+  /**
+   * On-chain pre-flight for a connected account: assert the nonce has not been
+   * spent and the configured owner matches the deployed account, returning `this`.
+   * Requires a connected account.
+   * @throws {NonceZeroError | NonceUnsetError | NonceCollisionError} On a bad nonce.
+   * @throws {OwnerMismatchError} If the on-chain owner differs from the configured one.
+   */
   async validateUsingProvider(this: CatapultarTx<O, true>) {
     await this.account.validateNonce({ nonce: this.nonce });
     await this.account.validateOwner();
@@ -146,6 +194,11 @@ export class CatapultarTx<
     );
   }
 
+  /**
+   * The full EIP-712 digest the owner signs for this batch (domain-wrapped
+   * `Calls` hash). This is the value recovered against in {@link hasValidSignature}.
+   * @param options.ignoreNoCalls Do not throw if no calls have been added. Default false.
+   */
   getTypeHashDigest(options?: { ignoreNoCalls?: boolean }) {
     const signerData = this.getSignerData(options);
     return callsDigest(signerData.domain, signerData.message);
@@ -204,22 +257,48 @@ export class CatapultarTx<
 }
 
 /**
- * This defines a meta transaction composed of several smaller transactions.
- * Intended usecase: Wrapping multiple transactions (that can later be retried) into a single batch.
+ * A batch-of-batches: a meta transaction composed of several independently-nonced sub-batches.
+ *
+ * Each sub-batch becomes its own inner {@link CatapultarTx} (executed with a
+ * dedicated nonce), and they are wrapped in one outer batch executed with
+ * {@link ExecutionMode.SkipRevert} by default — so a failed sub-batch is skipped
+ * (and can be retried later) rather than reverting the whole transaction.
+ *
+ * Typical flow:
+ *
+ * ```typescript
+ * const outer = await new MetaCatapultarTx({ account })
+ *   .addCalls({ calls: batchA }, { calls: batchB })
+ *   .asCatapultarTx(); // -> a normal CatapultarTx you then sign + send
+ * ```
+ *
+ * @typeParam O The owner variant controlling the account.
+ * @typeParam Connected Whether the underlying account has a viem client attached.
  */
 export class MetaCatapultarTx<
   O extends Owner = Owner,
   Connected extends boolean = false,
 > {
+  /** Execution mode of the outer (wrapping) batch. Defaults to SkipRevert when converted. */
   mode?: ExecutionMode;
+  /** Unused reserved field carried from constructor options. */
   nonce?: bigint;
+  /** The queued sub-batches, each with an optional explicit nonce/mode. */
   calls: { calls: Call[]; nonce?: bigint; mode?: ExecutionMode }[] = [];
 
+  /** Nonce of the outer batch. Random by default. */
   outerNonce: bigint;
+  /** Base nonce for sub-batches; sub-batch `i` defaults to `innerNonce + i`. */
   innerNonce: bigint;
 
+  /** The account every sub-batch (and the outer batch) is built for. */
   account: CatapultarAccount<O, Connected>;
 
+  /**
+   * @param options.account Account params or an existing {@link CatapultarAccount}.
+   * @param options.outerNonce Nonce for the wrapping batch. Defaults to a random value.
+   * @param options.innerNonce Base nonce for sub-batches. Defaults to `outerNonce + 1`.
+   */
   constructor(options: {
     account: AccountConstructorParams<O> | CatapultarAccount<O, Connected>;
     mode?: ExecutionMode;
@@ -252,11 +331,17 @@ export class MetaCatapultarTx<
     this.innerNonce = innerNonce;
   }
 
+  /** Set the execution mode of the outer (wrapping) batch. */
   setMode(mode: ExecutionMode) {
     this.mode = mode;
     return this;
   }
 
+  /**
+   * Queue one or more sub-batches. Each entry is a group of {@link Call}s with an
+   * optional explicit `nonce`/`mode`; omitted values are resolved when converted
+   * (nonce -> `innerNonce + index`, mode -> RaiseRevert).
+   */
   addCalls(
     ...calls: { calls: Call[]; nonce?: bigint; mode?: ExecutionMode }[]
   ) {
@@ -278,6 +363,11 @@ export class MetaCatapultarTx<
     );
   }
 
+  /**
+   * Assert no two sub-batches share a nonce (after resolving omitted nonces),
+   * returning `this`.
+   * @throws {DuplicateNonceError} If any resolved nonce appears more than once.
+   */
   checkNonces() {
     // Validate the resolved set so an explicit nonce that collides with a
     // generated `innerNonce + i` value is caught too, not just explicit-vs-explicit.
@@ -292,6 +382,11 @@ export class MetaCatapultarTx<
     return this;
   }
 
+  /**
+   * Materialize each queued sub-batch as its own unsigned {@link CatapultarTx}
+   * (with its resolved nonce and mode). Useful if you want to sign sub-batches
+   * individually rather than through {@link asCatapultarTx}.
+   */
   getCallsAsTxs() {
     const nonces = this.resolvedNonces();
     return this.calls.map((c, i) => {
@@ -304,6 +399,13 @@ export class MetaCatapultarTx<
     });
   }
 
+  /**
+   * Collapse all sub-batches into a single outer {@link CatapultarTx}: each
+   * sub-batch is encoded as a self-call carrying its own nonce/mode, then wrapped
+   * in one batch (defaulting to {@link ExecutionMode.SkipRevert} so a failed
+   * sub-batch is skipped). Validates nonces first. The returned transaction is
+   * unsigned — sign and send it like any other {@link CatapultarTx}.
+   */
   async asCatapultarTx() {
     this.checkNonces();
     return new CatapultarTx({

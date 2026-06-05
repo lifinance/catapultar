@@ -12,7 +12,7 @@ import {
 } from "../types/types";
 import { ValidationError } from "../errors";
 import { BaseTransaction } from "./transaction";
-import CATAPULTAR_V0_1_0_ABI from "../abi/catapultarV0.1.0";
+import CATAPULTAR_ABI from "../abi/catapultar";
 import { CAT_VALIDATOR_ABI } from "../abi/CATValidator";
 import { cat_validator } from "../config";
 import { constraintDigest } from "../protocol/constraint";
@@ -34,23 +34,48 @@ export type CatRefundOptions = {
 };
 
 /**
- * Helper class for deploying a Catapultar account with an embedded Constrained Asset Transaction
+ * Builder for a Constrained Asset Transaction (CAT).
+ *
+ * A CAT lets a designated `executor` spend an account's assets (the
+ * `allowances`) provided a set of `outcomes` is delivered — enforced by the
+ * `CATValidator` via an EIP-712 `ExecutionConstraint`. The typical flow embeds
+ * the constraint into a freshly-deployed account so arbitrary execution can be
+ * run against it later (see {@link asExecutionBundle}).
+ *
+ * Build the constraint with {@link addAllowances} / {@link addOutcomes}, then
+ * convert it: {@link asCatapultarAllowanceTransaction} for the embeddable
+ * approval batch, {@link asExecuteCall} for the validator entry call, or
+ * {@link asExecutionBundle} for the full deploy -> approve -> execute sequence.
+ *
+ * Two on-chain sentinels assist advanced flows: {@link SPEND_FULL_BALANCE} as a
+ * spend amount, and {@link OUTCOME_TO_SIGNER} (`address(0)`) as an outcome
+ * destination.
  */
 export class ConstrainedAssetTransaction {
+  /** Tokens (and amounts) the executor is permitted to pull from the account. */
   allowances: Allowance[] = [];
+  /** Tokens (and amounts) that must be delivered for the constraint to pass. */
   outcomes: Outcome[] = [];
 
+  /** The only address allowed to execute this constraint. */
   executor: `0x${string}`;
+  /** Chain the constraint (and its CAT Validator domain) is bound to. */
   chainId: number;
 
+  /** Constraint nonce (Permit2-style). Defaults to 1; `0` is the perpetual/reusable nonce. */
   constraintNonce: bigint = 1n;
 
+  /**
+   * @param opt.executor The address permitted to execute the constraint.
+   * @param opt.chainId Chain the constraint is bound to.
+   */
   constructor(opt: { executor: `0x${string}`; chainId: number }) {
     const { executor, chainId } = opt;
     this.executor = executor;
     this.chainId = chainId;
   }
 
+  /** Add token allowances the executor may pull from the account. */
   addAllowances(...allowances: Allowance[]): this {
     this.allowances.push(...allowances);
     return this;
@@ -137,7 +162,7 @@ export class ConstrainedAssetTransaction {
         to: zeroAddress,
         value: 0n,
         data: encodeFunctionData({
-          abi: CATAPULTAR_V0_1_0_ABI,
+          abi: CATAPULTAR_ABI,
           functionName: "setSignature",
           args: [digest, DigestApproval.Signature],
         }),
@@ -203,6 +228,11 @@ export class ConstrainedAssetTransaction {
     return executeCall;
   }
 
+  /**
+   * Build the validator entry call that refunds the full allowances 1:1 back to
+   * `opt.refund` (each allowance becomes an equal outcome to the refund target).
+   * Use this to unwind an embedded constraint without running any execution.
+   */
   asRefundCall(opt: CatRefundOptions) {
     const { validator = cat_validator } = opt;
 

@@ -19,10 +19,24 @@ import {
   assertNonce,
 } from "../protocol/validation";
 import { NonceZeroError, ValidationError } from "../errors";
-import CATAPULTAR_FACTORY_V0_1_0_ABI from "../abi/catapultarFactoryV0.1.0";
-import CATAPULTAR_V0_1_0_ABI from "../abi/catapultarV0.1.0";
+import CATAPULTAR_FACTORY_ABI from "../abi/catapultarFactory";
+import CATAPULTAR_ABI from "../abi/catapultar";
 import { _factory } from "../config";
 
+/**
+ * Minimal, account-agnostic Catapultar batch.
+ *
+ * `BaseTransaction` is the low-level building block: it holds a mode, a nonce,
+ * and a list of {@link Call}s, and encodes them into the `opData` /
+ * `executionData` the on-chain `execute` entrypoint decodes. It carries no
+ * account context, signer, or EIP-712 domain — bring your own signature (set
+ * {@link signature} directly) or leave it unsigned to embed the batch into an
+ * account via {@link asAccount}.
+ *
+ * For account-aware building (domain construction, owner-specific signature
+ * normalization, on-chain validation) use {@link CatapultarTx}, which extends
+ * this class.
+ */
 export class BaseTransaction {
   /** Transaction ExecutionMode, defines transaction behavior for call reverts. */
   mode?: ExecutionMode;
@@ -31,8 +45,14 @@ export class BaseTransaction {
   /** List of calls the transaction contains. */
   calls: Call[];
 
+  /**
+   * Raw owner signature over the batch digest, in the on-chain wire format.
+   * Optional: when unset the batch encodes without a signature (the self-call /
+   * embedded-digest form).
+   */
   signature?: `0x${string}`;
 
+  /** Construct a batch, optionally pre-seeding mode / nonce / calls / signature. */
   constructor(opt?: {
     mode?: ExecutionMode;
     nonce?: bigint;
@@ -93,6 +113,7 @@ export class BaseTransaction {
 
   // --- Validation --- //
 
+  /** @returns Whether a recognized {@link ExecutionMode} has been set. */
   hasValidMode() {
     if (this.mode === undefined) return false;
     return Object.values(ExecutionMode).includes(this.mode);
@@ -130,6 +151,10 @@ export class BaseTransaction {
     return buildOpData(this.nonce, sig);
   }
 
+  /**
+   * ABI-encoded `(Call[], opData)` payload that `ERC7821.execute` decodes for the
+   * Catapultar execution mode. Combines the calls with {@link getOpData}.
+   */
   getExecutionData() {
     return buildExecutionData(this.calls, this.getOpData());
   }
@@ -156,7 +181,7 @@ export class BaseTransaction {
     assertMode(mode);
     const executionData = this.getExecutionData();
     const data = encodeFunctionData({
-      abi: CATAPULTAR_V0_1_0_ABI,
+      abi: CATAPULTAR_ABI,
       functionName: "execute",
       args: [mode, executionData],
     });
@@ -189,7 +214,7 @@ export class BaseTransaction {
     const deployCall = {
       to: factory,
       data: encodeFunctionData({
-        abi: CATAPULTAR_FACTORY_V0_1_0_ABI,
+        abi: CATAPULTAR_FACTORY_ABI,
         functionName: "deployWithDigest",
         args: [keyType, keyArray, opt.salt, callDigest, false],
       }),

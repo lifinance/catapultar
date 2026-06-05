@@ -1,3 +1,4 @@
+/** ABI of the CATValidator (constraint validator). Re-exported as `catValidatorAbi`. */
 export const CAT_VALIDATOR_ABI = [
   {
     type: "constructor",

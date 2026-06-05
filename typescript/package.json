@@ -38,7 +38,7 @@
   },
   "sideEffects": false,
   "scripts": {
-    "clean": "rm -rf _cjs _esm _types",
+    "clean": "rm -rf _cjs _esm _types dist out",
     "prebuild": "bun run clean",
     "build:js": "rollup -c",
     "build:types": "tsc --project tsconfig.build.json",

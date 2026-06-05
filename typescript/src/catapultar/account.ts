@@ -20,11 +20,10 @@ import {
   type KeyedSignature,
   type Owner,
   type OwnerOf,
-  type Version,
 } from "../types/types";
 import { resolveChain } from "../utils/viem";
-import CATAPULTAR_V0_1_0_ABI from "../abi/catapultarV0.1.0";
-import CATAPULTAR_FACTORY_V0_1_0_ABI from "../abi/catapultarFactoryV0.1.0";
+import CATAPULTAR_ABI from "../abi/catapultar";
+import CATAPULTAR_FACTORY_ABI from "../abi/catapultarFactory";
 import {
   keyArrayToOwner,
   ownersEqual,
@@ -91,8 +90,8 @@ export class CatapultarAccount<
 
   /** Name of the account. Used for the domainSeparator. */
   readonly name: string;
-  /** Version of the account. Used for the domainSeparator. */
-  readonly version: Version;
+  /** EIP-712 domain version of the account. Used for the domainSeparator. */
+  readonly version: string;
 
   /** Owner of the account (ECDSA address or P256/WebAuthn public key). */
   readonly owner: O;
@@ -180,13 +179,13 @@ export class CatapultarAccount<
     let data: `0x${string}`;
     if (options.upgradeable) {
       data = encodeFunctionData({
-        abi: CATAPULTAR_FACTORY_V0_1_0_ABI,
+        abi: CATAPULTAR_FACTORY_ABI,
         functionName: "deployUpgradeable",
         args: [keyType, keyArray, options.salt],
       });
     } else if (options.digest) {
       data = encodeFunctionData({
-        abi: CATAPULTAR_FACTORY_V0_1_0_ABI,
+        abi: CATAPULTAR_FACTORY_ABI,
         functionName: "deployWithDigest",
         args: [
           keyType,
@@ -198,7 +197,7 @@ export class CatapultarAccount<
       });
     } else {
       data = encodeFunctionData({
-        abi: CATAPULTAR_FACTORY_V0_1_0_ABI,
+        abi: CATAPULTAR_FACTORY_ABI,
         functionName: "deploy",
         args: [keyType, keyArray, options.salt],
       });
@@ -300,24 +299,29 @@ export class CatapultarAccount<
     return this._client;
   }
 
-  abi(): typeof CATAPULTAR_V0_1_0_ABI {
-    return CATAPULTAR_V0_1_0_ABI;
+  /** The ABI of the Catapultar account contract this handle targets. */
+  abi(): typeof CATAPULTAR_ABI {
+    return CATAPULTAR_ABI;
   }
 
   // --- Type guards --- //
 
+  /** Narrowing guard: whether a viem client is attached (read methods available). */
   isConnected(): this is CatapultarAccount<O, true> {
     return this._client !== undefined;
   }
 
+  /** Narrowing guard: whether the owner is an ECDSA / ERC-1271 owner. */
   isEcdsa(): this is CatapultarAccount<OwnerOf<"ecdsa">, Connected> {
     return this.owner.type === "ecdsa";
   }
 
+  /** Narrowing guard: whether the owner is a raw P256 key. */
   isP256(): this is CatapultarAccount<OwnerOf<"p256">, Connected> {
     return this.owner.type === "p256";
   }
 
+  /** Narrowing guard: whether the owner is a WebAuthn passkey. */
   isWebAuthn(): this is CatapultarAccount<OwnerOf<"webauthn-p256">, Connected> {
     return this.owner.type === "webauthn-p256";
   }
@@ -347,7 +351,7 @@ export class CatapultarAccount<
       to: this.address,
       value: 0n,
       data: encodeFunctionData({
-        abi: CATAPULTAR_V0_1_0_ABI,
+        abi: CATAPULTAR_ABI,
         functionName: "setSignature",
         args: [options.digest, options.approval],
       }),
@@ -369,12 +373,12 @@ export class CatapultarAccount<
     const data =
       newOwner.type === "ecdsa" && BigInt(newOwner.address) === 0n
         ? encodeFunctionData({
-            abi: CATAPULTAR_V0_1_0_ABI,
+            abi: CATAPULTAR_ABI,
             functionName: "transferOwnership",
             args: [zeroAddress],
           })
         : encodeFunctionData({
-            abi: CATAPULTAR_V0_1_0_ABI,
+            abi: CATAPULTAR_ABI,
             functionName: "transferOwnership",
             args: [ownerTypeToEnum(newOwner.type), ownerToKeyArray(newOwner)],
           });
@@ -398,7 +402,7 @@ export class CatapultarAccount<
       to: this.address,
       value: 0n,
       data: encodeFunctionData({
-        abi: CATAPULTAR_V0_1_0_ABI,
+        abi: CATAPULTAR_ABI,
         functionName: "upgradeToAndCall",
         args: [options.implementation, options.data ?? "0x"],
       }),
@@ -426,7 +430,7 @@ export class CatapultarAccount<
       to: this.address,
       value: 0n,
       data: encodeFunctionData({
-        abi: CATAPULTAR_V0_1_0_ABI,
+        abi: CATAPULTAR_ABI,
         functionName: "invalidateUnorderedNonces",
         args: [wordPos, mask],
       }),
@@ -474,6 +478,13 @@ export class CatapultarAccount<
     return (wordPos << 8n) + bitPos;
   }
 
+  /**
+   * Assert that none of `options.nonces` has already been spent on-chain, and
+   * that the set contains no duplicates. Reads are batched per bitmap word.
+   * Requires a connected account.
+   * @throws {DuplicateNonceError} If a nonce appears twice in the input.
+   * @throws {NonceCollisionError} If a nonce is already spent on-chain.
+   */
   async validateNonces(
     this: CatapultarAccount<O, true>,
     options: { nonces: bigint[] },
@@ -729,6 +740,13 @@ export class CatapultarAccount<
     return this;
   }
 
+  /**
+   * Assert a single nonce is usable: present, non-zero, and not yet spent
+   * on-chain. Returns `this`. Requires a connected account.
+   * @throws {NonceZeroError} If the nonce is 0 (reserved as "unset").
+   * @throws {NonceUnsetError} If no nonce was provided.
+   * @throws {NonceCollisionError} If the nonce is already spent on-chain.
+   */
   async validateNonce(
     this: CatapultarAccount<O, true>,
     options: {

@@ -1,3 +1,24 @@
+/**
+ * Catapultar — a TypeScript interface for the Catapultar ERC-7821 smart account.
+ *
+ * The library is layered so you can opt into as much abstraction as you need,
+ * and is offline by default (build/hash/sign with no network; attach a viem
+ * client to unlock on-chain reads):
+ *
+ * - **High level** ({@link CatapultarAccount}, {@link CatapultarTx},
+ *   {@link MetaCatapultarTx}) — account-aware, validated build/sign/execute flows.
+ * - **Low level** ({@link BaseTransaction}, {@link ConstrainedAssetTransaction})
+ *   — minimal batch primitives without account context.
+ * - **Protocol primitives** (`callsDigest`, `constraintDigest`,
+ *   `predictCloneAddress`, the owner/signature codecs, …) — pure, side-effect-free
+ *   encoders that mirror the on-chain libraries byte-for-byte, plus the contract
+ *   ABIs and deployment addresses — for integrating without any of the classes.
+ *
+ * Bring your own signing and broadcasting at every layer.
+ *
+ * @packageDocumentation
+ */
+
 // --- High-level classes (src/catapultar) --- //
 
 export { CatapultarAccount } from "./catapultar/account";
@@ -38,13 +59,13 @@ export {
 
 // --- Contract ABIs --- //
 
-export { default as catapultarAbi } from "./abi/catapultarV0.1.0";
-export { default as catapultarFactoryAbi } from "./abi/catapultarFactoryV0.1.0";
+export { default as catapultarAbi } from "./abi/catapultar";
+export { default as catapultarFactoryAbi } from "./abi/catapultarFactory";
 export { CAT_VALIDATOR_ABI as catValidatorAbi } from "./abi/CATValidator";
 
 // --- Deployment addresses --- //
 
-export { factories, templates, cat_validator } from "./config";
+export { defaultFactory, cat_validator } from "./config";
 
 // --- Unopinionated protocol primitives --- //
 // Pure encoders/decoders that mirror the on-chain libraries. Use these to
@@ -111,7 +132,6 @@ export type {
   Outcome,
   ExecutionConstraint,
   WebAuthnSignature,
-  Version,
   Factory,
   EmbeddedDigest,
   DeployOptions,

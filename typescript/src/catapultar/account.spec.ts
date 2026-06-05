@@ -13,8 +13,8 @@ import { random, asHex } from "../utils/helpers";
 import { ownerToKeyArray, ownerTypeToEnum } from "../protocol/owner";
 import { rpcUrl } from "../../test/setup";
 import type { Owner } from "../types/types";
-import { factories, templates } from "../config";
-import CATAPULTAR_FACTORY_V0_1_0_ABI from "../abi/catapultarFactoryV0.1.0";
+import { defaultFactory } from "../config";
+import CATAPULTAR_FACTORY_ABI from "../abi/catapultarFactory";
 import { P256 } from "ox";
 
 const chainId = 31337;
@@ -43,7 +43,7 @@ describe("Catapultar Account", () => {
       const owner: Owner = { type: "ecdsa", address };
       return {
         salt: address.padEnd(64 + 2, "0") as `0x${string}`,
-        factory: { factory: factories["0.1.0"], template: templates["0.1.0"] },
+        factory: defaultFactory,
         owner,
       };
     };
@@ -55,7 +55,7 @@ describe("Catapultar Account", () => {
 
       const factoryReturned = await publicClient.readContract({
         address: options.factory.factory,
-        abi: CATAPULTAR_FACTORY_V0_1_0_ABI,
+        abi: CATAPULTAR_FACTORY_ABI,
         functionName: "predictDeploy",
         args: [ownerTypeToEnum(options.owner.type), keyArray, options.salt],
       });
@@ -72,7 +72,7 @@ describe("Catapultar Account", () => {
       const keyArray = ownerToKeyArray(options.owner);
       const factoryReturned = await publicClient.readContract({
         address: options.factory.factory,
-        abi: CATAPULTAR_FACTORY_V0_1_0_ABI,
+        abi: CATAPULTAR_FACTORY_ABI,
         functionName: "predictDeployWithDigest",
         args: [
           ownerTypeToEnum(options.owner.type),
@@ -93,7 +93,7 @@ describe("Catapultar Account", () => {
       const keyArray = ownerToKeyArray(options.owner);
       const factoryReturned = await publicClient.readContract({
         address: options.factory.factory,
-        abi: CATAPULTAR_FACTORY_V0_1_0_ABI,
+        abi: CATAPULTAR_FACTORY_ABI,
         functionName: "predictDeployUpgradeable",
         args: [ownerTypeToEnum(options.owner.type), keyArray, options.salt],
       });
@@ -160,7 +160,7 @@ describe("Catapultar Account", () => {
     });
   });
 
-  describe("0.1.0 with transactions", () => {
+  describe("with transactions", () => {
     const pubkey = privateKeyToAccount(random(32));
 
     const wallet = privateKeyToAccount(PUBLIC_DEFAULT_ANVIL_ACCOUNT_0);
@@ -176,7 +176,7 @@ describe("Catapultar Account", () => {
       const deployCall010 = CatapultarAccount.deploy({
         owner: { type: "ecdsa", address: pubkey.address },
         salt: `0x${asHex(0n, 20)}${random(12).replace("0x", "")}`,
-        factory: { factory: factories["0.1.0"], template: templates["0.1.0"] },
+        factory: defaultFactory,
       });
       deployedAccountV010 = deployCall010.account.connectRpc({
         chainId,
@@ -213,7 +213,7 @@ describe("Catapultar Account", () => {
       const deployCall = CatapultarAccount.deploy({
         owner,
         salt: `0x${asHex(0n, 20)}${random(12).replace("0x", "")}`,
-        factory: { factory: factories["0.1.0"], template: templates["0.1.0"] },
+        factory: defaultFactory,
       });
 
       const p256Account = deployCall.account.connectRpc({
@@ -259,7 +259,7 @@ describe("Catapultar Account", () => {
       const deployCall = CatapultarAccount.deploy({
         owner: { type: "ecdsa", address: pubkey.address },
         salt: `0x${asHex(0n, 20)}${random(12).replace("0x", "")}`,
-        factory: { factory: factories["0.1.0"], template: templates["0.1.0"] },
+        factory: defaultFactory,
         digest: { hash: digest, isSignature: true },
       });
       const tx = await executor.sendTransaction({

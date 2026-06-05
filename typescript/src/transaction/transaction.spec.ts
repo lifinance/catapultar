@@ -6,7 +6,7 @@ import { rpcUrl } from "../../test/setup";
 import { anvil } from "viem/chains";
 import { PUBLIC_DEFAULT_ANVIL_ACCOUNT_0 } from "../config";
 import { privateKeyToAccount } from "viem/accounts";
-import CATAPULTAR_V0_1_0_ABI from "../abi/catapultarV0.1.0";
+import CATAPULTAR_ABI from "../abi/catapultar";
 
 async function waitForTransaction(hash: `0x${string}`) {
   await new Promise((resolve) => setTimeout(resolve, 50));
@@ -192,7 +192,7 @@ describe("Base Transaction", () => {
       // Check the embedded action.
       const embedStatus = await publicClient.readContract({
         address: txAcct.address,
-        abi: CATAPULTAR_V0_1_0_ABI,
+        abi: CATAPULTAR_ABI,
         functionName: "approvedDigest",
         args: [txAcct.callDigest],
       });

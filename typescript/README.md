@@ -6,7 +6,7 @@ Catapultar is a compact TypeScript library for managing Catapultar smart account
 
 - Utilities for interacting with the Catapultar smart account
 - Ethers and viem compatibility.
-- Natural language transaction creation.
+- Fluent, chainable transaction building (build, sign, and execute batches).
 - Helpers for account and factory interactions to simplify common tasks
 
 ### Library Structure
@@ -58,7 +58,8 @@ Catapultar is offline by default — it can build, hash, and sign everything wit
 - EIP-1271 signature validation
 - Reading owner / approved digests / upgradeability from the account.
 
-Accounts target the `0.1.0` Catapultar contract.
+Accounts default to the `0.1.0` EIP-712 domain version (matching the deployed
+Catapultar contract); pass `version` to the account constructor to override it.
 
 For the common single-wallet case, `CatapultarTx` already signs and broadcasts a
 batch in one call via `tx.execute(walletClient)` (see [Transaction Creation](#transaction-creation)).
@@ -154,7 +155,7 @@ You can predict the address without building a call via `CatapultarAccount.predi
 
 By default the factory mints the cheap, immutable PUSH0 minimal clone. Pass
 `upgradeable: true` to mint a durable ERC-1967 proxy the owner can later upgrade
-via `upgradeToAndCall` (see `account.buildUpgradeCall` / `client.upgrade`). The
+via `upgradeToAndCall` (build the call with `account.buildUpgradeCall`). The
 predicted address differs between the two strategies, and an embedded `digest`
 is only available for the immutable clone (the type system rejects
 `{ upgradeable: true, digest }`).
@@ -182,10 +183,8 @@ the signature.
 const digest = account.getReplayProtectedDigest(payloadHash);
 const signature = await ownerLocalAccount.sign({ hash: digest });
 
-// Or via the client (ECDSA owners with a local signer):
-const signature2 = await client.signMessageAsAccount(payloadHash);
-
-// Verify against the deployed account's on-chain ERC-1271 view:
+// Verify against the deployed account's on-chain ERC-1271 view (pass the
+// ORIGINAL payloadHash — the account rehashes into the replay envelope itself):
 const ok = await connectedAccount.isValidAccountSignature({
   payloadHash,
   signature,
