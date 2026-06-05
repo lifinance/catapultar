@@ -482,6 +482,7 @@ export class CatapultarAccount<
    * Assert that none of `options.nonces` has already been spent on-chain, and
    * that the set contains no duplicates. Reads are batched per bitmap word.
    * Requires a connected account.
+   * @throws {NonceZeroError} If any nonce is 0 (reserved as "unset"; rejected on-chain).
    * @throws {DuplicateNonceError} If a nonce appears twice in the input.
    * @throws {NonceCollisionError} If a nonce is already spent on-chain.
    */
@@ -491,6 +492,12 @@ export class CatapultarAccount<
   ) {
     const lookups: { [upper: string]: bigint } = {};
     for (const nonce of options.nonces) {
+      // Nonce 0 is rejected on-chain (BitmapNonce `_useUnorderedNonce`), so guard it
+      // here too — this is the shared entry point that `validateNonce` delegates to.
+      if (nonce === 0n)
+        throw new NonceZeroError(
+          "Nonce 0 is not allowed. It cannot be differentiated from an invalid nonce.",
+        );
       const wordPos = nonce >> 8n;
       const bitPos = nonce & 255n;
       const val = lookups[wordPos.toString(16)];

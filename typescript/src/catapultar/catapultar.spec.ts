@@ -19,7 +19,8 @@ import {
 import { Base64, P256 } from "ox";
 import { CatapultarAccount } from "./account";
 import { rpcUrl } from "../../test/setup";
-import { defaultFactory, PUBLIC_DEFAULT_ANVIL_ACCOUNT_0 } from "../config";
+import { defaultFactory } from "../config";
+import { PUBLIC_DEFAULT_ANVIL_ACCOUNT_0 } from "../../test/fixtures";
 
 const chainId = 31337;
 

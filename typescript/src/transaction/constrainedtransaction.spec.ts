@@ -10,12 +10,12 @@ import { anvil } from "viem/chains";
 import { rpcUrl } from "../../test/setup";
 import { random } from "../utils/helpers";
 import { privateKeyToAccount } from "viem/accounts";
+import { cat_validator } from "../config";
 import {
   PUBLIC_DEFAULT_ANVIL_ACCOUNT_0,
-  cat_validator,
   token1,
   token2,
-} from "../config";
+} from "../../test/fixtures";
 import { MOCKERC20_abi } from "../abi/mockerc20";
 
 async function waitForTransaction(hash: `0x${string}`) {
@@ -42,6 +42,60 @@ describe("ConstrainedAssetTransaction", () => {
       expect(catx.constraintNonce).toBe(1n);
       catx.setConstraintNonce(10n);
       expect(catx.constraintNonce).toBe(10n);
+    });
+
+    it("asExecutionBundle binds the embedded batch to the execute validator", () => {
+      const amount = 10n ** 18n;
+      const customValidator = random(20);
+      const salt = random(32);
+      const owner = { type: "ecdsa", address: random(20) } as const;
+      const execute = {
+        executionTarget: token2,
+        executionPayload: "0x" as const,
+        spends: [amount],
+      };
+      const buildCatx = () => {
+        const c = new ConstrainedAssetTransaction({
+          executor: zeroAddress,
+          chainId: 31337,
+        });
+        c.addAllowances({ token: token1, amount });
+        c.addOutcomes({ token: token2, amount, destination: zeroAddress });
+        return c;
+      };
+
+      // Custom validator: the embedded approve/signature batch + the predicted account
+      // address must match a batch built explicitly for that validator, and the entry
+      // call must target it too. (Regression for the approve-one/execute-another bug.)
+      const customBundle = buildCatx().asExecutionBundle({
+        salt,
+        owner,
+        execute: { ...execute, validator: customValidator },
+      });
+      const expectedCustom = buildCatx()
+        .asCatapultarAllowanceTransaction({ validator: customValidator })
+        .asAccount({ salt, owner });
+      expect(customBundle.entryCall.to).toBe(customValidator);
+      expect(customBundle.address).toBe(expectedCustom.address);
+      expect(customBundle.actionCall.data).toBe(expectedCustom.actionCall.data);
+
+      // Default path (no override) still binds the library default validator.
+      const defaultBundle = buildCatx().asExecutionBundle({
+        salt,
+        owner,
+        execute,
+      });
+      const expectedDefault = buildCatx()
+        .asCatapultarAllowanceTransaction({ validator: cat_validator })
+        .asAccount({ salt, owner });
+      expect(defaultBundle.entryCall.to).toBe(cat_validator);
+      expect(defaultBundle.address).toBe(expectedDefault.address);
+      expect(defaultBundle.actionCall.data).toBe(
+        expectedDefault.actionCall.data,
+      );
+
+      // The validator must actually flow into the digest/address derivation.
+      expect(customBundle.address).not.toBe(defaultBundle.address);
     });
   });
   describe("integration", () => {

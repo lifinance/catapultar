@@ -285,7 +285,13 @@ export class ConstrainedAssetTransaction {
     entryCall: Call;
     address: `0x${string}`;
   } {
-    const tx = this.asCatapultarAllowanceTransaction();
+    // The embedded approve + setSignature batch must target the SAME validator the
+    // entry call (asExecuteCall) executes against, or the custom validator would have
+    // neither an ERC20 allowance nor an approved digest. `undefined` re-applies the
+    // library default via the destructuring default, preserving the default path.
+    const tx = this.asCatapultarAllowanceTransaction({
+      validator: opt.execute.validator,
+    });
     const { deployCall, actionCall, address } = tx.asAccount({
       salt: opt.salt,
       owner: opt.owner,

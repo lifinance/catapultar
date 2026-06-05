@@ -4,7 +4,7 @@ import { random } from "../utils/helpers";
 import { BaseTransaction } from "./transaction";
 import { rpcUrl } from "../../test/setup";
 import { anvil } from "viem/chains";
-import { PUBLIC_DEFAULT_ANVIL_ACCOUNT_0 } from "../config";
+import { PUBLIC_DEFAULT_ANVIL_ACCOUNT_0 } from "../../test/fixtures";
 import { privateKeyToAccount } from "viem/accounts";
 import CATAPULTAR_ABI from "../abi/catapultar";
 

@@ -29,13 +29,18 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.bun/install/cache
-          key: ${{ runner.os }}-bun-${{ hashFiles('typescript/bun.lockb') }}
+          key: ${{ runner.os }}-bun-${{ hashFiles('typescript/bun.lock') }}
           restore-keys: |
             ${{ runner.os }}-bun-
 
       - name: Install dependencies
         run: bun install
         id: install
+        working-directory: typescript
+
+      - name: Build package (typecheck + bundle + smoke)
+        run: bun run build
+        id: build
         working-directory: typescript
 
       - name: Install Anvil
