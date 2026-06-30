@@ -60,6 +60,9 @@ export class BaseTransaction {
     signature?: `0x${string}`;
   }) {
     const { mode, nonce, calls = [], signature } = opt ?? {};
+    // Reject nonce 0 here too (not just in setNonce): it is indistinguishable
+    // from an unset nonce on-chain, so fail fast at construction.
+    if (nonce === 0n) throw new NonceZeroError(NONCE_ZERO_ERROR);
     this.mode = mode;
     this.nonce = nonce;
     this.calls = calls;

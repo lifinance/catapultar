@@ -3,7 +3,6 @@
   "compilerOptions": {
     // Bundler mode
     "allowImportingTsExtensions": true,
-    "verbatimModuleSyntax": true,
     "noEmit": true,
     "types": ["bun"]
   }

@@ -135,6 +135,10 @@ describe("Base Transaction", () => {
       const nonce0Error = `Nonce 0 is not allowed. It cannot be differentiated from an invalid nonce.`;
       expect(() => tx.setNonce(0n)).toThrow(nonce0Error);
       expect(tx.nonce).toBeUndefined();
+      // The constructor rejects nonce 0 too (consistent with setNonce).
+      expect(() => new BaseTransaction({ nonce: 0n })).toThrow(nonce0Error);
+      // A non-zero nonce in the constructor is accepted.
+      expect(new BaseTransaction({ nonce: 1n }).nonce).toBe(1n);
       tx.nonce = 0n;
       expect(() => tx.getOpData()).toThrow(nonce0Error);
     });

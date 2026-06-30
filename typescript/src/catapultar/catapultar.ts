@@ -405,6 +405,11 @@ export class MetaCatapultarTx<
    * in one batch (defaulting to {@link ExecutionMode.SkipRevert} so a failed
    * sub-batch is skipped). Validates nonces first. The returned transaction is
    * unsigned — sign and send it like any other {@link CatapultarTx}.
+   *
+   * Always `await` this: it is asynchronous (sub-batches are encoded via the
+   * async {@link CatapultarTx.asCall}), and the nonce check surfaces as a
+   * rejected promise.
+   * @throws {DuplicateNonceError} If two sub-batches resolve to the same nonce.
    */
   async asCatapultarTx() {
     this.checkNonces();

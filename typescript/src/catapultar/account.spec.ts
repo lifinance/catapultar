@@ -4,9 +4,12 @@ import {
   createWalletClient,
   http,
   keccak256,
+  numberToHex,
   pad,
+  sha256,
+  type PublicClient,
 } from "viem";
-import { privateKeyToAccount } from "viem/accounts";
+import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import { anvil } from "viem/chains";
 import { CatapultarAccount, REPLAY_PROTECTION } from "./account";
 import { NonceZeroError } from "../errors";
@@ -290,6 +293,105 @@ describe("Catapultar Account", () => {
       const approvalStatus = await smartAccount.getDigestApproval({ digest });
 
       expect(approvalStatus).toBe(2);
+    });
+  });
+
+  // Offline unit tests (no anvil needed).
+  describe("Signature validation", () => {
+    const p256Wire = (
+      r: bigint,
+      s: bigint,
+      flag: "00" | "01",
+    ): `0x${string}` => {
+      const rHex = numberToHex(r, { size: 32 }).slice(2);
+      const sHex = numberToHex(s, { size: 32 }).slice(2);
+      // [r:32][s:32][pad:00][flag] => 66 bytes (matches normalizeP256 layout).
+      return `0x${rHex}${sHex}00${flag}`;
+    };
+
+    it.concurrent("honors the P256 prehash flag", async () => {
+      const privateKey = P256.randomPrivateKey();
+      const pub = P256.getPublicKey({ privateKey });
+      const account = new CatapultarAccount({
+        address: random(20),
+        owner: {
+          type: "p256",
+          x: numberToHex(pub.x, { size: 32 }),
+          y: numberToHex(pub.y, { size: 32 }),
+        },
+      });
+      const digest = random(32);
+
+      // flag 00 -> verify against the raw digest.
+      const sig00 = P256.sign({ payload: digest, privateKey });
+      expect(
+        await account.isSignatureValid({
+          signature: p256Wire(sig00.r, sig00.s, "00"),
+          hash: digest,
+        }),
+      ).toBe(true);
+
+      // flag 01 -> verify against sha256(digest).
+      const sig01 = P256.sign({ payload: sha256(digest), privateKey });
+      expect(
+        await account.isSignatureValid({
+          signature: p256Wire(sig01.r, sig01.s, "01"),
+          hash: digest,
+        }),
+      ).toBe(true);
+
+      // The flag is actually honored: mismatched flag/payload must be rejected.
+      expect(
+        await account.isSignatureValid({
+          signature: p256Wire(sig00.r, sig00.s, "01"),
+          hash: digest,
+        }),
+      ).toBe(false);
+      expect(
+        await account.isSignatureValid({
+          signature: p256Wire(sig01.r, sig01.s, "00"),
+          hash: digest,
+        }),
+      ).toBe(false);
+    });
+
+    it.concurrent("verifies an ECDSA owner signature", async () => {
+      const signer = privateKeyToAccount(generatePrivateKey());
+      const account = new CatapultarAccount({
+        address: random(20),
+        owner: { type: "ecdsa", address: signer.address },
+      });
+      const digest = random(32);
+      const signature = await signer.sign({ hash: digest });
+      expect(await account.isSignatureValid({ signature, hash: digest })).toBe(
+        true,
+      );
+      expect(
+        await account.isSignatureValid({ signature, hash: random(32) }),
+      ).toBe(false);
+    });
+  });
+
+  describe("getNextValidNonce", () => {
+    // Stub client whose bitmap is empty for every word.
+    const emptyBitmapAccount = () =>
+      new CatapultarAccount({
+        address: random(20),
+        owner: { type: "ecdsa", address: random(20) },
+      }).connect({ readContract: async () => 0n } as unknown as PublicClient);
+
+    it.concurrent("never returns nonce 0", async () => {
+      // 0 is rejected on-chain (BitmapNonce) and by validateNonces, so the
+      // "next valid" nonce from 0 must skip it.
+      expect(await emptyBitmapAccount().getNextValidNonce({ nonce: 0n })).toBe(
+        1n,
+      );
+    });
+
+    it.concurrent("returns an unspent starting nonce unchanged", async () => {
+      expect(await emptyBitmapAccount().getNextValidNonce({ nonce: 5n })).toBe(
+        5n,
+      );
     });
   });
 });

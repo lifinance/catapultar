@@ -7,6 +7,7 @@ import {
   keccak256,
   parseAbiParameters,
   recoverAddress,
+  sha256,
   toBytes,
   zeroAddress,
   type Chain,
@@ -64,6 +65,25 @@ export const REPLAY_PROTECTION = keccak256(
 
 /** ERC-1271 magic value returned by `isValidSignature` for a valid signature. */
 export const ERC1271_MAGIC_VALUE = "0x1626ba7e" as const;
+
+/**
+ * Minimal ERC-1271 interface used to verify a signature against a smart-contract
+ * owner. The owner may be any ERC-1271 contract — not necessarily a Catapultar
+ * account — so this targets only the standard `isValidSignature(bytes32,bytes)`
+ * selector instead of the full account ABI.
+ */
+const ERC1271_ABI = [
+  {
+    type: "function",
+    name: "isValidSignature",
+    stateMutability: "view",
+    inputs: [
+      { name: "hash", type: "bytes32" },
+      { name: "signature", type: "bytes" },
+    ],
+    outputs: [{ name: "", type: "bytes4" }],
+  },
+] as const;
 
 /**
  * A Catapultar smart account.
@@ -466,6 +486,10 @@ export class CatapultarAccount<
       });
 
       for (bitPos; bitPos < 256n; bitPos += 1n) {
+        // Never yield nonce 0: it is reserved/rejected on-chain
+        // (BitmapNonce._useUnorderedNonce) and by validateNonces, so it can
+        // never be a usable "next valid" nonce.
+        if ((wordPos << 8n) + bitPos === 0n) continue;
         if (!(spentNonces & (1n << bitPos))) {
           found = true;
           break;
@@ -600,7 +624,9 @@ export class CatapultarAccount<
 
   /**
    * Return whether a signature is valid.
-   * @dev Verifies the raw digest; does not apply the P256 prehash flag.
+   * @dev Honors the trailing P256/WebAuthn prehash-flag byte (mirrors
+   *   `KeyedOwnable._validateSignature`): a non-zero flag re-hashes the digest
+   *   with SHA-256 before verification. ECDSA signatures are unaffected.
    */
   async isSignatureValid(options: {
     signature: `0x${string}`;
@@ -636,14 +662,17 @@ export class CatapultarAccount<
 
       const result1271 = await this.publicClient().readContract({
         address: this.owner.address,
-        abi: this.abi(),
+        abi: ERC1271_ABI,
         functionName: "isValidSignature",
         args: [hash, signature],
       });
-      return result1271 === "0x1626ba7e";
+      return result1271 === ERC1271_MAGIC_VALUE;
     }
 
-    // Run P256 and WebAuthn. First, check the formatting of the signature.
+    // Run P256 and WebAuthn. The wire signature carries a trailing prehash-flag
+    // byte (mirrors KeyedOwnable._validateSignature): a non-zero flag means the
+    // digest is re-hashed with SHA-256 before verification. Strip the flag and
+    // apply it so this check matches the on-chain result for either flag value.
     const raw = signature.replace("0x", "");
     if (raw.length <= 65 * 2) {
       return false;
@@ -653,11 +682,17 @@ export class CatapultarAccount<
         x: BigInt(this.owner.x),
         y: BigInt(this.owner.y),
       });
+      // Trailing byte is the prehash flag; the rest is the signature body.
+      const prehash = raw.slice(-2) !== "00";
+      const body = raw.slice(0, -2);
       if (this.isP256()) {
-        const r = BigInt("0x" + raw.slice(0, 64));
-        const s = BigInt("0x" + raw.slice(64, 128));
+        const r = BigInt("0x" + body.slice(0, 64));
+        const s = BigInt("0x" + body.slice(64, 128));
+        // `hash: prehash` makes ox SHA-256 the payload first, mirroring the
+        // on-chain `sha256(digest)` path when the flag is set.
         return await P256.verify({
           payload: hash,
+          hash: prehash,
           publicKey,
           signature: { r, s },
         });
@@ -667,7 +702,7 @@ export class CatapultarAccount<
           "WebAuthnAuth auth",
           "struct WebAuthnAuth { bytes authenticatorData; string clientDataJSON; uint256 challengeIndex; uint256 typeIndex; uint256 r; uint256 s;}",
         ]),
-        signature,
+        `0x${body}`,
       )[0];
       const metadata = {
         authenticatorData: unpackedSig.authenticatorData,
@@ -677,7 +712,9 @@ export class CatapultarAccount<
       };
       return await WebAuthnP256.verify({
         metadata,
-        challenge: hash,
+        // On-chain the challenge is `abi.encode(digest)` (the possibly-prehashed
+        // digest), so SHA-256 the hash when the flag is set.
+        challenge: prehash ? sha256(hash) : hash,
         publicKey,
         signature: { r: unpackedSig.r, s: unpackedSig.s },
       });
