@@ -18,6 +18,19 @@ import { CatapultarAccount } from "./account";
 import { BaseTransaction } from "../transaction/transaction";
 
 /**
+ * Resolve an account option into a {@link CatapultarAccount}: pass through an
+ * existing handle, or construct one from params. Shared by the transaction
+ * builders so their constructors don't each repeat the branch.
+ */
+function resolveAccount<O extends Owner, Connected extends boolean>(
+  account: AccountConstructorParams<O> | CatapultarAccount<O, Connected>,
+): CatapultarAccount<O, Connected> {
+  return account instanceof CatapultarAccount
+    ? account
+    : (new CatapultarAccount<O>(account) as CatapultarAccount<O, Connected>);
+}
+
+/**
  * Account-aware transaction builder: turns a list of {@link Call}s into a single
  * signed Catapultar batch for a specific account.
  *
@@ -67,13 +80,7 @@ export class CatapultarTx<
     signature?: `0x${string}`;
   }) {
     super(options);
-    this.account =
-      options.account instanceof CatapultarAccount
-        ? options.account
-        : (new CatapultarAccount<O>(options.account) as CatapultarAccount<
-            O,
-            Connected
-          >);
+    this.account = resolveAccount(options.account);
   }
 
   // --- Export the transaction for saving --- //
@@ -167,8 +174,12 @@ export class CatapultarTx<
    * @throws {OwnerMismatchError} If the on-chain owner differs from the configured one.
    */
   async validateUsingProvider(this: CatapultarTx<O, true>) {
-    await this.account.validateNonce({ nonce: this.nonce });
-    await this.account.validateOwner();
+    // Independent reads (nonceBitmap vs. getPublicKey) — run them concurrently
+    // so the pre-flight pays one round-trip latency, not two.
+    await Promise.all([
+      this.account.validateNonce({ nonce: this.nonce }),
+      this.account.validateOwner(),
+    ]);
 
     return this;
   }
@@ -281,8 +292,6 @@ export class MetaCatapultarTx<
 > {
   /** Execution mode of the outer (wrapping) batch. Defaults to SkipRevert when converted. */
   mode?: ExecutionMode;
-  /** Unused reserved field carried from constructor options. */
-  nonce?: bigint;
   /** The queued sub-batches, each with an optional explicit nonce/mode. */
   calls: { calls: Call[]; nonce?: bigint; mode?: ExecutionMode }[] = [];
 
@@ -302,31 +311,19 @@ export class MetaCatapultarTx<
   constructor(options: {
     account: AccountConstructorParams<O> | CatapultarAccount<O, Connected>;
     mode?: ExecutionMode;
-    nonce?: bigint;
-    signature?: `0x${string}`;
     outerNonce?: bigint;
     innerNonce?: bigint;
   }) {
-    this.account =
-      options.account instanceof CatapultarAccount
-        ? options.account
-        : (new CatapultarAccount<O>(options.account) as CatapultarAccount<
-            O,
-            Connected
-          >);
+    this.account = resolveAccount(options.account);
     // Random bytes with rightmost byte empty.
     const randomNonce = BigInt(random(31)) << 8n;
     const {
       mode,
-      nonce,
       outerNonce = randomNonce,
       innerNonce = randomNonce + 1n,
     } = options;
 
-    // Transaction Definition
     this.mode = mode;
-    this.nonce = nonce;
-
     this.outerNonce = outerNonce;
     this.innerNonce = innerNonce;
   }
@@ -345,9 +342,7 @@ export class MetaCatapultarTx<
   addCalls(
     ...calls: { calls: Call[]; nonce?: bigint; mode?: ExecutionMode }[]
   ) {
-    for (const call of calls) {
-      this.calls.push(call);
-    }
+    this.calls.push(...calls);
     return this;
   }
 

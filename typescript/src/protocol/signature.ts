@@ -1,13 +1,18 @@
 import {
   compactSignatureToSignature,
+  decodeAbiParameters,
   encodeAbiParameters,
+  isAddressEqual,
   parseAbiParameters,
   parseCompactSignature,
   parseSignature,
+  recoverAddress,
   serializeCompactSignature,
   serializeSignature,
+  sha256,
   signatureToCompactSignature,
 } from "viem";
+import { P256, PublicKey, WebAuthnP256 } from "ox";
 import type { KeyedSignature, WebAuthnSignature } from "../types/types";
 import type { Owner } from "./owner";
 
@@ -63,6 +68,11 @@ export function encodeWebAuthnAuth(sig: WebAuthnSignature): `0x${string}` {
   ]);
 }
 
+/** Decode `WebAuthnAuth` struct bytes back into its fields (inverse of {@link encodeWebAuthnAuth}). */
+export function decodeWebAuthnAuth(hex: `0x${string}`) {
+  return decodeAbiParameters(WEBAUTHN_AUTH_PARAMS, hex)[0];
+}
+
 /**
  * Pad a raw P256 signature to 65 bytes and append the prehash-flag byte (`00`,
  * meaning "no SHA-256 prehash"). Signatures already longer than 65 bytes (i.e.
@@ -90,4 +100,81 @@ export function normalizeSignature(
   if (owner.type === "p256") return normalizeP256(signature as `0x${string}`);
   // webauthn-p256
   return `${encodeWebAuthnAuth(signature as WebAuthnSignature)}00`;
+}
+
+/**
+ * Verify an on-chain-wire signature against an owner key, offline. The inverse
+ * of {@link normalizeSignature}: dispatch is on `owner.type` (never the JS type
+ * of `signature`), and the P256/WebAuthn wire format — the trailing prehash-flag
+ * byte, the `r`/`s` split, and the `WebAuthnAuth` struct — is decoded here in the
+ * one module that also encodes it, so encode and decode cannot drift.
+ *
+ * Mirrors the owner-key half of `KeyedOwnable._validateSignature`: a non-zero
+ * prehash flag re-hashes the digest with SHA-256 before verification.
+ *
+ * For an `ecdsa` owner this only checks ECDSA recovery against the owner address
+ * — a smart-contract (ERC-1271) owner returns `false` here and must be verified
+ * on-chain by the caller.
+ */
+export async function verifyKeyedSignature(
+  owner: Owner,
+  hash: `0x${string}`,
+  signature: `0x${string}`,
+): Promise<boolean> {
+  if (owner.type === "ecdsa") {
+    // Only recover ECDSA-sized signatures (65 bytes, or a 64-byte EIP-2098
+    // compact signature). Any other length is a contract signature: return
+    // false and let the caller defer to ERC-1271. The try/catch also covers
+    // correctly-sized but unrecoverable signatures (e.g. invalid v/yParity).
+    if (signature.length !== 65 * 2 + 2 && signature.length !== 64 * 2 + 2)
+      return false;
+    try {
+      const signer = await recoverAddress({
+        hash,
+        signature:
+          signature.length === 64 * 2 + 2
+            ? fromCompactSignature(signature)
+            : signature,
+      });
+      return isAddressEqual(owner.address, signer);
+    } catch {
+      return false;
+    }
+  }
+
+  const raw = signature.replace("0x", "");
+  if (raw.length <= 65 * 2) return false;
+  const publicKey = PublicKey.from({ x: BigInt(owner.x), y: BigInt(owner.y) });
+  // Trailing byte is the prehash flag; the rest is the signature body.
+  const prehash = raw.slice(-2) !== "00";
+  const body = raw.slice(0, -2);
+
+  if (owner.type === "p256") {
+    const r = BigInt(`0x${body.slice(0, 64)}`);
+    const s = BigInt(`0x${body.slice(64, 128)}`);
+    // `hash: prehash` makes ox SHA-256 the payload first, mirroring the
+    // on-chain `sha256(digest)` path when the flag is set.
+    return P256.verify({
+      payload: hash,
+      hash: prehash,
+      publicKey,
+      signature: { r, s },
+    });
+  }
+
+  // webauthn-p256
+  const auth = decodeWebAuthnAuth(`0x${body}`);
+  return WebAuthnP256.verify({
+    metadata: {
+      authenticatorData: auth.authenticatorData,
+      clientDataJSON: auth.clientDataJSON,
+      challengeIndex: Number(auth.challengeIndex),
+      typeIndex: Number(auth.typeIndex),
+    },
+    // On-chain the challenge is `abi.encode(digest)` (the possibly-prehashed
+    // digest), so SHA-256 the hash when the flag is set.
+    challenge: prehash ? sha256(hash) : hash,
+    publicKey,
+    signature: { r: auth.r, s: auth.s },
+  });
 }

@@ -189,6 +189,38 @@ export class ConstrainedAssetTransaction {
   }
 
   /**
+   * Encode a `CATValidator.entry` call — the shared shape behind
+   * {@link asExecuteCall} and {@link asRefundCall}. Only the execution
+   * target/payload, spends, and outcomes differ between them.
+   */
+  private buildEntryCall(opt: {
+    validator: `0x${string}`;
+    target: `0x${string}`;
+    payload: `0x${string}`;
+    account: `0x${string}`;
+    spends: AllowanceSpend[];
+    outcomes: Outcome[];
+  }): Call {
+    return {
+      to: opt.validator,
+      value: 0n,
+      data: encodeFunctionData({
+        abi: CAT_VALIDATOR_ABI,
+        functionName: "entry",
+        args: [
+          opt.target,
+          opt.payload,
+          opt.account,
+          this.constraintNonce,
+          opt.spends,
+          opt.outcomes,
+          "0x",
+        ],
+      }),
+    };
+  }
+
+  /**
    * The call for execution the validation on the account.
    */
   asExecuteCall(opt: CatExecuteOptions): Call {
@@ -208,24 +240,14 @@ export class ConstrainedAssetTransaction {
       spend: opt.spends[i]!,
     }));
 
-    const executeCall: Call = {
-      to: validator,
-      data: encodeFunctionData({
-        abi: CAT_VALIDATOR_ABI,
-        functionName: "entry",
-        args: [
-          executionTarget,
-          executionPayload,
-          opt.address,
-          this.constraintNonce,
-          allowanceSpends,
-          this.outcomes,
-          "0x",
-        ],
-      }),
-      value: 0n,
-    };
-    return executeCall;
+    return this.buildEntryCall({
+      validator,
+      target: executionTarget,
+      payload: executionPayload,
+      account: opt.address,
+      spends: allowanceSpends,
+      outcomes: this.outcomes,
+    });
   }
 
   /**
@@ -248,24 +270,14 @@ export class ConstrainedAssetTransaction {
     }));
 
     // Set target to the validator. The validator will forward funds to the user at the end of the call.
-    const executeCall: Call = {
-      to: validator,
-      data: encodeFunctionData({
-        abi: CAT_VALIDATOR_ABI,
-        functionName: "entry",
-        args: [
-          validator,
-          "0x",
-          opt.address,
-          this.constraintNonce,
-          allowanceSpends,
-          refundOutcomes,
-          "0x",
-        ],
-      }),
-      value: 0n,
-    };
-    return executeCall;
+    return this.buildEntryCall({
+      validator,
+      target: validator,
+      payload: "0x",
+      account: opt.address,
+      spends: allowanceSpends,
+      outcomes: refundOutcomes,
+    });
   }
 
   /**

@@ -92,8 +92,10 @@ export {
   fromCompactSignature,
   compactSignature,
   encodeWebAuthnAuth,
+  decodeWebAuthnAuth,
   normalizeP256,
   normalizeSignature,
+  verifyKeyedSignature,
 } from "./protocol/signature";
 export {
   ownerToKeyArray,

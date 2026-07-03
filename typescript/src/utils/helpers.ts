@@ -5,7 +5,9 @@
  * @param pad Value to pad with. Default: 0
  */
 export function padEven(s: string, minimal = 2, pad: string = "0") {
-  return s.padStart(((Math.max(s.length + 1, minimal) / 2) | 0) * 2, pad);
+  // Round the length up to even, but never below `minimal`.
+  const target = Math.max(minimal, s.length + (s.length % 2));
+  return s.padStart(target, pad);
 }
 
 /**

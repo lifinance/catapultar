@@ -99,9 +99,7 @@ export class BaseTransaction {
    * Adds list of calls to the Catapultar transaction. The calls will be executed with the configured mode.
    */
   addCall(...calls: Call[]) {
-    for (const call of calls) {
-      this.calls.push(call);
-    }
+    this.calls.push(...calls);
     return this;
   }
 

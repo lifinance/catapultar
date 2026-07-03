@@ -1,13 +1,10 @@
 import {
   createPublicClient,
-  decodeAbiParameters,
   encodeFunctionData,
   encodePacked,
   http,
   keccak256,
-  parseAbiParameters,
-  recoverAddress,
-  sha256,
+  pad,
   toBytes,
   zeroAddress,
   type Chain,
@@ -37,10 +34,12 @@ import {
   predictCloneAddress,
 } from "../protocol/factory";
 import {
-  fromCompactSignature,
   normalizeSignature as encodeKeyedSignature,
+  verifyKeyedSignature,
 } from "../protocol/signature";
 import type { CatapultarDomain } from "../protocol/calls";
+import { groupNoncesByWord, nonceBit, nonceWord } from "../protocol/nonce";
+import { NONCE_ZERO_ERROR } from "../protocol/validation";
 import {
   DuplicateNonceError,
   InvalidChainError,
@@ -50,7 +49,6 @@ import {
   NotConnectedError,
   OwnerMismatchError,
 } from "../errors";
-import { P256, PublicKey, WebAuthnP256 } from "ox";
 import { _factory } from "../config";
 
 /**
@@ -436,17 +434,7 @@ export class CatapultarAccount<
    * @param nonces Nonces to invalidate.
    */
   buildInvalidateNoncesCalls(...nonces: bigint[]): Call[] {
-    const pairs = new Set(nonces.map((n) => n >> 8n));
-    const bitMaps = [...pairs].map((wordPos) => {
-      const toInvalidate = nonces.filter((n) => n >> 8n === wordPos);
-      const bits = toInvalidate.map((v) => v % 256n);
-      let mask = 0n;
-      for (const bit of bits) {
-        mask |= 1n << bit;
-      }
-      return [wordPos, mask] as [bigint, bigint];
-    });
-    return bitMaps.map(([wordPos, mask]) => ({
+    return [...groupNoncesByWord(nonces)].map(([wordPos, mask]) => ({
       to: this.address,
       value: 0n,
       data: encodeFunctionData({
@@ -469,15 +457,11 @@ export class CatapultarAccount<
   ): Promise<bigint | null> {
     const { nonce: startingNonce, attempts = 10 } = options;
 
-    let wordPos = startingNonce >> 8n;
-    let bitPos = startingNonce % 256n;
-    let found = false;
+    const startWord = nonceWord(startingNonce);
+    const endWord = startWord + BigInt(attempts);
+    let bitPos = nonceBit(startingNonce);
     const client = this.publicClient();
-    for (
-      wordPos;
-      wordPos < (startingNonce >> 8n) + BigInt(attempts);
-      wordPos += 1n
-    ) {
+    for (let wordPos = startWord; wordPos < endWord; wordPos += 1n) {
       const spentNonces = await client.readContract({
         address: this.address,
         abi: this.abi(),
@@ -485,21 +469,16 @@ export class CatapultarAccount<
         args: [wordPos],
       });
 
-      for (bitPos; bitPos < 256n; bitPos += 1n) {
+      for (; bitPos < 256n; bitPos += 1n) {
         // Never yield nonce 0: it is reserved/rejected on-chain
         // (BitmapNonce._useUnorderedNonce) and by validateNonces, so it can
         // never be a usable "next valid" nonce.
         if ((wordPos << 8n) + bitPos === 0n) continue;
-        if (!(spentNonces & (1n << bitPos))) {
-          found = true;
-          break;
-        }
+        if (!(spentNonces & (1n << bitPos))) return (wordPos << 8n) + bitPos;
       }
-      if (found === true) break;
       bitPos = 0n;
     }
-    if (!found) return null;
-    return (wordPos << 8n) + bitPos;
+    return null;
   }
 
   /**
@@ -514,39 +493,34 @@ export class CatapultarAccount<
     this: CatapultarAccount<O, true>,
     options: { nonces: bigint[] },
   ) {
-    const lookups: { [upper: string]: bigint } = {};
+    const words = new Map<bigint, bigint>();
     for (const nonce of options.nonces) {
       // Nonce 0 is rejected on-chain (BitmapNonce `_useUnorderedNonce`), so guard it
       // here too — this is the shared entry point that `validateNonce` delegates to.
-      if (nonce === 0n)
-        throw new NonceZeroError(
-          "Nonce 0 is not allowed. It cannot be differentiated from an invalid nonce.",
-        );
-      const wordPos = nonce >> 8n;
-      const bitPos = nonce & 255n;
-      const val = lookups[wordPos.toString(16)];
-      if (!val) lookups[wordPos.toString(16)] = 0n;
-      if (val && val & (1n << bitPos))
-        throw new DuplicateNonceError(`Duplicate Nonce ${nonce}`);
-      lookups[wordPos.toString(16)]! |= 1n << bitPos;
+      if (nonce === 0n) throw new NonceZeroError(NONCE_ZERO_ERROR);
+      const word = nonceWord(nonce);
+      const bit = 1n << nonceBit(nonce);
+      const mask = words.get(word) ?? 0n;
+      if (mask & bit) throw new DuplicateNonceError(`Duplicate Nonce ${nonce}`);
+      words.set(word, mask | bit);
     }
     const client = this.publicClient();
-    const entries = Object.entries(lookups);
+    const entries = [...words];
     const spent = await Promise.all(
-      entries.map(([upper]) =>
+      entries.map(([word]) =>
         client.readContract({
           address: this.address,
           abi: this.abi(),
           functionName: "nonceBitmap",
-          args: [BigInt(`0x${upper}`)],
+          args: [word],
         }),
       ),
     );
-    entries.forEach(([upper, word], i) => {
+    entries.forEach(([word, mask], i) => {
       const spentNonces = spent[i]!;
-      if (spentNonces & word)
+      if (spentNonces & mask)
         throw new NonceCollisionError(
-          `Nonce collision on ${upper}, words: ${word} and ${spentNonces}`,
+          `Nonce collision on ${word.toString(16)}, words: ${mask} and ${spentNonces}`,
         );
     });
   }
@@ -623,101 +597,29 @@ export class CatapultarAccount<
   // --- Statement Functions --- //
 
   /**
-   * Return whether a signature is valid.
-   * @dev Honors the trailing P256/WebAuthn prehash-flag byte (mirrors
-   *   `KeyedOwnable._validateSignature`): a non-zero flag re-hashes the digest
-   *   with SHA-256 before verification. ECDSA signatures are unaffected.
+   * Return whether a signature is valid for `hash` under this account's owner.
+   *
+   * Delegates the offline owner-key check to the protocol seam
+   * {@link verifyKeyedSignature} (ECDSA recovery, or P256 / WebAuthn — honoring
+   * the trailing prehash-flag byte). An ECDSA owner that is actually an ERC-1271
+   * smart contract is then verified on-chain when the account is connected.
    */
   async isSignatureValid(options: {
     signature: `0x${string}`;
     hash: `0x${string}`;
   }): Promise<boolean> {
     const { signature, hash } = options;
-
-    if (this.isEcdsa()) {
-      // Check ECDSA. Only attempt recovery for ECDSA-sized signatures (65 bytes,
-      // or a 64-byte EIP-2098 compact signature). Any other length is a
-      // contract-specific signature: skip recovery (which would otherwise throw)
-      // and defer to the ERC-1271 check below. The try/catch also covers
-      // correctly-sized but unrecoverable signatures (e.g. invalid v/yParity).
-      let signer: `0x${string}` = "0x";
-      if (signature.length === 65 * 2 + 2 || signature.length === 64 * 2 + 2) {
-        try {
-          signer = (await recoverAddress({
-            hash: hash,
-            signature:
-              signature.length === 64 * 2 + 2
-                ? fromCompactSignature(signature)
-                : signature,
-          })) as `0x${string}`;
-        } catch {
-          // Not a recoverable ECDSA signature; defer to ERC-1271.
-        }
-      }
-      // Normalize case before comparing: recoverAddress returns a checksummed
-      // address while this.owner.address may have been supplied lower-cased.
-      if (this.owner.address.toLowerCase() === signer.toLowerCase())
-        return true;
-      if (!this.isConnected()) return false;
-
-      const result1271 = await this.publicClient().readContract({
+    if (await verifyKeyedSignature(this.owner, hash, signature)) return true;
+    // Offline verification failed. An `ecdsa` owner may be an ERC-1271 contract
+    // (an arbitrary-length contract signature); verify it on-chain when connected.
+    if (this.owner.type === "ecdsa" && this.isConnected()) {
+      const result = await this.publicClient().readContract({
         address: this.owner.address,
         abi: ERC1271_ABI,
         functionName: "isValidSignature",
         args: [hash, signature],
       });
-      return result1271 === ERC1271_MAGIC_VALUE;
-    }
-
-    // Run P256 and WebAuthn. The wire signature carries a trailing prehash-flag
-    // byte (mirrors KeyedOwnable._validateSignature): a non-zero flag means the
-    // digest is re-hashed with SHA-256 before verification. Strip the flag and
-    // apply it so this check matches the on-chain result for either flag value.
-    const raw = signature.replace("0x", "");
-    if (raw.length <= 65 * 2) {
-      return false;
-    }
-    if (this.isP256() || this.isWebAuthn()) {
-      const publicKey = PublicKey.from({
-        x: BigInt(this.owner.x),
-        y: BigInt(this.owner.y),
-      });
-      // Trailing byte is the prehash flag; the rest is the signature body.
-      const prehash = raw.slice(-2) !== "00";
-      const body = raw.slice(0, -2);
-      if (this.isP256()) {
-        const r = BigInt("0x" + body.slice(0, 64));
-        const s = BigInt("0x" + body.slice(64, 128));
-        // `hash: prehash` makes ox SHA-256 the payload first, mirroring the
-        // on-chain `sha256(digest)` path when the flag is set.
-        return await P256.verify({
-          payload: hash,
-          hash: prehash,
-          publicKey,
-          signature: { r, s },
-        });
-      }
-      const unpackedSig = decodeAbiParameters(
-        parseAbiParameters([
-          "WebAuthnAuth auth",
-          "struct WebAuthnAuth { bytes authenticatorData; string clientDataJSON; uint256 challengeIndex; uint256 typeIndex; uint256 r; uint256 s;}",
-        ]),
-        `0x${body}`,
-      )[0];
-      const metadata = {
-        authenticatorData: unpackedSig.authenticatorData,
-        clientDataJSON: unpackedSig.clientDataJSON,
-        challengeIndex: Number(unpackedSig.challengeIndex),
-        typeIndex: Number(unpackedSig.typeIndex),
-      };
-      return await WebAuthnP256.verify({
-        metadata,
-        // On-chain the challenge is `abi.encode(digest)` (the possibly-prehashed
-        // digest), so SHA-256 the hash when the flag is set.
-        challenge: prehash ? sha256(hash) : hash,
-        publicKey,
-        signature: { r: unpackedSig.r, s: unpackedSig.s },
-      });
+      return result === ERC1271_MAGIC_VALUE;
     }
     return false;
   }
@@ -744,7 +646,7 @@ export class CatapultarAccount<
         [
           REPLAY_PROTECTION,
           // address(this) left-padded to 32 bytes (matches asUnsafeBytes32).
-          `0x${this.address.replace("0x", "").toLowerCase().padStart(64, "0")}`,
+          pad(this.address, { size: 32 }),
           payloadHash,
         ],
       ),
@@ -798,10 +700,7 @@ export class CatapultarAccount<
     },
   ) {
     const { nonce } = options;
-    if (nonce === 0n)
-      throw new NonceZeroError(
-        "Nonce 0 is not allowed. It cannot be differentiated from an invalid nonce.",
-      );
+    if (nonce === 0n) throw new NonceZeroError(NONCE_ZERO_ERROR);
     if (!nonce) throw new NonceUnsetError("No nonce has been set");
     await this.validateNonces({ nonces: [nonce] });
     return this;

@@ -1,6 +1,5 @@
-import { encodeAbiParameters } from "viem";
+import { concatHex, encodeAbiParameters, numberToHex } from "viem";
 import { CallsTyped, type Call } from "../types/types";
-import { asHex } from "../utils/helpers";
 import { assertNonce } from "./validation";
 
 /**
@@ -18,10 +17,8 @@ export function buildOpData(
   signature?: `0x${string}`,
 ): `0x${string}` {
   assertNonce(nonce);
-  if (signature) {
-    return `0x${asHex(nonce, 32)}${signature.replace("0x", "")}`;
-  }
-  return asHex(nonce, 32, "0x");
+  const noncePart = numberToHex(nonce, { size: 32 });
+  return signature ? concatHex([noncePart, signature]) : noncePart;
 }
 
 /**
