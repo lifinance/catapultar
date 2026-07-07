@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 pragma solidity ^0.8.30;
 
+import { ReentrancyGuard } from "solady/src/utils/ReentrancyGuard.sol";
 import { SafeTransferLib } from "solady/src/utils/SafeTransferLib.sol";
 import { MockERC20 } from "solady/test/utils/mocks/MockERC20.sol";
 
@@ -89,6 +90,13 @@ contract MockExecutor {
         uint256 amount
     ) external {
         SafeTransferLib.safeTransferETH(validator, amount);
+    }
+
+    /// Attempts to re-enter CATValidator::entry from within an execution payload.
+    function executeAndReenter() external {
+        AllowanceSpend[] memory allowances = new AllowanceSpend[](0);
+        Outcome[] memory outcomes = new Outcome[](0);
+        CATValidator(payable(validator)).entry(address(0), hex"", address(this), 1, allowances, outcomes, hex"");
     }
 
     receive() external payable { }
@@ -713,6 +721,25 @@ contract CATValidatorTest is LibExecutionConstraintTest {
         validator.entry(address(exec), goodPayload, account, 1, allowances, outcomes, sig);
 
         assertEq(MockERC20(outToken).balanceOf(dest), amount);
+    }
+
+    /// The execution payload cannot re-enter entry(): the nonReentrant guard fires
+    /// on the inner call and the revert bubbles up through CallProxy and _call.
+    function test_entry_reentrancy_via_proxy_reverts() external {
+        (address account, uint256 key) = makeAddrAndKey("account");
+        address executor = makeAddr("executor");
+
+        MockExecutor exec = new MockExecutor(address(validator));
+
+        AllowanceSpend[] memory allowances = new AllowanceSpend[](0);
+        Outcome[] memory outcomes = new Outcome[](0);
+
+        bytes memory sig = _signEntry(account, key, executor, 1, allowances, outcomes);
+        bytes memory execPayload = abi.encodeCall(MockExecutor.executeAndReenter, ());
+
+        vm.prank(executor);
+        vm.expectRevert(ReentrancyGuard.Reentrancy.selector);
+        validator.entry(address(exec), execPayload, account, 1, allowances, outcomes, sig);
     }
 
     /// ERC-20 input, native ETH output: signer approves an ERC-20 and requests ETH back.

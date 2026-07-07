@@ -305,7 +305,7 @@ Since `CATValidator` relies on standing approvals, it is unsafe to execute arbit
 
 ### Constraint
 
-The signed `Outcome`s will be validated by recording the current balance of each `Outcome` before spending `Allowance` and comparing them to the balances after the external call. If the difference is less than `Outcome.amount` the transaction will revert.
+The signed `Outcome`s are validated after the external call: the executor must deliver each `Outcome.token` to `CATValidator` during execution, and the transaction reverts if the validator's balance of a token is less than `Outcome.amount`. The full held balance — including any surplus — is then forwarded to `Outcome.destination` (or the signer if the destination is `address(0)`). Note that fee-on-transfer tokens are charged on both legs: the balance check sees the amount net of the inbound fee, and the outbound forwarding incurs a further fee, so the destination may receive less than `Outcome.amount`.
 
 ## Development
 
