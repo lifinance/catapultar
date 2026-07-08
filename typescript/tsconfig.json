@@ -1,0 +1,9 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    // Bundler mode
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "types": ["bun"]
+  }
+}

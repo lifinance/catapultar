@@ -1,0 +1,28 @@
+{
+  // Declarations-only build for the wevm-style packaging: tsc emits only
+  // `.d.ts` (+ maps) into `_types/`. Runtime JS is emitted by rollup
+  // (rollup.config.mjs) into `_esm/` and `_cjs/`.
+  //
+  // `lib` adds DOM because transitive `ox` WebAuthn types reference browser
+  // globals (`window`, `AuthenticatorResponse`, ...) at type-check time. Pure
+  // type-level — wallet-service never invokes those code paths at runtime.
+  "extends": "./tsconfig.base.json",
+  "include": ["src"],
+  "exclude": [
+    "src/**/*.bench.ts",
+    "src/**/*.bench-d.ts",
+    "src/**/*.test.ts",
+    "src/**/*.test-d.ts",
+    "src/**/*.spec.ts",
+    "src/**/*.spec-d.ts",
+  ],
+  "compilerOptions": {
+    "rootDir": "./src",
+    "outDir": "_types",
+    "noEmit": false,
+    "declaration": true,
+    "declarationMap": true,
+    "emitDeclarationOnly": true,
+    "lib": ["ES2022", "DOM"]
+  }
+}

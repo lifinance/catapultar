@@ -1,0 +1,41 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.25;
+
+/// @author Uniswap (https://github.com/Uniswap/permit2/blob/main/src/SignatureTransfer.sol)
+abstract contract BitmapNonce {
+    error InvalidNonce();
+
+    event UnorderedNonceInvalidation(uint256 word, uint256 mask);
+
+    mapping(uint256 => uint256) public nonceBitmap;
+
+    /// @notice Returns the index of the bitmap and the bit position within the bitmap. Used for unordered nonces
+    /// @param nonce The nonce to get the associated word and bit positions
+    /// @return wordPos The word position or index into the nonceBitmap
+    /// @return bitPos The bit position
+    /// @dev The first 248 bits of the nonce value is the index of the desired bitmap
+    /// @dev The last 8 bits of the nonce value is the position of the bit in the bitmap
+    function bitmapPositions(
+        uint256 nonce
+    ) private pure returns (uint256 wordPos, uint256 bitPos) {
+        // forge-lint: disable-next-line(unsafe-typecast)
+        wordPos = uint248(nonce >> 8);
+        // forge-lint: disable-next-line(unsafe-typecast)
+        bitPos = uint8(nonce);
+    }
+
+    /// @notice Checks whether a nonce is taken and sets the bit at the bit position in the bitmap at the word position
+    /// @dev Disallows nonce 0
+    /// @param nonce The nonce to spend
+    function _useUnorderedNonce(
+        uint256 nonce
+    ) internal {
+        if (nonce == 0) revert InvalidNonce();
+        (uint256 wordPos, uint256 bitPos) = bitmapPositions(nonce);
+        // forge-lint: disable-next-line(incorrect-shift)
+        uint256 bit = 1 << bitPos;
+        uint256 flipped = nonceBitmap[wordPos] ^= bit;
+
+        if (flipped & bit == 0) revert InvalidNonce();
+    }
+}

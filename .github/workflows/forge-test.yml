@@ -1,0 +1,58 @@
+name: Forge Test & Coverage
+
+on:
+  push:
+    branches:
+      - 'main'
+    paths:
+      - 'solidity/**'
+      - '.github/workflows/forge-test.yml'
+  pull_request:
+    paths:
+      - 'solidity/**'
+  workflow_dispatch:
+
+env:
+  FOUNDRY_PROFILE: ci
+
+jobs:
+  check:
+    name: Foundry project
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@8789b3e21e6c11b2697f5eb56eddae542f746c10 # v1.7.0
+
+      - name: Show Forge version
+        run: forge --version
+
+      - name: Run Forge fmt
+        run: forge fmt --check
+        id: fmt
+        working-directory: solidity
+
+      - name: Run Forge build
+        run: forge build --sizes
+        id: build
+        working-directory: solidity
+
+      - name: Run Forge tests
+        run: forge test -vvv
+        id: test
+        working-directory: solidity
+
+      - name: Run Forge coverage
+        run: forge coverage --no-match-coverage "(script|test)" --report lcov
+        id: coverage
+        working-directory: solidity
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7
+        with:
+          files: solidity/lcov.info
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: true
