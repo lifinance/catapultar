@@ -82,7 +82,8 @@ export function callsDigest(
 export function isMultichainMode(mode: ExecutionMode | undefined): boolean {
   return (
     mode === ExecutionMode.RaiseRevertMultiChain ||
-    mode === ExecutionMode.SkipRevertMultiChain
+    mode === ExecutionMode.SkipRevertMultiChain ||
+    mode === ExecutionMode.EstimateGasMultiChain
   );
 }
 

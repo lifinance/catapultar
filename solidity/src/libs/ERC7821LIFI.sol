@@ -18,9 +18,17 @@ abstract contract ERC7821LIFI is ERC7821 {
 
     event CallReverted(bytes32 extraData, bytes revertData);
 
+    /// @notice Trace-only marker: emitted right before an `EstimateGas` frame reverts on an
+    /// empty-data failure. The revert discards it from the receipt; it is visible to tracers.
+    event EstimateGasEmptyRevertData(bytes32 extraData);
+
     /// @dev keccak256(bytes("CallReverted(bytes32,bytes)"));
     bytes32 constant _CALL_REVERTED_EVENT_SIGNATURE =
         0xa5ef9b4d75ffdec5840bf221dba12f4a744e8b60aeb23da25fbd8c487a97924d;
+
+    /// @dev keccak256(bytes("EstimateGasEmptyRevertData(bytes32)"));
+    bytes32 constant _ESTIMATE_GAS_EMPTY_REVERT_DATA_EVENT_SIGNATURE =
+        0x9f10a6d4377a26ad17f888e3031dd68cb59ab45d9a11e156c2c7f3eb3ddf88f1;
 
     /// @notice Validation function that validate opData for a specific call.
     function _validateOpData(
@@ -67,6 +75,7 @@ abstract contract ERC7821LIFI is ERC7821 {
             let m := and(shr(mul(22, 8), mode), 0xffff00000000ffffffff)
             id := or(shl(1, eq(m, 0x01000000000078210001)), id) //2.
             id := or(shl(1, eq(m, 0x01010000000078210001)), id) //2.
+            id := or(shl(1, eq(m, 0x01020000000078210001)), id) //2.
             id := or(mul(3, eq(m, 0x01000000000078210002)), id) //3.
         }
     }
@@ -157,9 +166,21 @@ abstract contract ERC7821LIFI is ERC7821 {
                 // Emit CallReverted(bytes32 extraData, bytes revertData).
                 log1(m, add(0x60, sizeAfterPad), _CALL_REVERTED_EVENT_SIGNATURE)
 
-                if iszero(shr(mul(31, 8), extraData)) {
+                let revertFlag := shr(mul(31, 8), extraData)
+                if iszero(revertFlag) {
                     // Bubble up the revert if the call reverts and the skip revert flag has not been set
                     revert(add(m, 0x60), returndatasize())
+                }
+                if and(eq(revertFlag, 2), iszero(returndatasize())) {
+                    // `EstimateGas` mode reverts on OOG-like failures. Then intention is to force
+                    // estimators toward non-empty revert data.
+                    // Emit a micro event for tracers, then revert with EMPTY returndata: a parent
+                    // `EstimateGas` frame sees this frame as an empty-data failure and reverts the
+                    // same way, so starvation composes through nested frames to the top-level
+                    // estimate without any sentinel matching.
+                    mstore(0x00, extraData)
+                    log1(0x00, 0x20, _ESTIMATE_GAS_EMPTY_REVERT_DATA_EVENT_SIGNATURE)
+                    revert(0x00, 0x00)
                 }
             }
         }

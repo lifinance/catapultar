@@ -39,23 +39,23 @@ Smart accounts are built for efficiency; To be used on Ethereum gas costs have t
 | Account Init                    |     ~117k     |   EIP-7702 Delegate    |  More expensive   | More expensive |
 | Modular (ERC-7579)              |      No       |           No           |        Yes        |      Yes       |
 
-
 #### EIP-7702
 
 Catapultar currently does not support EIP-7702, even though it would provide significant advantages. Using something like PREP or briefly generating a private key to initialize an account would substantially reduce account creation costs. However, this would require core changes to the codebase.
 
 In general, there are two main approaches to implementing EIP-7702 support for smart account creation:
 
-* **Disposed Private Key:**
+- **Disposed Private Key:**
   Generate a private key that is immediately disposed of after signing an EIP-7702 authorization. This approach allows signing more than just the authorization—for example, an initial (embedded) transaction—without requiring user input. Additionally, the address can be determined before generating a passkey, allowing the passkey to be named according to the address.
 
-* **[Provably Rootless EIP-7702 Proxy](https://blog.biconomy.io/prep-deep-dive/):**
+- **[Provably Rootless EIP-7702 Proxy](https://blog.biconomy.io/prep-deep-dive/):**
   Create an EIP-7702 authorization and set the signature as the account initialization data. Most well-formed random signatures are valid for a corresponding account. This EIP-7702 authorization signature for a random account acts as a proxy for a specific implementation. Furthermore, the initialization call can be enforced by validating the signature on-chain. This results in significantly lower account deployment costs and a provably secure technique. Unfortunately, EIP-7702 is not yet supported on most networks.
 
 #### Catapultar Usage Note
 
 - To simulate dual mode transaction, mode `0x01000000000078210001` transactions can be submitted to the relevant proxy using the context of `msg.sender === proxy`.
 - Catapultar contains no gas controls. If dual mode transactions are used, gas controls should be handled off-chain. Gas-spending untrusted contracts should be executed individually.
+- For gas preflight, mode `0x01020000000078210001` can be used to skip failures with non-empty revert data but revert on empty revert data. This is a heuristic for OOG-like failures and should primarily be used for simulation or with RPC state/code overrides.
 - Catapultar contains no calldata manipulation. Injection of `erc20::balanceOf()` or similar manipulations should be on external contracts.
 - Catapultar does not support external delegate calls. Delegate calls are dangerous, particularly for upgradeable contracts. They can change the owner of Catapultar but also the implementation of a proxy (ERC-1967).
 
@@ -64,6 +64,7 @@ In general, there are two main approaches to implementing EIP-7702 support for s
 - **Batch Execution Modes:**
   - Conditional batch: All transactions succeed or all fail. Nonce is only spent on success.
   - Individual batch: Each transaction in the batch is executed independently; failures do not block others. Nonce is always spent.
+  - EstimateGas batch: Non-empty revert data is skipped, but empty revert data reverts the top-level call to force gas estimators away from OOG-like skip paths.
   - Nested batches: Mix conditional and individual batches for complex workflows.
 - **Signature Validation:**
   - Supports ECDSA, ERC-1271, P256, and WebAuth P256 signatures.
@@ -77,15 +78,19 @@ In general, there are two main approaches to implementing EIP-7702 support for s
 Use the `CatapultarFactory` contract to deploy Catapultar proxies:
 
 - **Minimal Proxy:**
+
   ```solidity
   factory.deploy(ktp, owner, salt);
   ```
+
   Deploys a minimal proxy for batch execution.
 
 - **Proxy with Embedded Call:**
+
   ```solidity
   factory.deployWithDigest(ktp, owner, salt, callsTypeHash, isSignature);
   ```
+
   Deploys a proxy with a pre-configured allowed call.
 
 - **Upgradeable Proxy:**
@@ -107,18 +112,18 @@ For all deployments, the first 20 bytes of `salt` should be the owner address or
 
 Catapultar is not `ERC-7821` compatible but it follows `ERC-7821` specification. It supports the following execution modes:
 
-| Execution Mode          | 0x0100....78210001 | 0x0101....78210001 | 0x0100....78210002 |
-| ----------------------- | :----------------: | :----------------: | :----------------: |
-| Raise Revert            |        Yes         |         No         |        Yes         |
-| Consume Nonce on Revert |         No         |        Yes         |         No         |
-| Batch of Batches        |         No         |         No         |        Yes         |
-| OpData Required         |        Yes         |        Yes         |         No         |
-| Multi-chain Signed      |        Yes         |        Yes         |     Inherited      |
-
+| Execution Mode          | 0x0100....78210001 | 0x0101....78210001 | 0x0102....78210001 | 0x0100....78210002 |
+| ----------------------- | :----------------: | :----------------: | :----------------: | :----------------: |
+| Raise Revert            |        Yes         |         No         |  Empty returndata  |        Yes         |
+| Consume Nonce on Revert |         No         |        Yes         |        Yes         |         No         |
+| Batch of Batches        |         No         |         No         |         No         |        Yes         |
+| OpData Required         |        Yes         |        Yes         |        Yes         |         No         |
+| Multi-chain Signed      |        Yes         |        Yes         |        Yes         |     Inherited      |
 
 #### opData
 
 To execute a transaction batch `opData` is required for execution. As a result, mode `0x01000000000000000000` is not supported. `opData` is expected to be formatted in one of two ways:
+
 1. `abi.encodePacked(bytes32(nonce), bytes(signature))` whenever the account is called externally.
 2. `abi.encodePacked(bytes32(nonce))` if the account calls itself.
 
@@ -135,21 +140,24 @@ Since `0x01000000000078210002` does not execute a transaction batch but a batch 
   Uses `EIP712Domain(string name,string version,address verifyingContract)` which does not include the chainId. This allows for executing a batch of calls on any chain with a deployed account.
 
 - **0x01000000000078210001**: Executing a set of conditional transactions.
-  
-  If 1 transaction in a set fails, the entire set should fail. This can allow for retrying the transaction at a later time since the nonce is not spent.
- 
-- **0x01010000000078210001**: Executing a set of individual transactions.
-  
-  If 1 or more transactions in a set fails, the remaining transactions in the set should be executed. The nonce is always spent.
- 
-- **0x01000000000078210001 inside 0x01010000000078210001**: Executing a large set of individual transactions containing conditional transactions.
-  
-  Each 0x01000000000078210001 batch can be retried in the future if it fails with each 0x01010000000078210001 only being executable once. This allows a batch executor to schedule a set of transaction to be executed. The entire set should be executed individually (0x01010000000078210001) but each sub-batch or transaction needs to be executed conditionally (0x01000000000078210001).
 
+  If 1 transaction in a set fails, the entire set should fail. This can allow for retrying the transaction at a later time since the nonce is not spent.
+
+- **0x01010000000078210001**: Executing a set of individual transactions.
+
+  If 1 or more transactions in a set fails, the remaining transactions in the set should be executed. The nonce is always spent.
+
+- **0x01020000000078210001**: Estimating a set of individual transactions.
+
+  If a transaction fails with non-empty revert data, the remaining transactions should be executed and the revert data is emitted. If a transaction fails with empty revert data, the frame emits the trace-only marker event `EstimateGasEmptyRevertData(bytes32)` and reverts with empty revert data. Because the frame's own failure is again an empty-data failure, nested EstimateGas frames propagate the starvation to the top-level call, so the mode composes recursively. This is intended to improve gas estimation for expensive doomed calls by rejecting OOG-like skip paths. It is a heuristic: `revert()` with no data, invalid opcode, and other empty-data failures are treated like OOG. The marker event is discarded by the revert and is only visible to tracers.
+
+- **0x01000000000078210001 inside 0x01010000000078210001**: Executing a large set of individual transactions containing conditional transactions.
+
+  Each 0x01000000000078210001 batch can be retried in the future if it fails with each 0x01010000000078210001 only being executable once. This allows a batch executor to schedule a set of transaction to be executed. The entire set should be executed individually (0x01010000000078210001) but each sub-batch or transaction needs to be executed conditionally (0x01000000000078210001).
 
 ### Account Signature Validation (ERC-1271)
 
-To validate ERC-1271 signatures against the account, the message hash needs to be rehashed for replay protection. 
+To validate ERC-1271 signatures against the account, the message hash needs to be rehashed for replay protection.
 
 - Hash your payload as usual (e.g., EIP-712).
 - Compute the replay-protected hash:
@@ -219,7 +227,7 @@ This proxy implements **[Reednaa's Stowaway](https://github.com/reednaa/stowaway
 
 When the smart account calls itself, it can bypass security checks on important functions. This feature is used to allow other accounts to execute all functions for a signer. The following have authorization that can be bypassed if called from itself:
 
-- The `execute` endpoint does not require a signature IFF the caller is the SCA. 
+- The `execute` endpoint does not require a signature IFF the caller is the SCA.
 - The SCA can authorize an upgrade of the underlying SCA if the contract is upgradeable.
 - The SCA can upgrade the contract owner.
 
@@ -232,7 +240,7 @@ The only way to have the SCA call itself is through the batch endpoint. The batc
 If A implements ERC-1271, it can execute **ANY** call it desires on the SCA. Using the above batch, it is possible to:
 
 1. Call A with batch + custom calldata.
-2. Store custom calldata in transient storage and set custom calldata as signed  (by A).
+2. Store custom calldata in transient storage and set custom calldata as signed (by A).
 3. Execute Batch On SCA -> SCA calls A.
 4. A calls SCA with custom calldata.
 5. SCA will validate the batch by staticcall A, A returns true.
@@ -245,6 +253,7 @@ Additionally, remember that token allowances are long-lived. If a token allowanc
 The Constrained Asset Transaction Validator is a intent-like contract for validating that a specific asset exchange happened. The CAT Validator validates that the signed token allowances and tokens outcomes are executed accordingly to the signer's requirements but not the execution itself.
 
 Compare to a fully fledged intent system, the system differs by being a permissioned asset centric system:
+
 - No validation of best execution.
 - A specific executor is required for each transaction.
 - Custom calldata is not included in validator.
@@ -288,6 +297,7 @@ function entry(
 ```
 
 It is required that you explicitly spend allowances. If the signer receives an uncertain amount, the allocated amount can be set higher than the actual spend. The spend magic value `1 << 255` means the current balance. No allowance magic value exists.
+
 ```solidity
 struct AllowanceSpend {
   address token;
@@ -295,6 +305,7 @@ struct AllowanceSpend {
   uint256 spend;
 }
 ```
+
 Spent allowance are sent to `execTarget`. The transaction will revert if either `allowance` is less than the `spend` or `account` does not have `spend`.
 
 ### Execution

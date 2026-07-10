@@ -18,8 +18,12 @@ contract ERC7821LIFITest is Test {
     MockERC7821LIFI mbe;
 
     bytes32 internal constant _SUPPORTED_MODE = bytes10(0x01000000000078210001);
+    bytes32 internal constant _ESTIMATE_GAS_MODE = bytes10(0x01020000000078210001);
+    bytes32 internal constant _ESTIMATE_GAS_MULTICHAIN_MODE =
+        0x0102010000007821000100000000000000000000000000000000000000000000;
 
     bytes[] internal _bytes;
+    uint256 internal healthyCalls;
 
     function setUp() public {
         mbe = new MockERC7821LIFI();
@@ -29,10 +33,20 @@ contract ERC7821LIFITest is Test {
         revert SmallError();
     }
 
+    function revertsWithNoData() external payable {
+        assembly ("memory-safe") {
+            revert(0x00, 0x00)
+        }
+    }
+
     function revertsWithCustomError(
         bytes calldata m
     ) external payable {
         revert CustomError(m);
+    }
+
+    function healthy() external payable {
+        ++healthyCalls;
     }
 
     function returnsBytes(
@@ -54,6 +68,13 @@ contract ERC7821LIFITest is Test {
         bytes32 toSelect = mode & bytes32(0x00ff000000000000000000000000000000000000000000000000000000000000);
         if (uint256(toSelect) > 0) vm.assertEq(toSelect << 8, result);
         else vm.assertEq(result, bytes32(0x0000000000000000000000000000000000000000000000000000000000000000));
+    }
+
+    function testERC7821LIFI_estimateGasModeSupported() external view {
+        assertEq(mbe.executionModeId(_ESTIMATE_GAS_MODE), 2);
+        assertEq(mbe.executionModeId(_ESTIMATE_GAS_MULTICHAIN_MODE), 2);
+        assertTrue(mbe.supportsExecutionMode(_ESTIMATE_GAS_MODE));
+        assertTrue(mbe.supportsExecutionMode(_ESTIMATE_GAS_MULTICHAIN_MODE));
     }
 
     struct RandomBytes {
@@ -111,6 +132,76 @@ contract ERC7821LIFITest is Test {
 
         vm.prank(address(mbe));
         mbe.execute(bytes10(0x01010000000078210001), executionData);
+    }
+
+    function testERC7821LIFI_estimateGas_nonEmptyRevertDataContinues(
+        uint256 nonce,
+        bytes calldata payload
+    ) external {
+        ERC7821.Call[] memory calls = new ERC7821.Call[](2);
+        calls[0] = ERC7821.Call({
+            to: address(this), data: abi.encodeWithSignature("revertsWithCustomError(bytes)", payload), value: 0
+        });
+        calls[1] = ERC7821.Call({ to: address(this), data: abi.encodeWithSignature("healthy()"), value: 0 });
+
+        mbe.setValidCalldata(abi.encode(nonce));
+        uint256 extraDataU = uint256(bytes32(bytes1(0x02))) + uint256((nonce << (9 * 8)) >> 8);
+        vm.expectEmit(true, true, true, true);
+        emit CallReverted(bytes32(extraDataU + 0), abi.encodeWithSelector(CustomError.selector, payload));
+
+        bytes memory executionData = abi.encode(calls, abi.encode(nonce));
+
+        vm.prank(address(mbe));
+        mbe.execute(_ESTIMATE_GAS_MODE, executionData);
+
+        assertEq(healthyCalls, 1);
+    }
+
+    function testRevert_ERC7821LIFI_estimateGas_emptyRevertData(
+        uint256 nonce
+    ) external {
+        ERC7821.Call[] memory calls = new ERC7821.Call[](2);
+        calls[0] = ERC7821.Call({ to: address(this), data: abi.encodeWithSignature("revertsWithNoData()"), value: 0 });
+        calls[1] = ERC7821.Call({ to: address(this), data: abi.encodeWithSignature("healthy()"), value: 0 });
+
+        mbe.setValidCalldata(abi.encode(nonce));
+        bytes memory executionData = abi.encode(calls, abi.encode(nonce));
+
+        vm.prank(address(mbe));
+        // The EstimateGas frame reverts with EMPTY returndata (the EstimateGasEmptyRevertData
+        // event marker is discarded by the revert) so parent EstimateGas frames compose.
+        vm.expectRevert(bytes(""));
+        mbe.execute(_ESTIMATE_GAS_MODE, executionData);
+
+        assertEq(healthyCalls, 0);
+    }
+
+    /// An empty-data failure inside a NESTED EstimateGas frame must propagate through the
+    /// parent EstimateGas frame as another empty revert, all the way to the top.
+    function testRevert_ERC7821LIFI_estimateGas_emptyRevertDataComposes(
+        uint256 nonce
+    ) external {
+        ERC7821.Call[] memory innerCalls = new ERC7821.Call[](1);
+        innerCalls[0] =
+            ERC7821.Call({ to: address(this), data: abi.encodeWithSignature("revertsWithNoData()"), value: 0 });
+        bytes memory innerExecutionData = abi.encode(innerCalls, abi.encode(nonce));
+
+        ERC7821.Call[] memory calls = new ERC7821.Call[](2);
+        calls[0] = ERC7821.Call({
+            to: address(mbe),
+            data: abi.encodeWithSignature("execute(bytes32,bytes)", _ESTIMATE_GAS_MODE, innerExecutionData),
+            value: 0
+        });
+        calls[1] = ERC7821.Call({ to: address(this), data: abi.encodeWithSignature("healthy()"), value: 0 });
+
+        mbe.setValidCalldata(abi.encode(nonce));
+        bytes memory executionData = abi.encode(calls, abi.encode(nonce));
+
+        vm.prank(address(mbe));
+        vm.expectRevert(bytes(""));
+        mbe.execute(_ESTIMATE_GAS_MODE, executionData);
+
+        assertEq(healthyCalls, 0);
     }
 
     /// The following test does not work, because for it to work it has to allocate memory for type(uint64).max) + 1

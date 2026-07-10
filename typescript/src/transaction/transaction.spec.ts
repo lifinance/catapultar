@@ -53,6 +53,10 @@ describe("Base Transaction", () => {
       expect(tx.mode).toBe(ExecutionMode.SkipRevert);
       tx.setMode(ExecutionMode.SkipRevertMultiChain);
       expect(tx.mode).toBe(ExecutionMode.SkipRevertMultiChain);
+      tx.setMode(ExecutionMode.EstimateGas);
+      expect(tx.mode).toBe(ExecutionMode.EstimateGas);
+      tx.setMode(ExecutionMode.EstimateGasMultiChain);
+      expect(tx.mode).toBe(ExecutionMode.EstimateGasMultiChain);
     });
 
     it.concurrent("has valid mode", () => {
@@ -64,6 +68,10 @@ describe("Base Transaction", () => {
       tx.setMode(ExecutionMode.SkipRevert);
       expect(tx.hasValidMode()).toBe(true);
       tx.setMode(ExecutionMode.SkipRevertMultiChain);
+      expect(tx.hasValidMode()).toBe(true);
+      tx.setMode(ExecutionMode.EstimateGas);
+      expect(tx.hasValidMode()).toBe(true);
+      tx.setMode(ExecutionMode.EstimateGasMultiChain);
       expect(tx.hasValidMode()).toBe(true);
       tx.setMode(
         "0x0200000000007821000100000000000000000000000000000000000000000000" as ExecutionMode,
@@ -80,6 +88,10 @@ describe("Base Transaction", () => {
       tx.setMode(ExecutionMode.SkipRevert);
       expect(tx.hasMultichainMode()).toBe(false);
       tx.setMode(ExecutionMode.SkipRevertMultiChain);
+      expect(tx.hasMultichainMode()).toBe(true);
+      tx.setMode(ExecutionMode.EstimateGas);
+      expect(tx.hasMultichainMode()).toBe(false);
+      tx.setMode(ExecutionMode.EstimateGasMultiChain);
       expect(tx.hasMultichainMode()).toBe(true);
     });
 

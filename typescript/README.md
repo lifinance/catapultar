@@ -58,7 +58,7 @@ Catapultar is offline by default — it can build, hash, and sign everything wit
 - EIP-1271 signature validation
 - Reading owner / approved digests / upgradeability from the account.
 
-Accounts default to the `0.1.0` EIP-712 domain version (matching the deployed
+Accounts default to the `0.1.1` EIP-712 domain version (matching the deployed
 Catapultar contract); pass `version` to the account constructor to override it.
 
 For the common single-wallet case, `CatapultarTx` already signs and broadcasts a
@@ -78,13 +78,9 @@ type Signable = {
     chainId?: bigint;
     verifyingContract: `0x${string}`;
   };
-  types: {
-    /** Universal typed const */
-  };
+  types: { /** Universal typed const */ };
   primaryType: string;
-  message: {
-    /** Typed Message */
-  };
+  message: { /** Typed Message */ };
 };
 ```
 
@@ -98,12 +94,8 @@ type EthersSignable = {
     chainId?: bigint;
     verifyingContract: `0x${string}`;
   };
-  types: {
-    /** Universal typed const */
-  };
-  data: {
-    /** Typed Message */
-  };
+  types: { /** Universal typed const */ };
+  data: { /** Typed Message */ };
 };
 ```
 
@@ -216,6 +208,40 @@ await viemWalletClient.sendTransaction({
   account,
   ...call, // unpack call into viem.
 });
+```
+
+### EstimateGas Preflight
+
+`ExecutionMode.EstimateGas` is intended for simulation. It skips failures that
+return non-empty revert data, but reverts (with empty revert data, after
+emitting a trace-only marker event) on empty revert data so RPC gas estimators
+do not converge on an inner out-of-gas skip path — and so nested EstimateGas
+frames propagate the failure to the top. `MetaCatapultarTx.estimateGas` builds
+an estimation twin of the meta transaction: the outer mode and every sub-batch
+— whatever its execution mode — are swapped to EstimateGas. For atomic
+(RaiseRevert) sub-batches the estimate is therefore a ceiling: estimation
+executes a group's calls past a data-carrying failure that on-chain execution
+would stop at, so every call is priced even when a group fails during
+estimation but succeeds at relay time. Only SkipRevert-outer meta transactions
+can be estimated this way.
+With `useCodeOverride`, the bundled Catapultar account runtime code is injected
+at the account address unless `overrideCode` or `overrideCodeAddress` is
+provided. Estimation is always sent from the account address itself and uses
+Catapultar's unsigned self-call authorization path, so no signer is required.
+The returned estimate excludes signature validation, digest hashing, and the
+proxy hop — add a signed-path margin before using it as a relay gas limit.
+
+```typescript
+import { MetaCatapultarTx, ExecutionMode } from "catapultar";
+
+const metaTx = new MetaCatapultarTx({ account: connectedAccount })
+  .setMode(ExecutionMode.SkipRevert) // outer mode; SkipRevert is the default
+  .addCalls(
+    { calls: batchA, mode: ExecutionMode.RaiseRevert },
+    { calls: batchB, mode: ExecutionMode.SkipRevert },
+  );
+
+const gas = await metaTx.estimateGas({ useCodeOverride: true });
 ```
 
 ### Embed

@@ -23,10 +23,14 @@ export enum ExecutionMode {
   RaiseRevert = "0x0100000000007821000100000000000000000000000000000000000000000000",
   /** If a call fails, skip it and emit an event; the nonce is still spent (unless out of gas). */
   SkipRevert = "0x0101000000007821000100000000000000000000000000000000000000000000",
+  /** For gas estimation: skip non-empty reverts, but revert on empty revert data. */
+  EstimateGas = "0x0102000000007821000100000000000000000000000000000000000000000000",
   /** {@link RaiseRevert} signed chain-agnostically (multichain domain). */
   RaiseRevertMultiChain = "0x0100010000007821000100000000000000000000000000000000000000000000",
   /** {@link SkipRevert} signed chain-agnostically (multichain domain). */
   SkipRevertMultiChain = "0x0101010000007821000100000000000000000000000000000000000000000000",
+  /** {@link EstimateGas} signed chain-agnostically (multichain domain). */
+  EstimateGasMultiChain = "0x0102010000007821000100000000000000000000000000000000000000000000",
 }
 
 /** Approval flag stored against a digest on the account (`approvedDigest` view). */
@@ -75,7 +79,7 @@ export type AccountConstructorParams<O extends Owner = Owner> = {
   address: `0x${string}`;
   owner: O;
   name?: string;
-  /** EIP-712 domain version. Defaults to `0.1.0` (the deployed contract's domain). */
+  /** EIP-712 domain version. Defaults to `0.1.1` (the deployed contract's domain). */
   version?: string;
   chainId?: number;
   /** Bring-your-own viem client used for on-chain reads. */
@@ -213,6 +217,8 @@ export type EmbeddedDigest = {
  * `factory` defaults to the library's well-known factory/template. Provide a
  * `digest` to embed an approved call/signature at deploy time — because these
  * are explicit named fields, a misspelled or partial option fails to compile.
+ * `version` only sets the returned account handle's EIP-712 domain version; it
+ * does not affect factory calldata or the predicted deployment address.
  *
  * `upgradeable` selects the clone strategy: omitted/`false` mints the cheap
  * immutable PUSH0 clone, `true` mints a durable ERC-1967 proxy the owner can
@@ -224,6 +230,7 @@ export type DeployOptions<O extends Owner = Owner> = {
   salt: `0x${string}`;
   owner: O;
   factory?: Factory;
+  version?: string;
 } & (
   | { upgradeable?: false; digest?: EmbeddedDigest }
   | { upgradeable: true; digest?: never }

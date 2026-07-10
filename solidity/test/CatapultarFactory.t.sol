@@ -38,7 +38,7 @@ contract CatapultarFactoryTest is Test {
     }
 
     function test_version() external view {
-        assertEq(factory.VERSION(), "0.1.0");
+        assertEq(factory.VERSION(), "0.1.1");
     }
 
     /// forge-config: default.isolate = true

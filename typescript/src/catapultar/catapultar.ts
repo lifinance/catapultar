@@ -1,4 +1,4 @@
-import type { Account, Hex, WalletClient } from "viem";
+import type { Account, Address, Hex, WalletClient } from "viem";
 import { random } from "../utils/helpers";
 import {
   ExecutionMode,
@@ -7,13 +7,18 @@ import {
   type KeyedSignature,
   type Owner,
 } from "../types/types";
-import { callsDigest, callsTypedData } from "../protocol/calls";
+import {
+  callsDigest,
+  callsTypedData,
+  isMultichainMode,
+} from "../protocol/calls";
 import { assertCalls, assertMode, assertNonce } from "../protocol/validation";
 import {
   DuplicateNonceError,
   InvalidSignatureError,
   ValidationError,
 } from "../errors";
+import { CATAPULTAR_ACCOUNT_RUNTIME_CODE } from "../bytecode/catapultar";
 import { CatapultarAccount } from "./account";
 import { BaseTransaction } from "../transaction/transaction";
 
@@ -267,6 +272,78 @@ export class CatapultarTx<
   }
 }
 
+export type CatapultarEstimateGasOptions = {
+  /**
+   * Enable an RPC state override for the account code. Useful when estimating
+   * against an already-deployed account whose on-chain code does not yet support
+   * EstimateGas mode.
+   */
+  useCodeOverride?: boolean;
+  /** Runtime bytecode to place at the Catapultar account address during estimation. */
+  overrideCode?: Hex;
+  /**
+   * Address to read override runtime bytecode from. When omitted, the library's
+   * embedded Catapultar account runtime bytecode is used.
+   */
+  overrideCodeAddress?: Address;
+};
+
+/**
+ * The estimation twin of an execution mode: every frame becomes EstimateGas
+ * (an empty-data failure reverts the frame instead of being skipped), keeping
+ * the multichain flag. For a RaiseRevert (atomic) frame this makes the estimate
+ * a ceiling: estimation keeps executing the group's calls past a data-carrying
+ * failure that on-chain execution would stop at, so every call in every group
+ * is priced — including groups that fail at estimation time but succeed at
+ * execution time.
+ */
+function estimateModeFor(mode: ExecutionMode | undefined): ExecutionMode {
+  return isMultichainMode(mode)
+    ? ExecutionMode.EstimateGasMultiChain
+    : ExecutionMode.EstimateGas;
+}
+
+/**
+ * Estimate an unsigned transaction from the account address itself, optionally
+ * injecting runtime bytecode at the account address via `stateOverride`. Uses
+ * Catapultar's self-call authorization path (`opData.length == 32` and
+ * `msg.sender == address(this)`), so no signature — and no signer round-trip —
+ * is required.
+ */
+async function estimateUnsignedWithOverride<O extends Owner>(
+  tx: CatapultarTx<O, true>,
+  options: CatapultarEstimateGasOptions,
+): Promise<bigint> {
+  const call = await tx.asCall();
+  const publicClient = tx.account.publicClient();
+  const account = tx.account.address;
+  const shouldOverride =
+    options.useCodeOverride ||
+    options.overrideCode !== undefined ||
+    options.overrideCodeAddress !== undefined;
+
+  if (!shouldOverride) {
+    return publicClient.estimateGas({
+      account,
+      ...call,
+    });
+  }
+
+  const code =
+    options.overrideCode ??
+    (options.overrideCodeAddress === undefined
+      ? CATAPULTAR_ACCOUNT_RUNTIME_CODE
+      : await publicClient.getCode({ address: options.overrideCodeAddress }));
+  if (!code)
+    throw new ValidationError("No override code was found for estimation.");
+
+  return publicClient.estimateGas({
+    account,
+    ...call,
+    stateOverride: [{ address: tx.account.address, code }],
+  });
+}
+
 /**
  * A batch-of-batches: a meta transaction composed of several independently-nonced sub-batches.
  *
@@ -416,5 +493,64 @@ export class MetaCatapultarTx<
       .addCall(
         ...(await Promise.all(this.getCallsAsTxs().map((c) => c.asCall()))),
       );
+  }
+
+  /**
+   * Estimate this meta transaction under the EstimateGas failure policy.
+   *
+   * Builds an estimation twin that mirrors the execution shape, with every
+   * frame — the outer mode and every sub-batch, whatever its execution mode —
+   * swapped to {@link ExecutionMode.EstimateGas} (or its multichain variant).
+   * Any call that fails with empty revert data (an OOG-like failure) then
+   * reverts the whole estimation, forcing the estimator up to the gas limit
+   * where every call either succeeds or reaches its genuine, data-carrying
+   * revert — the limit at which on-chain execution isolates failures instead
+   * of starving them.
+   *
+   * For atomic (RaiseRevert) sub-batches the estimate is a ceiling: the twin
+   * keeps executing a group's calls past a data-carrying failure that on-chain
+   * execution would stop at, so every call in every group is priced even if
+   * the group fails during estimation but succeeds at relay time. On-chain,
+   * a group that stops early simply uses less gas than allocated.
+   *
+   * The twin reuses this meta transaction's nonces, is left unsigned, and is
+   * estimated from the account address itself (the self-call authorization
+   * path), so no signer is involved; `options` control the RPC code override
+   * for accounts whose deployed bytecode predates EstimateGas mode. This
+   * object is not mutated. The returned estimate excludes signature
+   * validation, digest hashing, and the proxy hop — add a signed-path margin
+   * before using it as a relay gas limit.
+   *
+   * Only meta transactions whose outer mode is SkipRevert (the default) can
+   * be estimated this way: the estimate answers "at what limit does the batch
+   * complete with failures isolated", which only describes a skip-policy
+   * outer frame.
+   * @throws {ValidationError} If the outer execution mode is not SkipRevert.
+   * @throws {DuplicateNonceError} If two sub-batches resolve to the same nonce.
+   */
+  async estimateGas(
+    this: MetaCatapultarTx<O, true>,
+    options: CatapultarEstimateGasOptions = {},
+  ): Promise<bigint> {
+    const outerMode = this.mode ?? ExecutionMode.SkipRevert;
+    if (
+      outerMode !== ExecutionMode.SkipRevert &&
+      outerMode !== ExecutionMode.SkipRevertMultiChain
+    )
+      throw new ValidationError(
+        "estimateGas requires a SkipRevert outer mode: the estimate describes a batch that isolates failures.",
+      );
+
+    const twin = new MetaCatapultarTx<O, true>({
+      account: this.account,
+      mode: estimateModeFor(outerMode),
+      outerNonce: this.outerNonce,
+      innerNonce: this.innerNonce,
+    });
+    twin.addCalls(
+      ...this.calls.map((c) => ({ ...c, mode: estimateModeFor(c.mode) })),
+    );
+
+    return estimateUnsignedWithOverride(await twin.asCatapultarTx(), options);
   }
 }
