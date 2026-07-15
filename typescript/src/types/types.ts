@@ -23,14 +23,18 @@ export enum ExecutionMode {
   RaiseRevert = "0x0100000000007821000100000000000000000000000000000000000000000000",
   /** If a call fails, skip it and emit an event; the nonce is still spent (unless out of gas). */
   SkipRevert = "0x0101000000007821000100000000000000000000000000000000000000000000",
-  /** For gas estimation: skip non-empty reverts, but revert on empty revert data. */
+  /** For gas estimation: skip failures, but re-raise a failure that leaves the frame below the starvation threshold as EstimateGasStarved. */
   EstimateGas = "0x0102000000007821000100000000000000000000000000000000000000000000",
+  /** For gas estimation, the twin of {@link RaiseRevert}: bubble failures like RaiseRevert, but re-raise a failure that leaves the frame below the starvation threshold as EstimateGasStarved. */
+  RaiseRevertEstimate = "0x0103000000007821000100000000000000000000000000000000000000000000",
   /** {@link RaiseRevert} signed chain-agnostically (multichain domain). */
   RaiseRevertMultiChain = "0x0100010000007821000100000000000000000000000000000000000000000000",
   /** {@link SkipRevert} signed chain-agnostically (multichain domain). */
   SkipRevertMultiChain = "0x0101010000007821000100000000000000000000000000000000000000000000",
   /** {@link EstimateGas} signed chain-agnostically (multichain domain). */
   EstimateGasMultiChain = "0x0102010000007821000100000000000000000000000000000000000000000000",
+  /** {@link RaiseRevertEstimate} signed chain-agnostically (multichain domain). */
+  RaiseRevertEstimateMultiChain = "0x0103010000007821000100000000000000000000000000000000000000000000",
 }
 
 /** Approval flag stored against a digest on the account (`approvedDigest` view). */

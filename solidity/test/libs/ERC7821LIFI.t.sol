@@ -21,6 +21,9 @@ contract ERC7821LIFITest is Test {
     bytes32 internal constant _ESTIMATE_GAS_MODE = bytes10(0x01020000000078210001);
     bytes32 internal constant _ESTIMATE_GAS_MULTICHAIN_MODE =
         0x0102010000007821000100000000000000000000000000000000000000000000;
+    bytes32 internal constant _RAISE_REVERT_ESTIMATE_MODE = bytes10(0x01030000000078210001);
+    bytes32 internal constant _RAISE_REVERT_ESTIMATE_MULTICHAIN_MODE =
+        0x0103010000007821000100000000000000000000000000000000000000000000;
 
     bytes[] internal _bytes;
     uint256 internal healthyCalls;
@@ -37,6 +40,12 @@ contract ERC7821LIFITest is Test {
         assembly ("memory-safe") {
             revert(0x00, 0x00)
         }
+    }
+
+    function revertsWithEstimateGasStarved(
+        uint256 gasLeft
+    ) external payable {
+        revert ERC7821LIFI.EstimateGasStarved(gasLeft);
     }
 
     function revertsWithCustomError(
@@ -75,6 +84,10 @@ contract ERC7821LIFITest is Test {
         assertEq(mbe.executionModeId(_ESTIMATE_GAS_MULTICHAIN_MODE), 2);
         assertTrue(mbe.supportsExecutionMode(_ESTIMATE_GAS_MODE));
         assertTrue(mbe.supportsExecutionMode(_ESTIMATE_GAS_MULTICHAIN_MODE));
+        assertEq(mbe.executionModeId(_RAISE_REVERT_ESTIMATE_MODE), 2);
+        assertEq(mbe.executionModeId(_RAISE_REVERT_ESTIMATE_MULTICHAIN_MODE), 2);
+        assertTrue(mbe.supportsExecutionMode(_RAISE_REVERT_ESTIMATE_MODE));
+        assertTrue(mbe.supportsExecutionMode(_RAISE_REVERT_ESTIMATE_MULTICHAIN_MODE));
     }
 
     struct RandomBytes {
@@ -157,7 +170,9 @@ contract ERC7821LIFITest is Test {
         assertEq(healthyCalls, 1);
     }
 
-    function testRevert_ERC7821LIFI_estimateGas_emptyRevertData(
+    /// Starvation is classified by gas accounting, not returndata: an empty-data failure
+    /// with ample gas remaining is a genuine (bare) business revert and is skipped.
+    function testERC7821LIFI_estimateGas_emptyRevertDataAmpleGasContinues(
         uint256 nonce
     ) external {
         ERC7821.Call[] memory calls = new ERC7821.Call[](2);
@@ -165,20 +180,72 @@ contract ERC7821LIFITest is Test {
         calls[1] = ERC7821.Call({ to: address(this), data: abi.encodeWithSignature("healthy()"), value: 0 });
 
         mbe.setValidCalldata(abi.encode(nonce));
+        uint256 extraDataU = uint256(bytes32(bytes1(0x02))) + uint256((nonce << (9 * 8)) >> 8);
+        vm.expectEmit(true, true, true, true);
+        emit CallReverted(bytes32(extraDataU + 0), bytes(""));
+
         bytes memory executionData = abi.encode(calls, abi.encode(nonce));
 
         vm.prank(address(mbe));
-        // The EstimateGas frame reverts with EMPTY returndata (the EstimateGasEmptyRevertData
-        // event marker is discarded by the revert) so parent EstimateGas frames compose.
-        vm.expectRevert(bytes(""));
+        mbe.execute(_ESTIMATE_GAS_MODE, executionData);
+
+        assertEq(healthyCalls, 1);
+    }
+
+    /// A failure that leaves the frame below the starvation threshold reverts the estimation
+    /// with `EstimateGasStarved` even when the failure carries typed revert data — a callee
+    /// that wraps an inner OOG as a typed error cannot fake its gas consumption.
+    function testRevert_ERC7821LIFI_estimateGas_starvedTypedRevertReverts(
+        uint256 nonce,
+        bytes calldata payload
+    ) external {
+        ERC7821.Call[] memory calls = new ERC7821.Call[](2);
+        calls[0] = ERC7821.Call({
+            to: address(this), data: abi.encodeWithSignature("revertsWithCustomError(bytes)", payload), value: 0
+        });
+        calls[1] = ERC7821.Call({ to: address(this), data: abi.encodeWithSignature("healthy()"), value: 0 });
+
+        mbe.setValidCalldata(abi.encode(nonce));
+        bytes memory executionData = abi.encode(calls, abi.encode(nonce));
+
+        vm.prank(address(mbe));
+        vm.expectPartialRevert(ERC7821LIFI.EstimateGasStarved.selector);
+        // The whole frame runs below the starvation threshold, so any failure classifies
+        // as starvation and forces the estimator up.
+        mbe.execute{ gas: 250_000 }(_ESTIMATE_GAS_MODE, executionData);
+
+        assertEq(healthyCalls, 0);
+    }
+
+    /// A failed call reverting `EstimateGasStarved` (a child EstimateGas frame's starvation
+    /// verdict) is bubbled unchanged by selector, even when THIS frame has ample gas — so
+    /// nesting EstimateGas frames does not weaken the check.
+    function testRevert_ERC7821LIFI_estimateGas_starvedSelectorBubblesWithAmpleGas(
+        uint256 nonce,
+        uint256 gasLeft
+    ) external {
+        ERC7821.Call[] memory calls = new ERC7821.Call[](2);
+        calls[0] = ERC7821.Call({
+            to: address(this),
+            data: abi.encodeWithSignature("revertsWithEstimateGasStarved(uint256)", gasLeft),
+            value: 0
+        });
+        calls[1] = ERC7821.Call({ to: address(this), data: abi.encodeWithSignature("healthy()"), value: 0 });
+
+        mbe.setValidCalldata(abi.encode(nonce));
+        bytes memory executionData = abi.encode(calls, abi.encode(nonce));
+
+        vm.prank(address(mbe));
+        // The child's exact error (including its gasLeft) is bubbled, not re-wrapped.
+        vm.expectRevert(abi.encodeWithSelector(ERC7821LIFI.EstimateGasStarved.selector, gasLeft));
         mbe.execute(_ESTIMATE_GAS_MODE, executionData);
 
         assertEq(healthyCalls, 0);
     }
 
-    /// An empty-data failure inside a NESTED EstimateGas frame must propagate through the
-    /// parent EstimateGas frame as another empty revert, all the way to the top.
-    function testRevert_ERC7821LIFI_estimateGas_emptyRevertDataComposes(
+    /// A starved NESTED EstimateGas frame re-raises `EstimateGasStarved`, which the parent
+    /// bubbles by selector to the top.
+    function testRevert_ERC7821LIFI_estimateGas_starvationComposes(
         uint256 nonce
     ) external {
         ERC7821.Call[] memory innerCalls = new ERC7821.Call[](1);
@@ -198,8 +265,143 @@ contract ERC7821LIFITest is Test {
         bytes memory executionData = abi.encode(calls, abi.encode(nonce));
 
         vm.prank(address(mbe));
-        vm.expectRevert(bytes(""));
+        vm.expectPartialRevert(ERC7821LIFI.EstimateGasStarved.selector);
+        mbe.execute{ gas: 250_000 }(_ESTIMATE_GAS_MODE, executionData);
+
+        assertEq(healthyCalls, 0);
+    }
+
+    /// A RaiseRevert frame nested inside an EstimateGas frame (the shape the SDK's
+    /// estimation twin produces for atomic sub-batches): a data-carrying failure in
+    /// the inner frame bubbles its exact revert data, which the outer EstimateGas
+    /// frame skips + logs — with the inner frame's earlier state changes ROLLED BACK,
+    /// matching the on-chain SkipRevert-outer behavior.
+    function testERC7821LIFI_estimateGas_nestedRaiseRevert_dataRevertSkipsAndRollsBack(
+        uint256 nonce,
+        bytes calldata payload
+    ) external {
+        ERC7821.Call[] memory innerCalls = new ERC7821.Call[](2);
+        innerCalls[0] = ERC7821.Call({ to: address(this), data: abi.encodeWithSignature("healthy()"), value: 0 });
+        innerCalls[1] = ERC7821.Call({
+            to: address(this), data: abi.encodeWithSignature("revertsWithCustomError(bytes)", payload), value: 0
+        });
+        bytes memory innerExecutionData = abi.encode(innerCalls, abi.encode(nonce));
+
+        ERC7821.Call[] memory calls = new ERC7821.Call[](2);
+        calls[0] = ERC7821.Call({
+            to: address(mbe),
+            data: abi.encodeWithSignature("execute(bytes32,bytes)", _SUPPORTED_MODE, innerExecutionData),
+            value: 0
+        });
+        calls[1] = ERC7821.Call({ to: address(this), data: abi.encodeWithSignature("healthy()"), value: 0 });
+
+        mbe.setValidCalldata(abi.encode(nonce));
+        uint256 extraDataU = uint256(bytes32(bytes1(0x02))) + uint256((nonce << (9 * 8)) >> 8);
+        vm.expectEmit(true, true, true, true);
+        emit CallReverted(bytes32(extraDataU + 0), abi.encodeWithSelector(CustomError.selector, payload));
+
+        bytes memory executionData = abi.encode(calls, abi.encode(nonce));
+
+        vm.prank(address(mbe));
         mbe.execute(_ESTIMATE_GAS_MODE, executionData);
+
+        // The inner frame's healthy() was rolled back with the inner revert;
+        // only the outer frame's second call landed.
+        assertEq(healthyCalls, 1);
+    }
+
+    /// A failure inside a nested RaiseRevert frame that leaves the outer EstimateGas frame
+    /// starved forces the estimator up — a starved call inside an atomic sub-batch cannot
+    /// hide behind the sub-batch's bubbled revert data.
+    function testRevert_ERC7821LIFI_estimateGas_nestedRaiseRevert_starvedBubbles(
+        uint256 nonce
+    ) external {
+        ERC7821.Call[] memory innerCalls = new ERC7821.Call[](1);
+        innerCalls[0] =
+            ERC7821.Call({ to: address(this), data: abi.encodeWithSignature("revertsWithNoData()"), value: 0 });
+        bytes memory innerExecutionData = abi.encode(innerCalls, abi.encode(nonce));
+
+        ERC7821.Call[] memory calls = new ERC7821.Call[](2);
+        calls[0] = ERC7821.Call({
+            to: address(mbe),
+            data: abi.encodeWithSignature("execute(bytes32,bytes)", _SUPPORTED_MODE, innerExecutionData),
+            value: 0
+        });
+        calls[1] = ERC7821.Call({ to: address(this), data: abi.encodeWithSignature("healthy()"), value: 0 });
+
+        mbe.setValidCalldata(abi.encode(nonce));
+        bytes memory executionData = abi.encode(calls, abi.encode(nonce));
+
+        vm.prank(address(mbe));
+        vm.expectPartialRevert(ERC7821LIFI.EstimateGasStarved.selector);
+        mbe.execute{ gas: 250_000 }(_ESTIMATE_GAS_MODE, executionData);
+
+        assertEq(healthyCalls, 0);
+    }
+
+    /// A RaiseRevertEstimate frame (the estimation twin of an atomic sub-batch): a
+    /// data-carrying business failure bubbles its exact revert data, which the outer
+    /// EstimateGas frame skips + logs — with the inner frame's earlier state changes
+    /// ROLLED BACK, exactly like RaiseRevert.
+    function testERC7821LIFI_raiseRevertEstimate_dataRevertBubblesExactAndRollsBack(
+        uint256 nonce,
+        bytes calldata payload
+    ) external {
+        ERC7821.Call[] memory innerCalls = new ERC7821.Call[](2);
+        innerCalls[0] = ERC7821.Call({ to: address(this), data: abi.encodeWithSignature("healthy()"), value: 0 });
+        innerCalls[1] = ERC7821.Call({
+            to: address(this), data: abi.encodeWithSignature("revertsWithCustomError(bytes)", payload), value: 0
+        });
+        bytes memory innerExecutionData = abi.encode(innerCalls, abi.encode(nonce));
+
+        ERC7821.Call[] memory calls = new ERC7821.Call[](2);
+        calls[0] = ERC7821.Call({
+            to: address(mbe),
+            data: abi.encodeWithSignature("execute(bytes32,bytes)", _RAISE_REVERT_ESTIMATE_MODE, innerExecutionData),
+            value: 0
+        });
+        calls[1] = ERC7821.Call({ to: address(this), data: abi.encodeWithSignature("healthy()"), value: 0 });
+
+        mbe.setValidCalldata(abi.encode(nonce));
+        uint256 extraDataU = uint256(bytes32(bytes1(0x02))) + uint256((nonce << (9 * 8)) >> 8);
+        vm.expectEmit(true, true, true, true);
+        emit CallReverted(bytes32(extraDataU + 0), abi.encodeWithSelector(CustomError.selector, payload));
+
+        bytes memory executionData = abi.encode(calls, abi.encode(nonce));
+
+        vm.prank(address(mbe));
+        mbe.execute(_ESTIMATE_GAS_MODE, executionData);
+
+        // The inner frame's healthy() was rolled back with the inner revert;
+        // only the outer frame's second call landed.
+        assertEq(healthyCalls, 1);
+    }
+
+    /// A starved failure inside a RaiseRevertEstimate frame is classified by the frame
+    /// itself and re-raised as `EstimateGasStarved`, which the outer EstimateGas frame
+    /// bubbles by selector to the top.
+    function testRevert_ERC7821LIFI_raiseRevertEstimate_starvedRaisesTyped(
+        uint256 nonce
+    ) external {
+        ERC7821.Call[] memory innerCalls = new ERC7821.Call[](1);
+        innerCalls[0] =
+            ERC7821.Call({ to: address(this), data: abi.encodeWithSignature("revertsWithNoData()"), value: 0 });
+        bytes memory innerExecutionData = abi.encode(innerCalls, abi.encode(nonce));
+
+        ERC7821.Call[] memory calls = new ERC7821.Call[](2);
+        calls[0] = ERC7821.Call({
+            to: address(mbe),
+            data: abi.encodeWithSignature("execute(bytes32,bytes)", _RAISE_REVERT_ESTIMATE_MODE, innerExecutionData),
+            value: 0
+        });
+        calls[1] = ERC7821.Call({ to: address(this), data: abi.encodeWithSignature("healthy()"), value: 0 });
+
+        mbe.setValidCalldata(abi.encode(nonce));
+        bytes memory executionData = abi.encode(calls, abi.encode(nonce));
+
+        vm.prank(address(mbe));
+        vm.expectPartialRevert(ERC7821LIFI.EstimateGasStarved.selector);
+        mbe.execute{ gas: 250_000 }(_ESTIMATE_GAS_MODE, executionData);
 
         assertEq(healthyCalls, 0);
     }

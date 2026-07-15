@@ -16,19 +16,23 @@ abstract contract ERC7821LIFI is ERC7821 {
     error InvalidOpData();
     error OpDataTooSmall();
 
-    event CallReverted(bytes32 extraData, bytes revertData);
+    /// @notice Raised by an `EstimateGas` frame when a failed call leaves it below
+    /// _ESTIMATE_GAS_STARVATION_THRESHOLD, carrying the gas remaining at re-raise time.
+    /// @dev Selector 0xaf3228d9.
+    error EstimateGasStarved(uint256 gasLeft);
 
-    /// @notice Trace-only marker: emitted right before an `EstimateGas` frame reverts on an
-    /// empty-data failure. The revert discards it from the receipt; it is visible to tracers.
-    event EstimateGasEmptyRevertData(bytes32 extraData);
+    event CallReverted(bytes32 extraData, bytes revertData);
 
     /// @dev keccak256(bytes("CallReverted(bytes32,bytes)"));
     bytes32 constant _CALL_REVERTED_EVENT_SIGNATURE =
         0xa5ef9b4d75ffdec5840bf221dba12f4a744e8b60aeb23da25fbd8c487a97924d;
 
-    /// @dev keccak256(bytes("EstimateGasEmptyRevertData(bytes32)"));
-    bytes32 constant _ESTIMATE_GAS_EMPTY_REVERT_DATA_EVENT_SIGNATURE =
-        0x9f10a6d4377a26ad17f888e3031dd68cb59ab45d9a11e156c2c7f3eb3ddf88f1;
+    /// @dev `262_144` is the maximum threshold used for Ethereum simulation: under the EIP-150
+    /// 63/64 rule, 64 times this value exactly reaches Ethereum's EIP-7825 per-transaction gas
+    /// cap of 16_777_216. In `EstimateGas` mode, a failed call that leaves this frame with less
+    /// gas than this threshold is treated as starvation: an OOG consumes nearly all forwarded
+    /// gas while a genuine business revert refunds unspent gas.
+    uint256 constant _ESTIMATE_GAS_STARVATION_THRESHOLD = 262_144;
 
     /// @notice Validation function that validate opData for a specific call.
     function _validateOpData(
@@ -76,6 +80,7 @@ abstract contract ERC7821LIFI is ERC7821 {
             id := or(shl(1, eq(m, 0x01000000000078210001)), id) //2.
             id := or(shl(1, eq(m, 0x01010000000078210001)), id) //2.
             id := or(shl(1, eq(m, 0x01020000000078210001)), id) //2.
+            id := or(shl(1, eq(m, 0x01030000000078210001)), id) //2.
             id := or(mul(3, eq(m, 0x01000000000078210002)), id) //3.
         }
     }
@@ -171,23 +176,40 @@ abstract contract ERC7821LIFI is ERC7821 {
                     // Bubble up the revert if the call reverts and the skip revert flag has not been set
                     revert(add(m, 0x60), returndatasize())
                 }
-                if and(eq(revertFlag, 2), iszero(returndatasize())) {
-                    // `EstimateGas` mode relies on every sub-call re-raising OOG-like failures
-                    // as empty returndata, never wrapping them as a typed error. This contract
-                    // follows its own rule through `revert(0x00, 0x00)`: a parent `EstimateGas`
-                    // call sees this frame as an empty-data failure and re-raises the same way,
-                    // so the OOG signal is propagated to the top-level estimator from any call
-                    // depth, forcing the estimation up instead of letting the estimator converge
-                    // on a cheaper estimate where an OOG is swallowed.
-                    // Any sub-call that swallows an OOG and raises a typed error like `OutOfGas()`
-                    // opens an OOG shortcut the estimator may converge on, potentially
-                    // underestimating the call.
-                    // Emit a micro event for tracers first — the revert discards it from the
-                    // receipt.
-                    mstore(0x00, extraData)
-                    log1(0x00, 0x20, _ESTIMATE_GAS_EMPTY_REVERT_DATA_EVENT_SIGNATURE)
-                    // rule: Raise empty returndata as empty returndata.
-                    revert(0x00, 0x00)
+                // Flags 2 (`EstimateGas`) and 3 (`RaiseRevertEstimate`) share the starvation
+                // classification; they differ only in what happens to a genuine business
+                // revert (skip vs bubble).
+                if gt(revertFlag, 1) {
+                    // A failed call that reverted with `EstimateGasStarved(uint256)` is a
+                    // child estimation frame that already classified its own failure as
+                    // starvation. Bubble it unchanged to ensure the gas check does not
+                    // become weaker in lower self calls.
+                    if and(eq(returndatasize(), 0x24), eq(shr(224, mload(add(m, 0x60))), 0xaf3228d9)) {
+                        revert(add(m, 0x60), 0x24)
+                    }
+                    // Estimation frames classify any other failure by the gas it left
+                    // behind: an OOG consumes nearly all forwarded gas, leaving this frame
+                    // with less than 1/64 of its gas, while a genuine business revert
+                    // refunds what it did not spend. Any failure that leaves this frame
+                    // below the threshold is treated as starvation and re-raised as
+                    // `EstimateGasStarved(gasLeft)` — bubbled by selector above through any
+                    // parent estimation frames to the top-level estimator, forcing the
+                    // estimation up instead of letting the estimator converge on a cheaper
+                    // estimate where the OOG is swallowed.
+                    if lt(gas(), _ESTIMATE_GAS_STARVATION_THRESHOLD) {
+                        mstore(0x00, 0xaf3228d9) // bytes4(keccak256("EstimateGasStarved(uint256)"))
+                        mstore(0x20, gas())
+                        revert(0x1c, 0x24)
+                    }
+                    // `RaiseRevertEstimate` is the estimation twin of an atomic (RaiseRevert)
+                    // sub-batch: a genuine business revert bubbles its exact returndata and
+                    // rolls the frame back, exactly like RaiseRevert — but the starvation
+                    // check above runs in THIS frame, where only one 1/64 reserve is held,
+                    // instead of in the outer estimation frame where the reserves of both
+                    // frames stack and halve the detectable budget.
+                    if eq(revertFlag, 3) {
+                        revert(add(m, 0x60), returndatasize())
+                    }
                 }
             }
         }

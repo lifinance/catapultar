@@ -7,11 +7,7 @@ import {
   type KeyedSignature,
   type Owner,
 } from "../types/types";
-import {
-  callsDigest,
-  callsTypedData,
-  isMultichainMode,
-} from "../protocol/calls";
+import { callsDigest, callsTypedData } from "../protocol/calls";
 import { assertCalls, assertMode, assertNonce } from "../protocol/validation";
 import {
   DuplicateNonceError,
@@ -289,18 +285,33 @@ export type CatapultarEstimateGasOptions = {
 };
 
 /**
- * The estimation twin of an execution mode: every frame becomes EstimateGas
- * (an empty-data failure reverts the frame instead of being skipped), keeping
- * the multichain flag. For a RaiseRevert (atomic) frame this makes the estimate
- * a ceiling: estimation keeps executing the group's calls past a data-carrying
- * failure that on-chain execution would stop at, so every call in every group
- * is priced — including groups that fail at estimation time but succeed at
- * execution time.
+ * The estimation twin of an execution mode: skip-policy frames (SkipRevert,
+ * SkipRevertMultiChain) become their EstimateGas counterparts so a starved
+ * call inside them is not silently swallowed during estimation, and atomic
+ * frames (RaiseRevert, RaiseRevertMultiChain, or `undefined`, which resolves
+ * to RaiseRevert when the sub-batch is materialized) become their
+ * RaiseRevertEstimate counterparts: a genuine business revert bubbles its
+ * exact returndata and rolls the frame back — matching on-chain RaiseRevert —
+ * and is then skipped + logged by the enclosing EstimateGas frame, while a
+ * failure that leaves the atomic frame below the starvation threshold is
+ * re-raised as `EstimateGasStarved` from inside the frame itself, where only
+ * one EIP-150 reserve is held, so atomic sub-batches get the same detection
+ * bound as every other frame.
  */
 function estimateModeFor(mode: ExecutionMode | undefined): ExecutionMode {
-  return isMultichainMode(mode)
-    ? ExecutionMode.EstimateGasMultiChain
-    : ExecutionMode.EstimateGas;
+  switch (mode) {
+    case ExecutionMode.SkipRevert:
+      return ExecutionMode.EstimateGas;
+    case ExecutionMode.SkipRevertMultiChain:
+      return ExecutionMode.EstimateGasMultiChain;
+    case ExecutionMode.RaiseRevert:
+    case undefined:
+      return ExecutionMode.RaiseRevertEstimate;
+    case ExecutionMode.RaiseRevertMultiChain:
+      return ExecutionMode.RaiseRevertEstimateMultiChain;
+    default:
+      return mode;
+  }
 }
 
 /**
@@ -498,20 +509,30 @@ export class MetaCatapultarTx<
   /**
    * Estimate this meta transaction under the EstimateGas failure policy.
    *
-   * Builds an estimation twin that mirrors the execution shape, with every
-   * frame — the outer mode and every sub-batch, whatever its execution mode —
-   * swapped to {@link ExecutionMode.EstimateGas} (or its multichain variant).
-   * Any call that fails with empty revert data (an OOG-like failure) then
-   * reverts the whole estimation, forcing the estimator up to the gas limit
-   * where every call either succeeds or reaches its genuine, data-carrying
-   * revert — the limit at which on-chain execution isolates failures instead
-   * of starving them.
+   * Builds an estimation twin that mirrors the execution shape. The outer
+   * SkipRevert mode becomes {@link ExecutionMode.EstimateGas} (or its
+   * multichain variant), skip-policy sub-batch modes are mirrored the same
+   * way, and atomic (RaiseRevert, or unset) sub-batches become
+   * {@link ExecutionMode.RaiseRevertEstimate} — bubbling failures exactly like
+   * RaiseRevert, so their on-chain rollback semantics hold during estimation:
+   * a sub-batch that fails rolls back its partial state changes before the
+   * outer frame skips it, and later sub-batches are simulated against the
+   * same state the broadcast would see. Any failure that leaves its EstimateGas frame below the
+   * starvation threshold (an OOG) reverts the whole estimation with
+   * `EstimateGasStarved`, forcing the estimator up to the gas limit where
+   * every call either succeeds or reaches its genuine business revert with
+   * gas to spare — the limit at which on-chain execution isolates failures
+   * instead of starving them.
    *
-   * For atomic (RaiseRevert) sub-batches the estimate is a ceiling: the twin
-   * keeps executing a group's calls past a data-carrying failure that on-chain
-   * execution would stop at, so every call in every group is priced even if
-   * the group fails during estimation but succeeds at relay time. On-chain,
-   * a group that stops early simply uses less gas than allocated.
+   * An atomic sub-batch that genuinely reverts with data during estimation is
+   * priced at the gas it actually burns before failing — exactly its on-chain
+   * cost for the estimated state. The trade-off: a sub-batch that fails at
+   * estimation time but succeeds at relay time (state changed in between) is
+   * priced only to its estimation-time failure point, leaving the calls after
+   * that point unpriced — an inherent estimation-vs-relay divergence no fixed
+   * margin can bound. Callers whose atomic sub-batches can flip from failing
+   * to succeeding between estimation and relay should re-estimate close to
+   * broadcast or budget for the group's full cost themselves.
    *
    * The twin reuses this meta transaction's nonces, is left unsigned, and is
    * estimated from the account address itself (the self-call authorization

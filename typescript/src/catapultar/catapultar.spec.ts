@@ -223,7 +223,7 @@ describe("Catapultar", () => {
     });
 
     it.concurrent(
-      "estimates the meta tx with mirrored EstimateGas modes and no signer",
+      "estimates the meta tx with every mode mirrored to its estimation twin and no signer",
       async () => {
         const ownerAccount = privateKeyToAccount(random(32));
         const estimateArgs: unknown[] = [];
@@ -259,6 +259,14 @@ describe("Catapultar", () => {
               calls: [{ to: random(20), value: 0n, data: "0x" }],
               mode: ExecutionMode.SkipRevert,
             },
+            // No mode: mirrored like RaiseRevert in the twin.
+            {
+              calls: [{ to: random(20), value: 0n, data: "0x" }],
+            },
+            {
+              calls: [{ to: random(20), value: 0n, data: "0x" }],
+              mode: ExecutionMode.SkipRevertMultiChain,
+            },
           );
 
         const gas = await metaTx.estimateGas({ useCodeOverride: true });
@@ -269,6 +277,8 @@ describe("Catapultar", () => {
         expect(metaTx.calls.map((c) => c.mode)).toEqual([
           ExecutionMode.RaiseRevert,
           ExecutionMode.SkipRevert,
+          undefined,
+          ExecutionMode.SkipRevertMultiChain,
         ]);
         expect(getCodeArgs).toEqual([]);
         expect(estimateArgs).toHaveLength(1);
@@ -298,8 +308,11 @@ describe("Catapultar", () => {
         // Unsigned self-call: opData is the bare 32-byte outer nonce.
         expect(opData.length).toBe(2 + 64);
 
-        // Sub-batches are self-calls; every mode is mirrored to EstimateGas.
-        expect(innerCalls).toHaveLength(2);
+        // Sub-batches are self-calls; skip-policy modes are mirrored to
+        // EstimateGas and atomic (RaiseRevert/unset) sub-batches to
+        // RaiseRevertEstimate — bubbling like RaiseRevert so their rollback
+        // semantics hold, with the starvation check run inside the frame.
+        expect(innerCalls).toHaveLength(4);
         const innerModes = innerCalls.map((call) => {
           expect(call.to.toLowerCase()).toBe(account.address.toLowerCase());
           const inner = decodeFunctionData({
@@ -310,8 +323,10 @@ describe("Catapultar", () => {
           return inner.args[0];
         });
         expect(innerModes).toEqual([
+          ExecutionMode.RaiseRevertEstimate,
           ExecutionMode.EstimateGas,
-          ExecutionMode.EstimateGas,
+          ExecutionMode.RaiseRevertEstimate,
+          ExecutionMode.EstimateGasMultiChain,
         ]);
       },
     );

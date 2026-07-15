@@ -212,19 +212,41 @@ await viemWalletClient.sendTransaction({
 
 ### EstimateGas Preflight
 
-`ExecutionMode.EstimateGas` is intended for simulation. It skips failures that
-return non-empty revert data, but reverts (with empty revert data, after
-emitting a trace-only marker event) on empty revert data so RPC gas estimators
-do not converge on an inner out-of-gas skip path — and so nested EstimateGas
-frames propagate the failure to the top. `MetaCatapultarTx.estimateGas` builds
+`ExecutionMode.EstimateGas` is intended for simulation. It classifies a failed
+call by the gas it leaves behind: an OOG consumes nearly all forwarded gas,
+while a genuine business revert refunds what it did not spend. A failure that
+leaves the frame below the starvation threshold (262,144 gas) is re-raised as
+`EstimateGasStarved(gasLeft)`; any other failure is skipped and logged. A
+parent EstimateGas frame recognizes the `EstimateGasStarved` selector in a
+failure's returndata and bubbles it unchanged — propagation between
+EstimateGas frames does not depend on remaining gas, so the OOG signal reaches
+the top-level estimator from any nesting depth, forcing the estimation up
+instead of letting it converge on a cheaper estimate where the OOG is
+swallowed.
+
+The selector is intentionally treated as a signal rather than authenticated as
+coming from a Catapultar child frame. A callee can therefore return the exact
+36-byte `EstimateGasStarved(uint256)` error itself. This cannot change state or
+damage the account because the mode is used only for simulation; it can only
+make the estimate more conservative or prevent the RPC from finding an
+automatic estimate. Allowing the signal can also be beneficial: a nested or
+gas-sensitive integration can use it to report that its current gas allowance
+is unsafe even when an intermediate contract would otherwise wrap or swallow
+the underlying failure. Callers can fall back to a manually selected gas limit
+if a target emits the signal unconditionally.
+
+`MetaCatapultarTx.estimateGas` builds
 an estimation twin of the meta transaction: the outer mode and skip-policy
 sub-batch modes (SkipRevert, SkipRevertMultiChain) are swapped to their
-EstimateGas counterparts; atomic (RaiseRevert, or unset) sub-batches keep
-their mode, so their on-chain rollback semantics hold: a failing atomic
-sub-batch rolls back its partial state before the outer frame skips it —
-later sub-batches simulate against the same state the broadcast would see —
-and is priced at the gas it burns before failing. An empty-data (OOG-like)
-failure anywhere reverts the whole estimation, forcing the estimator up.
+EstimateGas counterparts; atomic (RaiseRevert, or unset) sub-batches become
+RaiseRevertEstimate, which bubbles failures exactly like RaiseRevert but runs
+the starvation check inside the frame itself. Their on-chain rollback
+semantics hold: a failing atomic sub-batch bubbles its exact revert data and
+rolls back its partial state before the outer frame skips it — later
+sub-batches simulate against the same state the broadcast would see — and is
+priced at the gas it burns before failing. An OOG anywhere within the
+threshold's bounds (below) reverts the whole estimation, forcing the estimator
+up.
 Trade-off: a sub-batch that fails at estimation but succeeds at relay (state
 changed in between) is priced only up to its failure point, leaving its
 remaining calls unpriced — a divergence no fixed margin can bound.
@@ -232,12 +254,16 @@ Re-estimate close to broadcast if your atomic sub-batches can flip from
 failing to succeeding. Only SkipRevert-outer meta transactions can be
 estimated this way.
 
-Known limitation: an `EstimateGas` frame only inspects its immediate callee's
-returndata. A callee that makes nested calls — a router, say — and rewraps a
-nested out-of-gas as a typed revert like `TransferFailed()` looks like a
-genuine business failure and is skipped; the starvation defense cannot see
-through it. For high-value multi-hop routes, prefer integrations that bubble
-raw failures, or validate with per-leg gas traces.
+Bounds of the threshold: the estimate carries the threshold as headroom past
+each genuinely failing skip call (the frame must stay above it for the failure
+to be skipped), and under the EIP-150 63/64 rule the gas check captures OOGs
+at frame budgets up to 64 times the threshold — an OOG consumes everything
+forwarded, leaving the frame its `budget / 64` reserve, which must stay below
+the threshold — at the 262,144 (2^18) threshold that is 16,777,216, exactly
+Ethereum's EIP-7825 per-transaction cap (2^24). Every estimation-twin frame —
+EstimateGas and RaiseRevertEstimate alike — classifies its own failures with a
+single reserve held, and parents bubble the typed error by selector, so the
+bound holds per frame at any nesting depth.
 
 With `useCodeOverride`, the bundled Catapultar account runtime code is injected
 at the account address unless `overrideCode` or `overrideCodeAddress` is

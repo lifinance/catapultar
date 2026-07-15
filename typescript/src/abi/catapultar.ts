@@ -362,19 +362,6 @@ const CATAPULTAR_ABI = [
   },
   {
     type: "event",
-    name: "EstimateGasEmptyRevertData",
-    inputs: [
-      {
-        name: "extraData",
-        type: "bytes32",
-        indexed: false,
-        internalType: "bytes32",
-      },
-    ],
-    anonymous: false,
-  },
-  {
-    type: "event",
     name: "Initialized",
     inputs: [
       {
@@ -469,6 +456,17 @@ const CATAPULTAR_ABI = [
         name: "",
         type: "bytes32",
         internalType: "bytes32",
+      },
+    ],
+  },
+  {
+    type: "error",
+    name: "EstimateGasStarved",
+    inputs: [
+      {
+        name: "gasLeft",
+        type: "uint256",
+        internalType: "uint256",
       },
     ],
   },
