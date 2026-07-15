@@ -217,13 +217,28 @@ return non-empty revert data, but reverts (with empty revert data, after
 emitting a trace-only marker event) on empty revert data so RPC gas estimators
 do not converge on an inner out-of-gas skip path — and so nested EstimateGas
 frames propagate the failure to the top. `MetaCatapultarTx.estimateGas` builds
-an estimation twin of the meta transaction: the outer mode and every sub-batch
-— whatever its execution mode — are swapped to EstimateGas. For atomic
-(RaiseRevert) sub-batches the estimate is therefore a ceiling: estimation
-executes a group's calls past a data-carrying failure that on-chain execution
-would stop at, so every call is priced even when a group fails during
-estimation but succeeds at relay time. Only SkipRevert-outer meta transactions
-can be estimated this way.
+an estimation twin of the meta transaction: the outer mode and skip-policy
+sub-batch modes (SkipRevert, SkipRevertMultiChain) are swapped to their
+EstimateGas counterparts; atomic (RaiseRevert, or unset) sub-batches keep
+their mode, so their on-chain rollback semantics hold: a failing atomic
+sub-batch rolls back its partial state before the outer frame skips it —
+later sub-batches simulate against the same state the broadcast would see —
+and is priced at the gas it burns before failing. An empty-data (OOG-like)
+failure anywhere reverts the whole estimation, forcing the estimator up.
+Trade-off: a sub-batch that fails at estimation but succeeds at relay (state
+changed in between) is priced only up to its failure point, leaving its
+remaining calls unpriced — a divergence no fixed margin can bound.
+Re-estimate close to broadcast if your atomic sub-batches can flip from
+failing to succeeding. Only SkipRevert-outer meta transactions can be
+estimated this way.
+
+Known limitation: an `EstimateGas` frame only inspects its immediate callee's
+returndata. A callee that makes nested calls — a router, say — and rewraps a
+nested out-of-gas as a typed revert like `TransferFailed()` looks like a
+genuine business failure and is skipped; the starvation defense cannot see
+through it. For high-value multi-hop routes, prefer integrations that bubble
+raw failures, or validate with per-leg gas traces.
+
 With `useCodeOverride`, the bundled Catapultar account runtime code is injected
 at the account address unless `overrideCode` or `overrideCodeAddress` is
 provided. Estimation is always sent from the account address itself and uses

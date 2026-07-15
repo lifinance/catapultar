@@ -172,14 +172,21 @@ abstract contract ERC7821LIFI is ERC7821 {
                     revert(add(m, 0x60), returndatasize())
                 }
                 if and(eq(revertFlag, 2), iszero(returndatasize())) {
-                    // `EstimateGas` mode reverts on OOG-like failures. Then intention is to force
-                    // estimators toward non-empty revert data.
-                    // Emit a micro event for tracers, then revert with EMPTY returndata: a parent
-                    // `EstimateGas` frame sees this frame as an empty-data failure and reverts the
-                    // same way, so starvation composes through nested frames to the top-level
-                    // estimate without any sentinel matching.
+                    // `EstimateGas` mode relies on every sub-call re-raising OOG-like failures
+                    // as empty returndata, never wrapping them as a typed error. This contract
+                    // follows its own rule through `revert(0x00, 0x00)`: a parent `EstimateGas`
+                    // call sees this frame as an empty-data failure and re-raises the same way,
+                    // so the OOG signal is propagated to the top-level estimator from any call
+                    // depth, forcing the estimation up instead of letting the estimator converge
+                    // on a cheaper estimate where an OOG is swallowed.
+                    // Any sub-call that swallows an OOG and raises a typed error like `OutOfGas()`
+                    // opens an OOG shortcut the estimator may converge on, potentially
+                    // underestimating the call.
+                    // Emit a micro event for tracers first — the revert discards it from the
+                    // receipt.
                     mstore(0x00, extraData)
                     log1(0x00, 0x20, _ESTIMATE_GAS_EMPTY_REVERT_DATA_EVENT_SIGNATURE)
+                    // rule: Raise empty returndata as empty returndata.
                     revert(0x00, 0x00)
                 }
             }
