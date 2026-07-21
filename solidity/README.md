@@ -55,7 +55,7 @@ In general, there are two main approaches to implementing EIP-7702 support for s
 
 - To simulate dual mode transaction, mode `0x01000000000078210001` transactions can be submitted to the relevant proxy using the context of `msg.sender === proxy`.
 - Catapultar contains no gas controls. If dual mode transactions are used, gas controls should be handled off-chain. Gas-spending untrusted contracts should be executed individually.
-- For gas preflight, mode `0x01020000000078210001` can be used to skip failures with non-empty revert data but revert on empty revert data. This is a heuristic for OOG-like failures and should primarily be used for simulation or with RPC state/code overrides.
+- For gas preflight, mode `0x01020000000078210001` can be used to skip ordinary reverts while re-raising OOG-like failures as `EstimateGasStarved(uint256)`. Failures are classified by the gas remaining in the executing frame: a failure that leaves the frame below the starvation threshold (262,144 gas) is treated as out-of-gas and re-raised, and a child frame's `EstimateGasStarved` is bubbled unchanged regardless of remaining gas; any other failure is skipped. This should primarily be used for simulation or with RPC state/code overrides.
 - Catapultar contains no calldata manipulation. Injection of `erc20::balanceOf()` or similar manipulations should be on external contracts.
 - Catapultar does not support external delegate calls. Delegate calls are dangerous, particularly for upgradeable contracts. They can change the owner of Catapultar but also the implementation of a proxy (ERC-1967).
 
@@ -64,7 +64,8 @@ In general, there are two main approaches to implementing EIP-7702 support for s
 - **Batch Execution Modes:**
   - Conditional batch: All transactions succeed or all fail. Nonce is only spent on success.
   - Individual batch: Each transaction in the batch is executed independently; failures do not block others. Nonce is always spent.
-  - EstimateGas batch: Non-empty revert data is skipped, but empty revert data reverts the top-level call to force gas estimators away from OOG-like skip paths.
+  - EstimateGas batch: Failures are classified by remaining gas; a failure classified as a logical revert is skipped, while one that leaves the frame below the starvation threshold is re-raised as `EstimateGasStarved(uint256)` to force gas estimators away from OOG-like skip paths.
+  - RaiseRevertEstimate batch: The estimation twin of the conditional batch; failures classified as logical reverts bubble their exact revert data and roll the frame back, while starvation is re-raised as `EstimateGasStarved(uint256)`. Used by estimation twins of nested atomic sub-batches.
   - Nested batches: Mix conditional and individual batches for complex workflows.
 - **Signature Validation:**
   - Supports ECDSA, ERC-1271, P256, and WebAuth P256 signatures.
@@ -112,13 +113,13 @@ For all deployments, the first 20 bytes of `salt` should be the owner address or
 
 Catapultar is not `ERC-7821` compatible but it follows `ERC-7821` specification. It supports the following execution modes:
 
-| Execution Mode          | 0x0100....78210001 | 0x0101....78210001 | 0x0102....78210001 | 0x0100....78210002 |
-| ----------------------- | :----------------: | :----------------: | :----------------: | :----------------: |
-| Raise Revert            |        Yes         |         No         |  Empty returndata  |        Yes         |
-| Consume Nonce on Revert |         No         |        Yes         |        Yes         |         No         |
-| Batch of Batches        |         No         |         No         |         No         |        Yes         |
-| OpData Required         |        Yes         |        Yes         |        Yes         |         No         |
-| Multi-chain Signed      |        Yes         |        Yes         |        Yes         |     Inherited      |
+| Execution Mode          | 0x0100....78210001 | 0x0101....78210001 | 0x0102....78210001 | 0x0103....78210001 | 0x0100....78210002 |
+| ----------------------- | :----------------: | :----------------: | :----------------: | :----------------: | :----------------: |
+| Raise Revert            |        Yes         |         No         |   On starvation    |        Yes         |        Yes         |
+| Consume Nonce on Revert |         No         |        Yes         |        Yes         |         No         |         No         |
+| Batch of Batches        |         No         |         No         |         No         |         No         |        Yes         |
+| OpData Required         |        Yes         |        Yes         |        Yes         |        Yes         |         No         |
+| Multi-chain Signed      |        Yes         |        Yes         |        Yes         |        Yes         |     Inherited      |
 
 #### opData
 
