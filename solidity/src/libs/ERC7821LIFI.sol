@@ -31,7 +31,12 @@ abstract contract ERC7821LIFI is ERC7821 {
     /// 63/64 rule, 64 times this value exactly reaches Ethereum's EIP-7825 per-transaction gas
     /// cap of 16_777_216. In `EstimateGas` mode, a failed call that leaves this frame with less
     /// gas than this threshold is treated as starvation: an OOG consumes nearly all forwarded
-    /// gas while a genuine business revert refunds unspent gas.
+    /// gas while a genuine logical revert refunds unspent gas.
+    /// The check is on the gas left in this frame after a failed call returns. A callee that
+    /// catches an inner OOG and reverts with a typed error releases more gas back to this frame
+    /// than a true OOG could, so the failure can be classified as a genuine logical revert and
+    /// skipped; a callee that swallows the failure and returns success is never classified at
+    /// all. Both hide the inner starvation from the estimator.
     uint256 constant _ESTIMATE_GAS_STARVATION_THRESHOLD = 262_144;
 
     /// @notice Validation function that validate opData for a specific call.
@@ -177,7 +182,7 @@ abstract contract ERC7821LIFI is ERC7821 {
                     revert(add(m, 0x60), returndatasize())
                 }
                 // Flags 2 (`EstimateGas`) and 3 (`RaiseRevertEstimate`) share the starvation
-                // classification; they differ only in what happens to a genuine business
+                // classification; they differ only in what happens to a genuine logical
                 // revert (skip vs bubble).
                 if gt(revertFlag, 1) {
                     // A failed call that reverted with `EstimateGasStarved(uint256)` is a
@@ -189,7 +194,7 @@ abstract contract ERC7821LIFI is ERC7821 {
                     }
                     // Estimation frames classify any other failure by the gas it left
                     // behind: an OOG consumes nearly all forwarded gas, leaving this frame
-                    // with less than 1/64 of its gas, while a genuine business revert
+                    // with less than 1/64 of its gas, while a genuine logical revert
                     // refunds what it did not spend. Any failure that leaves this frame
                     // below the threshold is treated as starvation and re-raised as
                     // `EstimateGasStarved(gasLeft)` — bubbled by selector above through any
@@ -202,7 +207,7 @@ abstract contract ERC7821LIFI is ERC7821 {
                         revert(0x1c, 0x24)
                     }
                     // `RaiseRevertEstimate` is the estimation twin of an atomic (RaiseRevert)
-                    // sub-batch: a genuine business revert bubbles its exact returndata and
+                    // sub-batch: a genuine logical revert bubbles its exact returndata and
                     // rolls the frame back, exactly like RaiseRevert — but the starvation
                     // check above runs in THIS frame, where only one 1/64 reserve is held,
                     // instead of in the outer estimation frame where the reserves of both

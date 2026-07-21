@@ -149,11 +149,17 @@ Since `0x01000000000078210002` does not execute a transaction batch but a batch 
 
 - **0x01020000000078210001**: Estimating a set of individual transactions.
 
-  If a transaction fails with non-empty revert data, the remaining transactions should be executed and the revert data is emitted. If a transaction fails with empty revert data, the frame emits the trace-only marker event `EstimateGasEmptyRevertData(bytes32)` and reverts with empty revert data. Because the frame's own failure is again an empty-data failure, nested EstimateGas frames propagate the starvation to the top-level call, so the mode composes recursively. This is intended to improve gas estimation for expensive doomed calls by rejecting OOG-like skip paths. It is a heuristic: `revert()` with no data, invalid opcode, and other empty-data failures are treated like OOG. The marker event is discarded by the revert and is only visible to tracers.
+  If a transaction fails, the frame classifies the failure by the gas it left behind: an OOG consumes nearly all forwarded gas, while a genuine logical revert refunds what it did not spend. A failure that leaves the frame with less than the starvation threshold (262,144 gas) is re-raised as `EstimateGasStarved(uint256)`; any other failure is skipped and its revert data is emitted, and the remaining transactions are executed. A parent EstimateGas frame recognizes the `EstimateGasStarved` selector in a failure's returndata and bubbles it unchanged, so the starvation signal reaches the top-level call from any nesting depth. This is intended to improve gas estimation for expensive doomed calls by rejecting OOG-like skip paths.
+
+  The classification is dependent on the gas returned when the immediate callee returns. A callee that catches an inner out-of-gas and reverts with an ordinary typed error — not spending its entire allocated gas budget — is skipped as a logical revert, so estimation may settle on a value where the inner operation fails cheaply while a higher-gas execution would run a more expensive success path. A callee that swallows the failure and returns success hides starvation entirely — successful calls are never classified.
+
+- **0x01030000000078210001**: Estimating a set of conditional transactions.
+
+  The estimation twin of `0x01000000000078210001`: a failure that leaves the frame below the starvation threshold is re-raised as `EstimateGasStarved(uint256)`; any other failure bubbles its exact revert data and rolls the frame back, exactly like the conditional mode. Used by estimation twins of nested batches so atomic sub-batches keep their on-chain rollback semantics during estimation.
 
 - **0x01000000000078210001 inside 0x01010000000078210001**: Executing a large set of individual transactions containing conditional transactions.
 
-  Each 0x01000000000078210001 batch can be retried in the future if it fails with each 0x01010000000078210001 only being executable once. This allows a batch executor to schedule a set of transaction to be executed. The entire set should be executed individually (0x01010000000078210001) but each sub-batch or transaction needs to be executed conditionally (0x01000000000078210001).
+  Each `0x01000000000078210001` batch can be retried in the future if it fails with each `0x01010000000078210001` only being executable once. This allows a batch executor to schedule a set of transaction to be executed. The entire set should be executed individually (`0x01010000000078210001`) but each sub-batch or transaction needs to be executed conditionally (`0x01000000000078210001`).
 
 ### Account Signature Validation (ERC-1271)
 

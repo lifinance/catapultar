@@ -171,7 +171,7 @@ contract ERC7821LIFITest is Test {
     }
 
     /// Starvation is classified by gas accounting, not returndata: an empty-data failure
-    /// with ample gas remaining is a genuine (bare) business revert and is skipped.
+    /// with ample gas remaining is a genuine (bare) logical revert and is skipped.
     function testERC7821LIFI_estimateGas_emptyRevertDataAmpleGasContinues(
         uint256 nonce
     ) external {
@@ -340,7 +340,7 @@ contract ERC7821LIFITest is Test {
     }
 
     /// A RaiseRevertEstimate frame (the estimation twin of an atomic sub-batch): a
-    /// data-carrying business failure bubbles its exact revert data, which the outer
+    /// data-carrying logical failure bubbles its exact revert data, which the outer
     /// EstimateGas frame skips + logs — with the inner frame's earlier state changes
     /// ROLLED BACK, exactly like RaiseRevert.
     function testERC7821LIFI_raiseRevertEstimate_dataRevertBubblesExactAndRollsBack(

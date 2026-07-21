@@ -214,7 +214,7 @@ await viemWalletClient.sendTransaction({
 
 `ExecutionMode.EstimateGas` is intended for simulation. It classifies a failed
 call by the gas it leaves behind: an OOG consumes nearly all forwarded gas,
-while a genuine business revert refunds what it did not spend. A failure that
+while a genuine logical revert refunds what it did not spend. A failure that
 leaves the frame below the starvation threshold (262,144 gas) is re-raised as
 `EstimateGasStarved(gasLeft)`; any other failure is skipped and logged. A
 parent EstimateGas frame recognizes the `EstimateGasStarved` selector in a

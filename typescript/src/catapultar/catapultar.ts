@@ -290,7 +290,7 @@ export type CatapultarEstimateGasOptions = {
  * call inside them is not silently swallowed during estimation, and atomic
  * frames (RaiseRevert, RaiseRevertMultiChain, or `undefined`, which resolves
  * to RaiseRevert when the sub-batch is materialized) become their
- * RaiseRevertEstimate counterparts: a genuine business revert bubbles its
+ * RaiseRevertEstimate counterparts: a genuine logical revert bubbles its
  * exact returndata and rolls the frame back — matching on-chain RaiseRevert —
  * and is then skipped + logged by the enclosing EstimateGas frame, while a
  * failure that leaves the atomic frame below the starvation threshold is
@@ -520,7 +520,7 @@ export class MetaCatapultarTx<
    * same state the broadcast would see. Any failure that leaves its EstimateGas frame below the
    * starvation threshold (an OOG) reverts the whole estimation with
    * `EstimateGasStarved`, forcing the estimator up to the gas limit where
-   * every call either succeeds or reaches its genuine business revert with
+   * every call either succeeds or reaches its genuine logical revert with
    * gas to spare — the limit at which on-chain execution isolates failures
    * instead of starving them.
    *
