@@ -15,6 +15,7 @@ import {
   ValidationError,
 } from "../errors";
 import { CATAPULTAR_ACCOUNT_RUNTIME_CODE } from "../bytecode/catapultar";
+import { applyCodeOverrideMargin } from "./gas";
 import { CatapultarAccount } from "./account";
 import { BaseTransaction } from "../transaction/transaction";
 
@@ -272,7 +273,9 @@ export type CatapultarEstimateGasOptions = {
   /**
    * Enable an RPC state override for the account code. Useful when estimating
    * against an already-deployed account whose on-chain code does not yet support
-   * EstimateGas mode.
+   * EstimateGas mode. Override estimates get the proportional
+   * {@link applyCodeOverrideMargin} added automatically, compensating for the
+   * clone proxy hop the override skips.
    */
   useCodeOverride?: boolean;
   /** Runtime bytecode to place at the Catapultar account address during estimation. */
@@ -320,6 +323,10 @@ function estimateModeFor(mode: ExecutionMode | undefined): ExecutionMode {
  * Catapultar's self-call authorization path (`opData.length == 32` and
  * `msg.sender == address(this)`), so no signature — and no signer round-trip —
  * is required.
+ *
+ * Override estimates run without the clone's delegatecall frame, so the
+ * proportional {@link applyCodeOverrideMargin} is applied before returning;
+ * non-override estimates run against the deployed proxy and need none.
  */
 async function estimateUnsignedWithOverride<O extends Owner>(
   tx: CatapultarTx<O, true>,
@@ -348,11 +355,13 @@ async function estimateUnsignedWithOverride<O extends Owner>(
   if (!code)
     throw new ValidationError("No override code was found for estimation.");
 
-  return publicClient.estimateGas({
-    account,
-    ...call,
-    stateOverride: [{ address: tx.account.address, code }],
-  });
+  return applyCodeOverrideMargin(
+    await publicClient.estimateGas({
+      account,
+      ...call,
+      stateOverride: [{ address: tx.account.address, code }],
+    }),
+  );
 }
 
 /**
@@ -538,9 +547,12 @@ export class MetaCatapultarTx<
    * estimated from the account address itself (the self-call authorization
    * path), so no signer is involved; `options` control the RPC code override
    * for accounts whose deployed bytecode predates EstimateGas mode. This
-   * object is not mutated. The returned estimate excludes signature
-   * validation, digest hashing, and the proxy hop — add a signed-path margin
-   * before using it as a relay gas limit.
+   * object is not mutated. When a code override is used, the returned
+   * estimate already includes the proportional
+   * {@link applyCodeOverrideMargin} covering the proxy hop the override
+   * skips. It still excludes signature validation and the signature's opData
+   * calldata — apply the flat signed-path overhead via
+   * {@link applyEstimateGasMargin} before using it as a relay gas limit.
    *
    * Only meta transactions whose outer mode is SkipRevert (the default) can
    * be estimated this way: the estimate answers "at what limit does the batch

@@ -1,32 +1,25 @@
-import { privateKeyToAccount, type PrivateKeyAccount } from "viem/accounts";
+import { privateKeyToAccount } from "viem/accounts";
 import { random, asHex } from "../utils/helpers";
 import { CatapultarTx, MetaCatapultarTx } from "./catapultar";
-import {
-  ExecutionMode,
-  type Owner,
-  type OwnerType,
-  type WebAuthnSignature,
-} from "../types/types";
+import { ExecutionMode, type Owner, type OwnerType } from "../types/types";
 import { anvil } from "viem/chains";
 import {
   createPublicClient,
   createWalletClient,
   decodeAbiParameters,
   decodeFunctionData,
-  hashTypedData,
   http,
   parseAbiParameters,
-  sha256,
-  stringToBytes,
   type PublicClient,
 } from "viem";
-import { Base64, P256 } from "ox";
 import { CatapultarAccount } from "./account";
+import { makeOwnerSigner } from "../../test/signers";
 import { rpcUrl } from "../../test/setup";
 import { defaultFactory } from "../config";
 import { PUBLIC_DEFAULT_ANVIL_ACCOUNT_0 } from "../../test/fixtures";
 import CATAPULTAR_ABI from "../abi/catapultar";
 import { CATAPULTAR_ACCOUNT_RUNTIME_CODE } from "../bytecode/catapultar";
+import { applyCodeOverrideMargin } from "./gas";
 
 const chainId = 31337;
 const anvilAccountVersion = "0.1.0";
@@ -271,7 +264,9 @@ describe("Catapultar", () => {
 
         const gas = await metaTx.estimateGas({ useCodeOverride: true });
 
-        expect(gas).toBe(123n);
+        // 123n from the fake client plus the ceiling-rounded 10% override margin.
+        expect(gas).toBe(applyCodeOverrideMargin(123n));
+        expect(gas).toBe(136n);
         // The source object is not mutated.
         expect(metaTx.mode).toBe(ExecutionMode.SkipRevert);
         expect(metaTx.calls.map((c) => c.mode)).toEqual([
@@ -328,6 +323,31 @@ describe("Catapultar", () => {
           ExecutionMode.RaiseRevertEstimate,
           ExecutionMode.EstimateGasMultiChain,
         ]);
+
+        // Without an override the raw estimate passes through unchanged (the
+        // deployed proxy hop is already in the trace) and no stateOverride is
+        // sent.
+        expect(await metaTx.estimateGas()).toBe(123n);
+        expect(estimateArgs).toHaveLength(2);
+        expect(estimateArgs[1]).not.toHaveProperty("stateOverride");
+
+        // overrideCode alone implies the override — and its margin.
+        expect(await metaTx.estimateGas({ overrideCode: "0x6001" })).toBe(
+          applyCodeOverrideMargin(123n),
+        );
+        expect(
+          (estimateArgs[2] as { stateOverride: unknown }).stateOverride,
+        ).toEqual([{ address: account.address, code: "0x6001" }]);
+
+        // overrideCodeAddress alone implies the override too, reading the
+        // code from the given address.
+        expect(
+          await metaTx.estimateGas({ overrideCodeAddress: random(20) }),
+        ).toBe(applyCodeOverrideMargin(123n));
+        expect(getCodeArgs).toHaveLength(1);
+        expect(
+          (estimateArgs[3] as { stateOverride: unknown }).stateOverride,
+        ).toEqual([{ address: account.address, code: "0x6000" }]);
       },
     );
 
@@ -344,7 +364,7 @@ describe("Catapultar", () => {
           .setMode(ExecutionMode.RaiseRevert)
           .addCalls({ calls: [{ to: random(20), value: 0n, data: "0x" }] });
 
-        expect(metaTx.estimateGas()).rejects.toThrow(
+        await expect(metaTx.estimateGas()).rejects.toThrow(
           "requires a SkipRevert outer mode",
         );
       },
@@ -414,49 +434,6 @@ describe("Catapultar", () => {
     });
   });
 
-  function p256signFunction(privateKey: `0x${string}`) {
-    return async (...args: Parameters<typeof hashTypedData>) => {
-      const payload = hashTypedData(...args);
-      const signedPayload = P256.sign({ payload, privateKey });
-      return `0x${asHex(signedPayload.r, 32, "")}${asHex(signedPayload.s, 32, "")}` as `0x${string}`;
-    };
-  }
-
-  function webAuthnSignFunction(privateKey: `0x${string}`) {
-    return async (...args: Parameters<typeof hashTypedData>) => {
-      const payload = hashTypedData(...args); // ABI.encoded hash of typedData.
-      const clientDataJson = {
-        type: "webauthn.get",
-        challenge: Base64.fromHex(payload, { url: true, pad: false }),
-        origin: "http://localhost:3000",
-      };
-      const clientDataJsonString = JSON.stringify(clientDataJson);
-      const typeIndex = clientDataJsonString.indexOf('"type":');
-      const challengeIndex = clientDataJsonString.indexOf('"challenge":');
-
-      const rpIdHash = sha256(stringToBytes("localhost"));
-      const flags = "01"; // UUP ‑ user present
-      const counter = "00000001";
-      const authenticatorData = (rpIdHash + flags + counter) as `0x${string}`;
-
-      const clientHash = sha256(stringToBytes(clientDataJsonString));
-      const messageHash = sha256(
-        (authenticatorData + clientHash.replace("0x", "")) as `0x${string}`,
-      );
-
-      const signedMessage = P256.sign({ payload: messageHash, privateKey });
-
-      const webAuthnSignature: WebAuthnSignature = {
-        authenticatorData,
-        clientDataJSON: clientDataJsonString,
-        challengeIndex,
-        typeIndex,
-        ...signedMessage,
-      };
-      return webAuthnSignature;
-    };
-  }
-
   const integrationTest = (ownerType: OwnerType) =>
     describe(`Integration ${ownerType}`, () => {
       const publicClient = createPublicClient({
@@ -464,23 +441,7 @@ describe("Catapultar", () => {
         transport: http(rpcUrl()),
       });
 
-      const privateKey =
-        ownerType === "ecdsa" ? random(32) : P256.randomPrivateKey();
-      const p256PubKey = (privateKey: `0x${string}`) => {
-        const { x, y } = P256.getPublicKey({ privateKey });
-        return { x: asHex(x, 32, "0x"), y: asHex(y, 32, "0x") };
-      };
-      const signer =
-        ownerType === "ecdsa"
-          ? privateKeyToAccount(privateKey)
-          : ownerType === "p256"
-            ? { signTypedData: p256signFunction(privateKey) }
-            : { signTypedData: webAuthnSignFunction(privateKey) };
-
-      const owner: Owner =
-        ownerType === "ecdsa"
-          ? { type: "ecdsa", address: (signer as PrivateKeyAccount).address }
-          : { type: ownerType, ...p256PubKey(privateKey) };
+      const { owner, signTypedData } = makeOwnerSigner(ownerType);
 
       const oftenTargetAddress = random(20); // This is acting as a random address.
 
@@ -538,7 +499,7 @@ describe("Catapultar", () => {
               value,
               data: "0x",
             })
-            .sign((...args) => signer.signTypedData(...args))
+            .sign((...args) => signTypedData(...args))
         ).asCall();
 
         const executionTransaction = await executor.sendTransaction(calldata);
@@ -586,7 +547,7 @@ describe("Catapultar", () => {
             .setMode(ExecutionMode.SkipRevert)
             .addCalls(...calls)
             .asCatapultarTx()
-        ).sign((...args) => signer.signTypedData(...args));
+        ).sign((...args) => signTypedData(...args));
 
         const executionTransaction = await executor.sendTransaction(
           await signedTx.asCall(),
@@ -621,7 +582,7 @@ describe("Catapultar", () => {
             .setRandomNonce()
             .setMode(ExecutionMode.RaiseRevert)
             .addCall(...invalidateCall)
-            .sign((...args) => signer.signTypedData(...args))
+            .sign((...args) => signTypedData(...args))
         ).asCall();
         let executionTransaction = await executor.sendTransaction(calldata);
         await waitForTransaction(executionTransaction);
@@ -640,7 +601,7 @@ describe("Catapultar", () => {
             .setRandomNonce()
             .setMode(ExecutionMode.RaiseRevert)
             .addCall(...invalidateCall)
-            .sign((...args) => signer.signTypedData(...args))
+            .sign((...args) => signTypedData(...args))
         ).asCall();
         executionTransaction = await executor.sendTransaction(calldata);
         await waitForTransaction(executionTransaction);

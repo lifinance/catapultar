@@ -15,8 +15,14 @@ import { ExecutionMode, type Call, type Owner } from "../types/types";
 import { asHex, random } from "../utils/helpers";
 import { CatapultarAccount } from "./account";
 import { MetaCatapultarTx } from "./catapultar";
+import { ESTIMATE_GAS_MARGIN_PERCENT, applyEstimateGasMargin } from "./gas";
 import { PUBLIC_DEFAULT_ANVIL_ACCOUNT_0 } from "../../test/fixtures";
+import { makeOwnerSigner } from "../../test/signers";
 import { rpcUrl } from "../../test/setup";
+import {
+  dirtyStateTargetBytecode,
+  gasEstimateTargetBytecode,
+} from "../../test/mock-bytecode";
 
 const chainId = 31337;
 const anvilAccountVersion = "0.1.0";
@@ -94,14 +100,6 @@ const dirtyStateTargetAbi = [
   },
 ] as const;
 
-// Deployment bytecode compiled from solidity/test/mocks/DirtyStateTarget.sol.
-const dirtyStateTargetBytecode =
-  "0x6080806040523460155761024a908161001a8239f35b5f80fdfe60806040526004361015610011575f80fd5b5f3560e01c80635270e9ca146101e757806362548c7b1461018d578063890eba681461014e5780638ace1a91146101135763a03df8a214610050575f80fd5b3461010f5760207ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffc36011261010f5760043560ff5f54166100e7576040515f91906020810190835b8385106100d4577f86954ecc0ae072157fcf7f87a425a1461295a4cc9cc3122d2efc73bf32d98e1a6020600180540180600155604051908152a1005b8152838252600160408220940193610098565b7f25e345dc000000000000000000000000000000000000000000000000000000005f5260045ffd5b5f80fd5b3461010f575f7ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffc36011261010f576020600154604051908152f35b3461010f575f7ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffc36011261010f57602060ff5f54166040519015158152f35b3461010f575f7ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffc36011261010f575f80547fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff00166001179055005b3461010f575f7ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffc36011261010f577fefece901000000000000000000000000000000000000000000000000000000005f5260045ffdfea164736f6c6343000823000a" as const;
-
-// Deployment bytecode compiled from solidity/test/mocks/GasEstimateTarget.sol.
-const gasEstimateTargetBytecode =
-  "0x6080806040523460155761016f908161001a8239f35b5f80fdfe6080806040526004361015610012575f80fd5b5f3560e01c9081637560fdd1146101035750806388f14b431461007b57639ebaf26b1461003d575f80fd5b34610077575f7ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffc3601126100775760205f54604051908152f35b5f80fd5b346100775760207ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffc360112610077576004355f90604051905f91602081015b8284106100ed57847ff839e66c000000000000000000000000000000000000000000000000000000005f5260045260245ffd5b93815282845260408120936001909301926100ba565b34610077575f7ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffc3601126100775760207fe2c7262c072f15668b0bb466afb96109550708a188a8a0845c275c2fba34bc169160015f5401805f558152a100fea164736f6c6343000823000a" as const;
-
 describe("Catapultar gas estimation PoC", () => {
   const publicClient = createPublicClient({
     chain: anvil,
@@ -128,8 +126,7 @@ describe("Catapultar gas estimation PoC", () => {
     return receipt.contractAddress;
   }
 
-  async function deployCatapultar(ownerAccount: PrivateKeyAccount) {
-    const owner: Owner = { type: "ecdsa", address: ownerAccount.address };
+  async function deployCatapultar(owner: Owner) {
     const deployCall = CatapultarAccount.deploy({
       owner,
       salt: `0x${asHex(0n, 20)}${random(12).replace("0x", "")}`,
@@ -204,7 +201,10 @@ describe("Catapultar gas estimation PoC", () => {
     "verifies Anvil can estimate the skip batch far below the high-gas failure path",
     async () => {
       const ownerAccount = privateKeyToAccount(random(32));
-      const account = await deployCatapultar(ownerAccount);
+      const account = await deployCatapultar({
+        type: "ecdsa",
+        address: ownerAccount.address,
+      });
       const target = await deployGasTarget();
       const nonceBase = BigInt(random(31)) << 8n;
 
@@ -264,7 +264,10 @@ describe("Catapultar gas estimation PoC", () => {
     "rolls back an atomic sub-batch's state in the estimation twin so later sub-batches see clean state",
     async () => {
       const ownerAccount = privateKeyToAccount(random(32));
-      const account = await deployCatapultar(ownerAccount);
+      const account = await deployCatapultar({
+        type: "ecdsa",
+        address: ownerAccount.address,
+      });
       const hash = await walletClient.deployContract({
         abi: dirtyStateTargetAbi,
         bytecode: dirtyStateTargetBytecode,
@@ -324,15 +327,12 @@ describe("Catapultar gas estimation PoC", () => {
       const estimate = await metaTx.estimateGas({ useCodeOverride: true });
       expect(estimate).toBeGreaterThan(1_000_000n);
 
-      // Broadcast at the estimate plus a tight signed-path margin — NOT a 2x
-      // buffer — so a partially-underestimating regression starves group2 and
-      // fails the finishedCalls assertion below. The margin is proportional,
-      // not constant: the code-override estimate runs without the clone's
-      // delegatecall frames, and each extra real frame retains 1/64 of gas
-      // (EIP-150), so the signed broadcast needs ~5% more at this scale; 10%
-      // + 50k absorbs that plus signature validation and the extra opData
-      // calldata while still failing on any >=~5% underestimation.
-      const withSignedPathMargin = (estimate * 110n) / 100n + 50_000n;
+      // Broadcast at the estimate (which already carries the proportional
+      // code-override margin) plus the SDK's flat signed-path overhead — NOT
+      // a 2x buffer — so a partially-underestimating regression starves
+      // group2 and fails the finishedCalls assertion below (rationale lives
+      // on applyCodeOverrideMargin's and applyEstimateGasMargin's JSDoc).
+      const withSignedPathMargin = applyEstimateGasMargin(estimate, "ecdsa");
       const signedTx = await (
         await metaTx.asCatapultarTx()
       ).sign((data) => ownerAccount.signTypedData(data));
@@ -366,4 +366,103 @@ describe("Catapultar gas estimation PoC", () => {
     },
     30_000,
   );
+
+  // The unsigned estimate skips signature validation, and non-ECDSA owners
+  // are where that omission is largest: on this anvil state P256 verification
+  // runs through Solady's deployed fallback verifier (no RIP-7212 precompile),
+  // the worst case the conservative SIGNED_PATH_GAS_OVERHEAD table must cover.
+  for (const ownerType of ["p256", "webauthn-p256"] as const) {
+    it.serial(
+      `broadcasts a signed ${ownerType} batch within applyEstimateGasMargin of the unsigned estimate`,
+      async () => {
+        const { owner, signTypedData } = makeOwnerSigner(ownerType);
+        const account = await deployCatapultar(owner);
+        const target = await deployGasTarget();
+        const nonceBase = BigInt(random(31)) << 8n;
+
+        const expensiveCall: Call = {
+          to: target,
+          value: 0n,
+          data: encodeFunctionData({
+            abi: gasEstimateTargetAbi,
+            functionName: "expensiveThenRevert",
+            args: [expensiveRounds],
+          }),
+        };
+        const healthyCall: Call = {
+          to: target,
+          value: 0n,
+          data: encodeFunctionData({
+            abi: gasEstimateTargetAbi,
+            functionName: "healthy",
+          }),
+        };
+        const buildMetaTx = (base: bigint) =>
+          new MetaCatapultarTx({
+            account,
+            outerNonce: base,
+            innerNonce: base + 1n,
+          })
+            .setMode(ExecutionMode.SkipRevert)
+            .addCalls(
+              { calls: [expensiveCall], mode: ExecutionMode.RaiseRevert },
+              { calls: [healthyCall], mode: ExecutionMode.RaiseRevert },
+            );
+
+        const metaTx = buildMetaTx(nonceBase);
+        const estimate = await metaTx.estimateGas({ useCodeOverride: true });
+        expect(estimate).toBeGreaterThan(1_000_000n);
+
+        const gasLimit = applyEstimateGasMargin(estimate, owner);
+        const signedTx = await (
+          await metaTx.asCatapultarTx()
+        ).sign((...args) => signTypedData(...args));
+        const receipt = await waitForTransaction(
+          await walletClient.sendTransaction({
+            ...(await signedTx.asCall()),
+            gas: gasLimit,
+          }),
+        );
+
+        // Semantic completion, not just tx status: the expensive call reached
+        // its genuine business revert (a starved skip logs "0x" instead) and
+        // the healthy group actually executed.
+        expect(receipt.status).toBe("success");
+        const revertData = callRevertData(receipt);
+        expect(revertData).toHaveLength(1);
+        expect(revertData[0]?.startsWith(expensiveFailureSelector)).toBe(true);
+        expect(await healthyCalls(target)).toBe(1n);
+        // Informational: the estimate is a minimum gas limit carrying unused
+        // starvation headroom, so gasUsed is not a margin measurement.
+        console.log(
+          `${ownerType}: estimate=${estimate} gasLimit=${gasLimit} gasUsed=${receipt.gasUsed}`,
+        );
+
+        // Lower bound: the same signed batch at the raw unsigned estimate —
+        // stripped of the built-in code-override margin, and with no
+        // owner-type overhead — must NOT fully complete for these owners
+        // (fallback P256 validation alone outweighs the estimate's slack),
+        // proving the margins do real work rather than being padding.
+        const rawEstimate =
+          (estimate * 100n) / (100n + ESTIMATE_GAS_MARGIN_PERCENT);
+        const controlTx = buildMetaTx(nonceBase + 10n);
+        const controlSigned = await (
+          await controlTx.asCatapultarTx()
+        ).sign((...args) => signTypedData(...args));
+        const controlReceipt = await waitForTransaction(
+          await walletClient.sendTransaction({
+            ...(await controlSigned.asCall()),
+            gas: rawEstimate,
+          }),
+        );
+        const controlRevertData = callRevertData(controlReceipt);
+        const fullyCompleted =
+          controlReceipt.status === "success" &&
+          controlRevertData.length === 1 &&
+          (controlRevertData[0]?.startsWith(expensiveFailureSelector) ?? false);
+        expect(fullyCompleted).toBe(false);
+      },
+      60_000,
+    );
+  }
 });

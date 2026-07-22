@@ -269,11 +269,30 @@ With `useCodeOverride`, the bundled Catapultar account runtime code is injected
 at the account address unless `overrideCode` or `overrideCodeAddress` is
 provided. Estimation is always sent from the account address itself and uses
 Catapultar's unsigned self-call authorization path, so no signer is required.
-The returned estimate excludes signature validation, digest hashing, and the
-proxy hop — add a signed-path margin before using it as a relay gas limit.
+Code-override estimates run without the clone's delegatecall frame, so
+`estimateGas` adds a proportional 10% margin (`applyCodeOverrideMargin`,
+covering EIP-150 frame retention) to them automatically. The returned
+estimate still excludes signature validation, the signature's calldata, and
+the EIP-712 digest hashing — apply `applyEstimateGasMargin` before using it
+as a relay gas limit.
+
+That margin is owner-type-aware: a flat overhead from
+`SIGNED_PATH_GAS_OVERHEAD`, which by default assumes the chain has no RIP-7212
+P256 precompile, so `p256` / `webauthn-p256` validation runs through Solady's
+~300k-gas fallback verifier (over-provisioned gas is refunded on precompile
+chains; pass `{ p256Precompile: true }` for the tighter analytic table).
+`ecdsa` means an EOA owner — an ERC-1271 smart-contract owner shares that wire
+type but its `isValidSignature` cost is unknowable to the SDK, so supply it
+via `{ signatureValidationGas }`. These are tested policy defaults, not
+bounds: they do not cover nested Catapultar self-calls or estimation-vs-relay
+state divergence.
 
 ```typescript
-import { MetaCatapultarTx, ExecutionMode } from "catapultar";
+import {
+  MetaCatapultarTx,
+  ExecutionMode,
+  applyEstimateGasMargin,
+} from "catapultar";
 
 const metaTx = new MetaCatapultarTx({ account: connectedAccount })
   .setMode(ExecutionMode.SkipRevert) // outer mode; SkipRevert is the default
@@ -282,7 +301,11 @@ const metaTx = new MetaCatapultarTx({ account: connectedAccount })
     { calls: batchB, mode: ExecutionMode.SkipRevert },
   );
 
-const gas = await metaTx.estimateGas({ useCodeOverride: true });
+const estimate = await metaTx.estimateGas({ useCodeOverride: true });
+const gas = applyEstimateGasMargin(estimate, connectedAccount.owner);
+
+const signedTx = await (await metaTx.asCatapultarTx()).sign(signFn);
+await walletClient.sendTransaction({ ...(await signedTx.asCall()), gas });
 ```
 
 ### Embed

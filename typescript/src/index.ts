@@ -38,6 +38,13 @@ export {
   CATAPULTAR_ACCOUNT_VERSION,
 } from "./bytecode/catapultar";
 export {
+  applyCodeOverrideMargin,
+  applyEstimateGasMargin,
+  ESTIMATE_GAS_MARGIN_PERCENT,
+  SIGNED_PATH_GAS_OVERHEAD,
+  SIGNED_PATH_GAS_OVERHEAD_WITH_P256_PRECOMPILE,
+} from "./catapultar/gas";
+export {
   CAT_VALIDATOR_DOMAIN_NAME,
   CAT_VALIDATOR_DOMAIN_VERSION,
   OUTCOME_TO_SIGNER,
@@ -146,6 +153,7 @@ export type {
 
 export type { DeployKind } from "./protocol/factory";
 export type { CatapultarEstimateGasOptions } from "./catapultar/catapultar";
+export type { EstimateGasMarginOptions } from "./catapultar/gas";
 export type {
   Signable,
   CallsMessage,
