@@ -245,11 +245,11 @@ describe("protocol/calls", () => {
     const verifyingContract =
       "0x1111111111111111111111111111111111111111" as const;
     const singleChain = callsDigest(
-      { name: "Catapultar", version: "0.1.0", chainId: 1, verifyingContract },
+      { name: "Catapultar", version: "0.1.1", chainId: 1, verifyingContract },
       message,
     );
     const multiChain = callsDigest(
-      { name: "Catapultar", version: "0.1.0", verifyingContract },
+      { name: "Catapultar", version: "0.1.1", verifyingContract },
       message,
     );
     expect(singleChain).not.toBe(multiChain);

@@ -461,6 +461,17 @@ const CATAPULTAR_ABI = [
   },
   {
     type: "error",
+    name: "EstimateGasStarved",
+    inputs: [
+      {
+        name: "gasLeft",
+        type: "uint256",
+        internalType: "uint256",
+      },
+    ],
+  },
+  {
+    type: "error",
     name: "FnSelectorNotRecognized",
     inputs: [],
   },

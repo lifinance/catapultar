@@ -23,6 +23,7 @@ import CATAPULTAR_FACTORY_ABI from "../abi/catapultarFactory";
 import { P256 } from "ox";
 
 const chainId = 31337;
+const anvilAccountVersion = "0.1.0";
 
 async function waitForTransaction(hash: `0x${string}`) {
   await new Promise((resolve) => setTimeout(resolve, 50));
@@ -180,6 +181,7 @@ describe("Catapultar Account", () => {
         owner: { type: "ecdsa", address: pubkey.address },
         salt: `0x${asHex(0n, 20)}${random(12).replace("0x", "")}`,
         factory: defaultFactory,
+        version: anvilAccountVersion,
       });
       deployedAccountV010 = deployCall010.account.connectRpc({
         chainId,
@@ -231,6 +233,7 @@ describe("Catapultar Account", () => {
         owner,
         salt: `0x${asHex(0n, 20)}${random(12).replace("0x", "")}`,
         factory: defaultFactory,
+        version: anvilAccountVersion,
       });
 
       const p256Account = deployCall.account.connectRpc({
@@ -253,6 +256,7 @@ describe("Catapultar Account", () => {
         owner: { type: "ecdsa", address: pubkey.address },
         salt: `0x${asHex(0n, 20)}${random(12).replace("0x", "")}`,
         digest: { hash: digest, isSignature: false },
+        version: anvilAccountVersion,
       });
       const tx = await executor.sendTransaction({
         ...deployCall.call,
@@ -278,6 +282,7 @@ describe("Catapultar Account", () => {
         salt: `0x${asHex(0n, 20)}${random(12).replace("0x", "")}`,
         factory: defaultFactory,
         digest: { hash: digest, isSignature: true },
+        version: anvilAccountVersion,
       });
       const tx = await executor.sendTransaction({
         ...deployCall.call,

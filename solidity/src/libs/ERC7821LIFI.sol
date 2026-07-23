@@ -16,11 +16,33 @@ abstract contract ERC7821LIFI is ERC7821 {
     error InvalidOpData();
     error OpDataTooSmall();
 
+    /// @notice Raised by an `EstimateGas` frame when a failed call leaves it below
+    /// _ESTIMATE_GAS_STARVATION_THRESHOLD, carrying the gas remaining at re-raise time.
+    /// @dev Selector 0xaf3228d9.
+    error EstimateGasStarved(uint256 gasLeft);
+
     event CallReverted(bytes32 extraData, bytes revertData);
 
     /// @dev keccak256(bytes("CallReverted(bytes32,bytes)"));
     bytes32 constant _CALL_REVERTED_EVENT_SIGNATURE =
         0xa5ef9b4d75ffdec5840bf221dba12f4a744e8b60aeb23da25fbd8c487a97924d;
+
+    /// @dev `262_144` equals 1/64 of Ethereum's EIP-7825 per-transaction gas cap of
+    /// 16_777_216: under the EIP-150 63/64 rule, a fully consuming child in a capped
+    /// transaction leaves this frame (which entered the call with less than the cap, after
+    /// pre-call overhead) below this threshold. In `EstimateGas` mode, a failed call that
+    /// leaves this frame with less gas than this threshold is treated as starvation: an OOG
+    /// consumes nearly all forwarded gas while a genuine logical revert refunds unspent gas.
+    /// The check is on the gas left in this frame after a failed call returns. A callee that
+    /// catches an inner OOG and reverts with a typed error releases more gas back to this frame
+    /// than a true OOG could, so — given sufficient frame budget — the failure may be
+    /// classified as a genuine logical revert and skipped; a callee that swallows the failure
+    /// and returns success is never classified at all. Both hide the inner starvation from the
+    /// estimator. A related limitation in the other direction: copying and logging a failed
+    /// call's returndata (`CallReverted`) costs gas before the check runs, so a logical revert
+    /// carrying very large returndata can drag this frame below the threshold and be
+    /// classified as starvation.
+    uint256 constant _ESTIMATE_GAS_STARVATION_THRESHOLD = 262_144;
 
     /// @notice Validation function that validate opData for a specific call.
     function _validateOpData(
@@ -67,6 +89,8 @@ abstract contract ERC7821LIFI is ERC7821 {
             let m := and(shr(mul(22, 8), mode), 0xffff00000000ffffffff)
             id := or(shl(1, eq(m, 0x01000000000078210001)), id) //2.
             id := or(shl(1, eq(m, 0x01010000000078210001)), id) //2.
+            id := or(shl(1, eq(m, 0x01020000000078210001)), id) //2.
+            id := or(shl(1, eq(m, 0x01030000000078210001)), id) //2.
             id := or(mul(3, eq(m, 0x01000000000078210002)), id) //3.
         }
     }
@@ -157,9 +181,46 @@ abstract contract ERC7821LIFI is ERC7821 {
                 // Emit CallReverted(bytes32 extraData, bytes revertData).
                 log1(m, add(0x60, sizeAfterPad), _CALL_REVERTED_EVENT_SIGNATURE)
 
-                if iszero(shr(mul(31, 8), extraData)) {
+                let revertFlag := shr(mul(31, 8), extraData)
+                if iszero(revertFlag) {
                     // Bubble up the revert if the call reverts and the skip revert flag has not been set
                     revert(add(m, 0x60), returndatasize())
+                }
+                // Flags 2 (`EstimateGas`) and 3 (`RaiseRevertEstimate`) share the starvation
+                // classification; they differ only in what happens to a genuine logical
+                // revert (skip vs bubble).
+                if gt(revertFlag, 1) {
+                    // A failed call that reverted with returndata shaped exactly like a child
+                    // starvation verdict — `EstimateGasStarved(uint256)`, 0x24 bytes — is
+                    // treated as a child estimation frame that already classified its own
+                    // failure as starvation. Bubble it unchanged to ensure the gas check does
+                    // not become weaker in lower self calls.
+                    if and(eq(returndatasize(), 0x24), eq(shr(224, mload(add(m, 0x60))), 0xaf3228d9)) {
+                        revert(add(m, 0x60), 0x24)
+                    }
+                    // Estimation frames classify any other failure by the gas it left
+                    // behind: an OOG consumes nearly all forwarded gas, leaving this frame
+                    // with less than 1/64 of its gas, while a genuine logical revert
+                    // refunds what it did not spend. Any failure that leaves this frame
+                    // below the threshold is treated as starvation and re-raised as
+                    // `EstimateGasStarved(gasLeft)` — bubbled by selector above through any
+                    // parent estimation frames to the top-level estimator, forcing the
+                    // estimation up instead of letting the estimator converge on a cheaper
+                    // estimate where the OOG is swallowed.
+                    if lt(gas(), _ESTIMATE_GAS_STARVATION_THRESHOLD) {
+                        mstore(0x00, 0xaf3228d9) // bytes4(keccak256("EstimateGasStarved(uint256)"))
+                        mstore(0x20, gas())
+                        revert(0x1c, 0x24)
+                    }
+                    // `RaiseRevertEstimate` is the estimation twin of an atomic (RaiseRevert)
+                    // sub-batch: a genuine logical revert bubbles its exact returndata and
+                    // rolls the frame back, exactly like RaiseRevert — but the starvation
+                    // check above runs in THIS frame, where only one 1/64 reserve is held,
+                    // instead of in the outer estimation frame where the reserves of both
+                    // frames stack and halve the detectable budget.
+                    if eq(revertFlag, 3) {
+                        revert(add(m, 0x60), returndatasize())
+                    }
                 }
             }
         }

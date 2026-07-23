@@ -50,6 +50,7 @@ import {
   OwnerMismatchError,
 } from "../errors";
 import { _factory } from "../config";
+import { CATAPULTAR_ACCOUNT_VERSION } from "../bytecode/catapultar";
 
 /**
  * `keccak256("Replay(address account,bytes32 payload)")` — the envelope tag the
@@ -131,7 +132,7 @@ export class CatapultarAccount<
       owner,
       chainId,
       name = "Catapultar",
-      version = "0.1.0",
+      version = CATAPULTAR_ACCOUNT_VERSION,
       client,
       rpc,
     } = options;
@@ -226,6 +227,7 @@ export class CatapultarAccount<
       account: new CatapultarAccount<O, false>({
         address: derivedAddress,
         owner: options.owner,
+        version: options.version,
       }),
     };
   }

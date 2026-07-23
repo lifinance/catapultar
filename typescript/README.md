@@ -58,7 +58,7 @@ Catapultar is offline by default — it can build, hash, and sign everything wit
 - EIP-1271 signature validation
 - Reading owner / approved digests / upgradeability from the account.
 
-Accounts default to the `0.1.0` EIP-712 domain version (matching the deployed
+Accounts default to the `0.1.1` EIP-712 domain version (matching the deployed
 Catapultar contract); pass `version` to the account constructor to override it.
 
 For the common single-wallet case, `CatapultarTx` already signs and broadcasts a
@@ -78,13 +78,9 @@ type Signable = {
     chainId?: bigint;
     verifyingContract: `0x${string}`;
   };
-  types: {
-    /** Universal typed const */
-  };
+  types: { /** Universal typed const */ };
   primaryType: string;
-  message: {
-    /** Typed Message */
-  };
+  message: { /** Typed Message */ };
 };
 ```
 
@@ -98,12 +94,8 @@ type EthersSignable = {
     chainId?: bigint;
     verifyingContract: `0x${string}`;
   };
-  types: {
-    /** Universal typed const */
-  };
-  data: {
-    /** Typed Message */
-  };
+  types: { /** Universal typed const */ };
+  data: { /** Typed Message */ };
 };
 ```
 
@@ -216,6 +208,104 @@ await viemWalletClient.sendTransaction({
   account,
   ...call, // unpack call into viem.
 });
+```
+
+### EstimateGas Preflight
+
+`ExecutionMode.EstimateGas` is intended for simulation. It classifies a failed
+call by the gas it leaves behind: an OOG consumes nearly all forwarded gas,
+while a genuine logical revert refunds what it did not spend. A failure that
+leaves the frame below the starvation threshold (262,144 gas) is re-raised as
+`EstimateGasStarved(gasLeft)`; any other failure is skipped and logged. A
+parent EstimateGas frame recognizes the `EstimateGasStarved` selector in a
+failure's returndata and bubbles it unchanged — propagation between
+EstimateGas frames does not depend on remaining gas, so the OOG signal reaches
+the top-level estimator from any nesting depth, forcing the estimation up
+instead of letting it converge on a cheaper estimate where the OOG is
+swallowed.
+
+The selector is intentionally treated as a signal rather than authenticated as
+coming from a Catapultar child frame. A callee can therefore return the exact
+36-byte `EstimateGasStarved(uint256)` error itself. This cannot change state or
+damage the account because the mode is used only for simulation; it can only
+make the estimate more conservative or prevent the RPC from finding an
+automatic estimate. Allowing the signal can also be beneficial: a nested or
+gas-sensitive integration can use it to report that its current gas allowance
+is unsafe even when an intermediate contract would otherwise wrap or swallow
+the underlying failure. Callers can fall back to a manually selected gas limit
+if a target emits the signal unconditionally.
+
+`MetaCatapultarTx.estimateGas` builds
+an estimation twin of the meta transaction: the outer mode and skip-policy
+sub-batch modes (SkipRevert, SkipRevertMultiChain) are swapped to their
+EstimateGas counterparts; atomic (RaiseRevert, or unset) sub-batches become
+RaiseRevertEstimate, which bubbles failures exactly like RaiseRevert but runs
+the starvation check inside the frame itself. Their on-chain rollback
+semantics hold: a failing atomic sub-batch bubbles its exact revert data and
+rolls back its partial state before the outer frame skips it — later
+sub-batches simulate against the same state the broadcast would see — and is
+priced at the gas it burns before failing. An OOG anywhere within the
+threshold's bounds (below) reverts the whole estimation, forcing the estimator
+up.
+Trade-off: a sub-batch that fails at estimation but succeeds at relay (state
+changed in between) is priced only up to its failure point, leaving its
+remaining calls unpriced — a divergence no fixed margin can bound.
+Re-estimate close to broadcast if your atomic sub-batches can flip from
+failing to succeeding. Only SkipRevert-outer meta transactions can be
+estimated this way.
+
+Bounds of the threshold: the estimate carries the threshold as headroom past
+each genuinely failing skip call (the frame must stay above it for the failure
+to be skipped), and under the EIP-150 63/64 rule the gas check captures OOGs
+at frame budgets up to 64 times the threshold — an OOG consumes everything
+forwarded, leaving the frame its `budget / 64` reserve, which must stay below
+the threshold — at the 262,144 (2^18) threshold that is 16,777,216, exactly
+Ethereum's EIP-7825 per-transaction cap (2^24). Every estimation-twin frame —
+EstimateGas and RaiseRevertEstimate alike — classifies its own failures with a
+single reserve held, and parents bubble the typed error by selector, so the
+bound holds per frame at any nesting depth.
+
+With `useCodeOverride`, the bundled Catapultar account runtime code is injected
+at the account address unless `overrideCode` or `overrideCodeAddress` is
+provided. Estimation is always sent from the account address itself and uses
+Catapultar's unsigned self-call authorization path, so no signer is required.
+Code-override estimates run without the clone's delegatecall frame, so
+`estimateGas` adds a proportional 10% margin (`applyCodeOverrideMargin`,
+covering EIP-150 frame retention) to them automatically. The returned
+estimate still excludes signature validation, the signature's calldata, and
+the EIP-712 digest hashing — apply `applyEstimateGasMargin` before using it
+as a relay gas limit.
+
+That margin is owner-type-aware: a flat overhead from
+`SIGNED_PATH_GAS_OVERHEAD`, which by default assumes the chain has no RIP-7212
+P256 precompile, so `p256` / `webauthn-p256` validation runs through Solady's
+~300k-gas fallback verifier (over-provisioned gas is refunded on precompile
+chains; pass `{ p256Precompile: true }` for the tighter analytic table).
+`ecdsa` means an EOA owner — an ERC-1271 smart-contract owner shares that wire
+type but its `isValidSignature` cost is unknowable to the SDK, so supply it
+via `{ signatureValidationGas }`. These are tested policy defaults, not
+bounds: they do not cover nested Catapultar self-calls or estimation-vs-relay
+state divergence.
+
+```typescript
+import {
+  MetaCatapultarTx,
+  ExecutionMode,
+  applyEstimateGasMargin,
+} from "catapultar";
+
+const metaTx = new MetaCatapultarTx({ account: connectedAccount })
+  .setMode(ExecutionMode.SkipRevert) // outer mode; SkipRevert is the default
+  .addCalls(
+    { calls: batchA, mode: ExecutionMode.RaiseRevert },
+    { calls: batchB, mode: ExecutionMode.SkipRevert },
+  );
+
+const estimate = await metaTx.estimateGas({ useCodeOverride: true });
+const gas = applyEstimateGasMargin(estimate, connectedAccount.owner);
+
+const signedTx = await (await metaTx.asCatapultarTx()).sign(signFn);
+await walletClient.sendTransaction({ ...(await signedTx.asCall()), gas });
 ```
 
 ### Embed

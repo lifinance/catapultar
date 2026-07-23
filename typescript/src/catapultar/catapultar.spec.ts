@@ -1,28 +1,28 @@
-import { privateKeyToAccount, type PrivateKeyAccount } from "viem/accounts";
+import { privateKeyToAccount } from "viem/accounts";
 import { random, asHex } from "../utils/helpers";
 import { CatapultarTx, MetaCatapultarTx } from "./catapultar";
-import {
-  ExecutionMode,
-  type Owner,
-  type OwnerType,
-  type WebAuthnSignature,
-} from "../types/types";
+import { ExecutionMode, type Owner, type OwnerType } from "../types/types";
 import { anvil } from "viem/chains";
 import {
   createPublicClient,
   createWalletClient,
-  hashTypedData,
+  decodeAbiParameters,
+  decodeFunctionData,
   http,
-  sha256,
-  stringToBytes,
+  parseAbiParameters,
+  type PublicClient,
 } from "viem";
-import { Base64, P256 } from "ox";
 import { CatapultarAccount } from "./account";
+import { makeOwnerSigner } from "../../test/signers";
 import { rpcUrl } from "../../test/setup";
 import { defaultFactory } from "../config";
 import { PUBLIC_DEFAULT_ANVIL_ACCOUNT_0 } from "../../test/fixtures";
+import CATAPULTAR_ABI from "../abi/catapultar";
+import { CATAPULTAR_ACCOUNT_RUNTIME_CODE } from "../bytecode/catapultar";
+import { applyCodeOverrideMargin } from "./gas";
 
 const chainId = 31337;
+const anvilAccountVersion = "0.1.0";
 
 async function waitForTransaction(hash: `0x${string}`) {
   await new Promise((resolve) => setTimeout(resolve, 50));
@@ -57,13 +57,13 @@ describe("Catapultar", () => {
           address: "0x1111111111111111111111111111111111111111",
           chainId: 1,
           owner: { type: "ecdsa", address },
-          version: "0.1.0",
+          version: "0.1.1",
         },
       });
 
       const domainSeparator = tx.account.getDomainSeparator();
       expect(domainSeparator.name).toBe("Catapultar");
-      expect(domainSeparator.version).toBe("0.1.0");
+      expect(domainSeparator.version).toBe("0.1.1");
       expect(domainSeparator.chainId).toBe(1);
       expect(domainSeparator.verifyingContract).toBe(
         "0x1111111111111111111111111111111111111111",
@@ -74,14 +74,14 @@ describe("Catapultar", () => {
           address: "0x1111111111111111111111111111111111111112",
           chainId: 2,
           owner: { type: "ecdsa", address },
-          version: "0.1.0",
+          version: "0.1.1",
           name: "Catapulting",
         },
       });
 
       const domainSeparatorNext = txNext.account.getDomainSeparator();
       expect(domainSeparatorNext.name).toBe("Catapulting");
-      expect(domainSeparatorNext.version).toBe("0.1.0");
+      expect(domainSeparatorNext.version).toBe("0.1.1");
       expect(domainSeparatorNext.chainId).toBe(2);
       expect(domainSeparatorNext.verifyingContract).toBe(
         "0x1111111111111111111111111111111111111112",
@@ -214,6 +214,161 @@ describe("Catapultar", () => {
       expect(opDataWithCompactSignature.startsWith("0x")).toBe(true);
       expect(opDataWithCompactSignature.length).toBe(2 + 192);
     });
+
+    it.concurrent(
+      "estimates the meta tx with every mode mirrored to its estimation twin and no signer",
+      async () => {
+        const ownerAccount = privateKeyToAccount(random(32));
+        const estimateArgs: unknown[] = [];
+        const getCodeArgs: unknown[] = [];
+        const fakeClient = {
+          getCode: async (args: unknown) => {
+            getCodeArgs.push(args);
+            return "0x6000" as `0x${string}`;
+          },
+          estimateGas: async (args: unknown) => {
+            estimateArgs.push(args);
+            return 123n;
+          },
+        };
+        const account = new CatapultarAccount({
+          address: random(20),
+          chainId: 1,
+          owner: { type: "ecdsa", address: ownerAccount.address },
+        }).connect(fakeClient as unknown as PublicClient);
+        const nonceBase = BigInt(random(31)) << 8n;
+        const metaTx = new MetaCatapultarTx({
+          account,
+          outerNonce: nonceBase,
+          innerNonce: nonceBase + 1n,
+        })
+          .setMode(ExecutionMode.SkipRevert)
+          .addCalls(
+            {
+              calls: [{ to: random(20), value: 0n, data: "0x" }],
+              mode: ExecutionMode.RaiseRevert,
+            },
+            {
+              calls: [{ to: random(20), value: 0n, data: "0x" }],
+              mode: ExecutionMode.SkipRevert,
+            },
+            // No mode: mirrored like RaiseRevert in the twin.
+            {
+              calls: [{ to: random(20), value: 0n, data: "0x" }],
+            },
+            {
+              calls: [{ to: random(20), value: 0n, data: "0x" }],
+              mode: ExecutionMode.SkipRevertMultiChain,
+            },
+          );
+
+        const gas = await metaTx.estimateGas({ useCodeOverride: true });
+
+        // 123n from the fake client plus the ceiling-rounded 10% override margin.
+        expect(gas).toBe(applyCodeOverrideMargin(123n));
+        expect(gas).toBe(136n);
+        // The source object is not mutated.
+        expect(metaTx.mode).toBe(ExecutionMode.SkipRevert);
+        expect(metaTx.calls.map((c) => c.mode)).toEqual([
+          ExecutionMode.RaiseRevert,
+          ExecutionMode.SkipRevert,
+          undefined,
+          ExecutionMode.SkipRevertMultiChain,
+        ]);
+        expect(getCodeArgs).toEqual([]);
+        expect(estimateArgs).toHaveLength(1);
+
+        const estimate = estimateArgs[0] as {
+          account: `0x${string}`;
+          data: `0x${string}`;
+          stateOverride: { address: `0x${string}`; code: `0x${string}` }[];
+        };
+        expect(estimate.account).toBe(account.address);
+        expect(estimate.stateOverride).toEqual([
+          { address: account.address, code: CATAPULTAR_ACCOUNT_RUNTIME_CODE },
+        ]);
+
+        const decoded = decodeFunctionData({
+          abi: CATAPULTAR_ABI,
+          data: estimate.data,
+        });
+        expect(decoded.functionName).toBe("execute");
+        expect(decoded.args[0]).toBe(ExecutionMode.EstimateGas);
+        const [innerCalls, opData] = decodeAbiParameters(
+          parseAbiParameters(
+            "(address to, uint256 value, bytes data)[] calls, bytes opData",
+          ),
+          decoded.args[1] as `0x${string}`,
+        );
+        // Unsigned self-call: opData is the bare 32-byte outer nonce.
+        expect(opData.length).toBe(2 + 64);
+
+        // Sub-batches are self-calls; skip-policy modes are mirrored to
+        // EstimateGas and atomic (RaiseRevert/unset) sub-batches to
+        // RaiseRevertEstimate — bubbling like RaiseRevert so their rollback
+        // semantics hold, with the starvation check run inside the frame.
+        expect(innerCalls).toHaveLength(4);
+        const innerModes = innerCalls.map((call) => {
+          expect(call.to.toLowerCase()).toBe(account.address.toLowerCase());
+          const inner = decodeFunctionData({
+            abi: CATAPULTAR_ABI,
+            data: call.data,
+          });
+          expect(inner.functionName).toBe("execute");
+          return inner.args[0];
+        });
+        expect(innerModes).toEqual([
+          ExecutionMode.RaiseRevertEstimate,
+          ExecutionMode.EstimateGas,
+          ExecutionMode.RaiseRevertEstimate,
+          ExecutionMode.EstimateGasMultiChain,
+        ]);
+
+        // Without an override the raw estimate passes through unchanged (the
+        // deployed proxy hop is already in the trace) and no stateOverride is
+        // sent.
+        expect(await metaTx.estimateGas()).toBe(123n);
+        expect(estimateArgs).toHaveLength(2);
+        expect(estimateArgs[1]).not.toHaveProperty("stateOverride");
+
+        // overrideCode alone implies the override — and its margin.
+        expect(await metaTx.estimateGas({ overrideCode: "0x6001" })).toBe(
+          applyCodeOverrideMargin(123n),
+        );
+        expect(
+          (estimateArgs[2] as { stateOverride: unknown }).stateOverride,
+        ).toEqual([{ address: account.address, code: "0x6001" }]);
+
+        // overrideCodeAddress alone implies the override too, reading the
+        // code from the given address.
+        expect(
+          await metaTx.estimateGas({ overrideCodeAddress: random(20) }),
+        ).toBe(applyCodeOverrideMargin(123n));
+        expect(getCodeArgs).toHaveLength(1);
+        expect(
+          (estimateArgs[3] as { stateOverride: unknown }).stateOverride,
+        ).toEqual([{ address: account.address, code: "0x6000" }]);
+      },
+    );
+
+    it.concurrent(
+      "refuses to estimate a RaiseRevert-outer meta tx",
+      async () => {
+        const ownerAccount = privateKeyToAccount(random(32));
+        const account = new CatapultarAccount({
+          address: random(20),
+          chainId: 1,
+          owner: { type: "ecdsa", address: ownerAccount.address },
+        }).connect({} as PublicClient);
+        const metaTx = new MetaCatapultarTx({ account })
+          .setMode(ExecutionMode.RaiseRevert)
+          .addCalls({ calls: [{ to: random(20), value: 0n, data: "0x" }] });
+
+        await expect(metaTx.estimateGas()).rejects.toThrow(
+          "requires a SkipRevert outer mode",
+        );
+      },
+    );
   });
 
   describe("Meta Transactions", () => {
@@ -279,49 +434,6 @@ describe("Catapultar", () => {
     });
   });
 
-  function p256signFunction(privateKey: `0x${string}`) {
-    return async (...args: Parameters<typeof hashTypedData>) => {
-      const payload = hashTypedData(...args);
-      const signedPayload = P256.sign({ payload, privateKey });
-      return `0x${asHex(signedPayload.r, 32, "")}${asHex(signedPayload.s, 32, "")}` as `0x${string}`;
-    };
-  }
-
-  function webAuthnSignFunction(privateKey: `0x${string}`) {
-    return async (...args: Parameters<typeof hashTypedData>) => {
-      const payload = hashTypedData(...args); // ABI.encoded hash of typedData.
-      const clientDataJson = {
-        type: "webauthn.get",
-        challenge: Base64.fromHex(payload, { url: true, pad: false }),
-        origin: "http://localhost:3000",
-      };
-      const clientDataJsonString = JSON.stringify(clientDataJson);
-      const typeIndex = clientDataJsonString.indexOf('"type":');
-      const challengeIndex = clientDataJsonString.indexOf('"challenge":');
-
-      const rpIdHash = sha256(stringToBytes("localhost"));
-      const flags = "01"; // UUP ‑ user present
-      const counter = "00000001";
-      const authenticatorData = (rpIdHash + flags + counter) as `0x${string}`;
-
-      const clientHash = sha256(stringToBytes(clientDataJsonString));
-      const messageHash = sha256(
-        (authenticatorData + clientHash.replace("0x", "")) as `0x${string}`,
-      );
-
-      const signedMessage = P256.sign({ payload: messageHash, privateKey });
-
-      const webAuthnSignature: WebAuthnSignature = {
-        authenticatorData,
-        clientDataJSON: clientDataJsonString,
-        challengeIndex,
-        typeIndex,
-        ...signedMessage,
-      };
-      return webAuthnSignature;
-    };
-  }
-
   const integrationTest = (ownerType: OwnerType) =>
     describe(`Integration ${ownerType}`, () => {
       const publicClient = createPublicClient({
@@ -329,23 +441,7 @@ describe("Catapultar", () => {
         transport: http(rpcUrl()),
       });
 
-      const privateKey =
-        ownerType === "ecdsa" ? random(32) : P256.randomPrivateKey();
-      const p256PubKey = (privateKey: `0x${string}`) => {
-        const { x, y } = P256.getPublicKey({ privateKey });
-        return { x: asHex(x, 32, "0x"), y: asHex(y, 32, "0x") };
-      };
-      const signer =
-        ownerType === "ecdsa"
-          ? privateKeyToAccount(privateKey)
-          : ownerType === "p256"
-            ? { signTypedData: p256signFunction(privateKey) }
-            : { signTypedData: webAuthnSignFunction(privateKey) };
-
-      const owner: Owner =
-        ownerType === "ecdsa"
-          ? { type: "ecdsa", address: (signer as PrivateKeyAccount).address }
-          : { type: ownerType, ...p256PubKey(privateKey) };
+      const { owner, signTypedData } = makeOwnerSigner(ownerType);
 
       const oftenTargetAddress = random(20); // This is acting as a random address.
 
@@ -363,6 +459,7 @@ describe("Catapultar", () => {
           owner,
           salt: `0x${asHex(0n, 20)}${random(12).replace("0x", "")}`,
           factory: defaultFactory,
+          version: anvilAccountVersion,
         });
         deployedAccountV010 = deployCall010.account.connectRpc({
           chainId,
@@ -402,7 +499,7 @@ describe("Catapultar", () => {
               value,
               data: "0x",
             })
-            .sign((...args) => signer.signTypedData(...args))
+            .sign((...args) => signTypedData(...args))
         ).asCall();
 
         const executionTransaction = await executor.sendTransaction(calldata);
@@ -450,10 +547,12 @@ describe("Catapultar", () => {
             .setMode(ExecutionMode.SkipRevert)
             .addCalls(...calls)
             .asCatapultarTx()
-        ).sign((...args) => signer.signTypedData(...args));
+        ).sign((...args) => signTypedData(...args));
 
-        await executor.sendTransaction(await signedTx.asCall());
-        // await waitForTransaction(executionTransaction);
+        const executionTransaction = await executor.sendTransaction(
+          await signedTx.asCall(),
+        );
+        await waitForTransaction(executionTransaction);
 
         await Promise.all(
           targets.map(async (address) =>
@@ -483,7 +582,7 @@ describe("Catapultar", () => {
             .setRandomNonce()
             .setMode(ExecutionMode.RaiseRevert)
             .addCall(...invalidateCall)
-            .sign((...args) => signer.signTypedData(...args))
+            .sign((...args) => signTypedData(...args))
         ).asCall();
         let executionTransaction = await executor.sendTransaction(calldata);
         await waitForTransaction(executionTransaction);
@@ -502,7 +601,7 @@ describe("Catapultar", () => {
             .setRandomNonce()
             .setMode(ExecutionMode.RaiseRevert)
             .addCall(...invalidateCall)
-            .sign((...args) => signer.signTypedData(...args))
+            .sign((...args) => signTypedData(...args))
         ).asCall();
         executionTransaction = await executor.sendTransaction(calldata);
         await waitForTransaction(executionTransaction);
@@ -534,6 +633,7 @@ describe("Catapultar", () => {
         owner,
         salt: `0x${asHex(0n, 20)}${random(12).replace("0x", "")}`,
         factory: defaultFactory,
+        version: anvilAccountVersion,
       });
       const account = deployCall.account.connectRpc({ chainId, rpc: rpcUrl() });
       await waitForTransaction(

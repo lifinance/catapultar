@@ -18,7 +18,7 @@ import { LibCalls } from "./libs/LibCalls.sol";
 /**
  * @title For throwing transactions into the mempool – Catapultar
  * @author Alexander @ LIFI (https://li.fi)
- * @custom:version 0.1.0
+ * @custom:version 0.1.1
  * @notice Batch executing smart account with ECDSA and ERC1271 signature validation logic.
  * This batch execution account supports ERC-7821 interfaces and supports the failure mode flag 01.
  * If provided, each call in a batch will be tried individually and the contract emits a event with the revert data.
@@ -77,7 +77,7 @@ contract Catapultar is ERC7821LIFI, EIP712, BitmapNonce, KeyedOwnable, Initializ
 
     function _domainNameAndVersion() internal pure override returns (string memory name, string memory version) {
         name = "Catapultar";
-        version = "0.1.0";
+        version = "0.1.1";
     }
 
     /**
