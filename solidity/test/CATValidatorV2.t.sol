@@ -382,7 +382,27 @@ contract CATValidatorV2Test is Test {
         bytes32 validationProgramHash,
         bytes32 paramsHash
     ) internal view returns (bytes memory signature) {
-        bytes32[] memory allowanceHashes = new bytes32[](0);
+        return signedEntryArgs(target, nonce, new AllowanceSpend[](0), outcomes, validationProgramHash, paramsHash);
+    }
+
+    function signedEntryArgs(
+        CATValidatorV2 target,
+        uint256 nonce,
+        AllowanceSpend[] memory allowances,
+        Outcome[] memory outcomes,
+        bytes32 validationProgramHash,
+        bytes32 paramsHash
+    ) internal view returns (bytes memory signature) {
+        bytes32[] memory allowanceHashes = new bytes32[](allowances.length);
+        for (uint256 i; i < allowances.length; ++i) {
+            allowanceHashes[i] = keccak256(
+                abi.encode(
+                    keccak256(bytes("Allowance(address token,uint256 amount)")),
+                    allowances[i].token,
+                    allowances[i].allocated
+                )
+            );
+        }
         bytes32[] memory outputHashes = new bytes32[](outcomes.length);
         for (uint256 i; i < outcomes.length; ++i) {
             outputHashes[i] = keccak256(
@@ -537,5 +557,69 @@ contract CATValidatorV2Test is Test {
 
         assertFalse(echoValidator.spentNonces(signer, 1), "nonce must remain unspent after validation failure");
         assertEq(token.balanceOf(signer), 5 ether, "funds untouched after validation failure");
+    }
+
+    /* ─────────────────────────── Zenith 6.2.1: failed balanceOf
+    reads
+    ─────────────────────────── */
+
+    function test_entry_outcomeBalanceOfFailureReverts() external {
+        // A token whose balanceOf reverts must not read as a zero balance:
+        // a zero read can be flipped into a passing outcome check once the
+        // token starts answering again.
+        address badToken = address(new RevertingBalanceOf());
+        Outcome[] memory outcomes = new Outcome[](1);
+        outcomes[0] = Outcome({ token: badToken, amount: 0, destination: makeAddr("destination") });
+        bytes memory sig = signedEntryArgs(validator, 1, outcomes, bytes32(0), bytes32(0));
+
+        vm.prank(executor);
+        vm.expectRevert(abi.encodeWithSelector(CATValidatorV2.BalanceOfFailed.selector, badToken));
+        validator.entry(
+            makeAddr("target"),
+            hex"",
+            signer,
+            1,
+            new AllowanceSpend[](0),
+            outcomes,
+            bytes32(0),
+            bytes32(0),
+            hex"",
+            new bytes[](0),
+            sig
+        );
+    }
+
+    function test_entry_balanceOfSpendFailureReverts() external {
+        // The SPEND_BALANCE_OF_MAGIC spend reads the signer's balance; a failed
+        // read must revert instead of spending zero.
+        address badToken = address(new RevertingBalanceOf());
+        AllowanceSpend[] memory allowances = new AllowanceSpend[](1);
+        allowances[0] = AllowanceSpend({ token: badToken, allocated: type(uint256).max, spend: 1 << 255 });
+        Outcome[] memory outcomes = new Outcome[](0);
+        bytes memory sig = signedEntryArgs(validator, 1, allowances, outcomes, bytes32(0), bytes32(0));
+
+        vm.prank(executor);
+        vm.expectRevert(abi.encodeWithSelector(CATValidatorV2.BalanceOfFailed.selector, badToken));
+        validator.entry(
+            makeAddr("target"),
+            hex"",
+            signer,
+            1,
+            allowances,
+            outcomes,
+            bytes32(0),
+            bytes32(0),
+            hex"",
+            new bytes[](0),
+            sig
+        );
+    }
+}
+
+contract RevertingBalanceOf {
+    function balanceOf(
+        address
+    ) external pure returns (uint256) {
+        revert("balanceOf reverted");
     }
 }

@@ -70,6 +70,7 @@ contract CATValidatorV2 is EIP712, ReentrancyGuard {
     /// nearly all remaining gas regardless, so `gas: 0` would leave the
     /// validation staticcall effectively unbounded instead of bounded.
     error InvalidValidationGasCap();
+    error BalanceOfFailed(address token);
 
     address public immutable CALL_PROXY;
     /// @notice The canonical VirtualMachine executing committed validation
@@ -250,6 +251,17 @@ contract CATValidatorV2 is EIP712, ReentrancyGuard {
         if (!SignatureCheckerLib.isValidSignatureNowCalldata(account, digest, signature)) revert BadSignature();
     }
 
+    /// @dev Calls token.balanceOf(account). Reverts with BalanceOfFailed if the call
+    /// fails or returns fewer than 32 bytes, instead of silently returning zero.
+    function _safeBalanceOf(
+        address token,
+        address account
+    ) private view returns (uint256 bal) {
+        bool implemented;
+        (implemented, bal) = SafeTransferLib.checkBalanceOf(token, account);
+        if (!implemented) revert BalanceOfFailed(token);
+    }
+
     /**
      * @notice Wraps balanceOf call for ERC20 tokens and natives.
      * @param account Fallback address for to read if outcome.destination is 0.
@@ -260,7 +272,7 @@ contract CATValidatorV2 is EIP712, ReentrancyGuard {
         Outcome calldata outcome
     ) internal view returns (uint256 bal) {
         address destination = outcome.destination == address(0) ? account : outcome.destination;
-        bal = outcome.token == address(0) ? destination.balance : SafeTransferLib.balanceOf(outcome.token, destination);
+        bal = outcome.token == address(0) ? destination.balance : _safeBalanceOf(outcome.token, destination);
     }
 
     /**
@@ -313,9 +325,8 @@ contract CATValidatorV2 is EIP712, ReentrancyGuard {
         for (uint256 i = 0; i < allowances.length; ++i) {
             AllowanceSpend calldata allowance = allowances[i];
 
-            uint256 spend = allowance.spend == SPEND_BALANCE_OF_MAGIC
-                ? SafeTransferLib.balanceOf(allowance.token, source)
-                : allowance.spend;
+            uint256 spend =
+                allowance.spend == SPEND_BALANCE_OF_MAGIC ? _safeBalanceOf(allowance.token, source) : allowance.spend;
             if (allowance.allocated < spend) revert AllocationTooSmall(allowance.allocated, spend);
 
             SafeTransferLib.safeTransferFrom(allowance.token, source, destination, spend);
