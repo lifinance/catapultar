@@ -12,7 +12,7 @@ import { CatapultarFactory } from "../../src/CatapultarFactory.sol";
 import { KeyedOwnable } from "../../src/libs/KeyedOwnable.sol";
 import { LibCalls } from "../../src/libs/LibCalls.sol";
 import { AllowanceSpend, Outcome } from "../../src/libs/LibExecutionConstraint.sol";
-import { LibValidationVM } from "../../src/libs/LibValidationVM.sol";
+import { VMCommand } from "../../src/libs/LibValidationVM.sol";
 import { ProgramBuilder } from "./ProgramBuilder.sol";
 import { VcTestBase } from "./VcTestBase.sol";
 
@@ -110,7 +110,7 @@ contract IntegrationV2Test is VcTestBase {
     struct Settlement {
         AllowanceSpend[] allowances;
         Outcome[] outcomes;
-        bytes program;
+        VMCommand[] program;
         bytes32[] params;
         bytes fillPayload;
         uint256 nonce;
@@ -244,11 +244,12 @@ contract IntegrationV2Test is VcTestBase {
     /* ─────────────────────────── the pinned compiler program
     ─────────────────────────── */
 
-    /// @notice The compose compiler's pinned `uc1-user-a` body, re-encoded through
-    /// `LibValidationVM.encodeRunVM` with the fixture's own register file (the
-    /// earlier `params ++ [account] ++ preBalances` layout), runs its whole
-    /// read, RPN and assert pipeline on the canonical VM and fails only on its
-    /// business invariants: first the WETH floor, then the USDC threshold.
+    /// @notice The compose compiler's pinned `uc1-user-a` `runVM` calldata, with the
+    /// fixture's own register file (the earlier `params ++ [account] ++
+    /// preBalances` layout), runs its whole read, RPN and assert pipeline on the
+    /// canonical VM and fails only on its business invariants: first the WETH
+    /// floor, then the USDC threshold. `HashParity.t.sol` proves this calldata is
+    /// the `runVM` encoding of the fixture's commands and registers.
     function test_uc1Fixture_failsOnlyOnItsInvariants() external onlyFork {
         bytes memory payload = _uc1Payload();
 
@@ -287,7 +288,7 @@ contract IntegrationV2Test is VcTestBase {
     function rateProgram(
         uint256 numerator,
         uint256 denominator
-    ) internal pure returns (bytes memory program, bytes32[] memory params) {
+    ) internal pure returns (VMCommand[] memory program, bytes32[] memory params) {
         // regValues = [spent[0], num, den]; RPN: push 0, push 1, MUL, push 2, DIV_UP.
         bytes memory rpn = abi.encodePacked(
             ProgramBuilder.RPN_PUSH | 0,
@@ -313,28 +314,27 @@ contract IntegrationV2Test is VcTestBase {
         );
         bytes memory bpAssert = abi.encodePacked(ProgramBuilder.bpStatic(R_PAID_0), ProgramBuilder.bpStatic(R_MIN_OUT));
 
-        program = abi.encodePacked(
-            ProgramBuilder.cmd(
-                ProgramBuilder.OP_CALLDATA_BUILD,
-                ProgramBuilder.packCallDataBuild(ProgramBuilder.SEL_EVALUATE_RPN, R_RPN_CALLDATA, bpRpn)
-            ),
-            ProgramBuilder.cmd(
-                ProgramBuilder.OP_CALL,
-                ProgramBuilder.packCall(
-                    ARITHMETIC_PROCESSOR, ProgramBuilder.CALLTYPE_STATICCALL, R_MIN_OUT, R_RPN_CALLDATA, 0
-                )
-            ),
-            ProgramBuilder.cmd(
-                ProgramBuilder.OP_CALLDATA_BUILD,
-                ProgramBuilder.packCallDataBuild(ProgramBuilder.SEL_ASSERT_GTE, R_ASSERT_CALLDATA, bpAssert)
-            ),
-            ProgramBuilder.cmd(
-                ProgramBuilder.OP_CALL,
-                ProgramBuilder.packCall(
-                    INVARIANT_CHECKER, ProgramBuilder.CALLTYPE_STATICCALL, R_VOID, R_ASSERT_CALLDATA, 0
-                )
+        program = new VMCommand[](4);
+        program[0] = VMCommand({
+            op: ProgramBuilder.OP_CALLDATA_BUILD,
+            data: ProgramBuilder.packCallDataBuild(ProgramBuilder.SEL_EVALUATE_RPN, R_RPN_CALLDATA, bpRpn)
+        });
+        program[1] = VMCommand({
+            op: ProgramBuilder.OP_CALL,
+            data: ProgramBuilder.packCall(
+                ARITHMETIC_PROCESSOR, ProgramBuilder.CALLTYPE_STATICCALL, R_MIN_OUT, R_RPN_CALLDATA, 0
             )
-        );
+        });
+        program[2] = VMCommand({
+            op: ProgramBuilder.OP_CALLDATA_BUILD,
+            data: ProgramBuilder.packCallDataBuild(ProgramBuilder.SEL_ASSERT_GTE, R_ASSERT_CALLDATA, bpAssert)
+        });
+        program[3] = VMCommand({
+            op: ProgramBuilder.OP_CALL,
+            data: ProgramBuilder.packCall(
+                INVARIANT_CHECKER, ProgramBuilder.CALLTYPE_STATICCALL, R_VOID, R_ASSERT_CALLDATA, 0
+            )
+        });
     }
 
     /* ─────────────────────────── settlement harness
@@ -370,7 +370,7 @@ contract IntegrationV2Test is VcTestBase {
             s.outcomes,
             executor,
             s.nonce,
-            keccak256(s.program),
+            hashProgram(s.program),
             hashParams(s.params)
         );
 
@@ -417,13 +417,10 @@ contract IntegrationV2Test is VcTestBase {
         );
     }
 
-    /// @dev `runVM` calldata for the fixture's `uc1-user-a` body and register
-    /// file, checked against the compiler's pinned calldata.
-    function _uc1Payload() internal view returns (bytes memory payload) {
-        bytes memory body = vm.parseJsonBytes(json, ".programVectors[0].canonicalBody");
-        bytes[] memory registers = vm.parseJsonBytesArray(json, ".programVectors[0].registers");
-        payload = this.exposedEncodeRunVM(body, registers);
-        assertEq(payload, vm.parseJsonBytes(json, ".programVectors[0].calldata"), "uc1 re-encoding drifted");
+    /// @dev The compiler's pinned `runVM` calldata for the fixture's `uc1-user-a`
+    /// commands and register file.
+    function _uc1Payload() internal view returns (bytes memory) {
+        return vm.parseJsonBytes(json, ".programVectors[0].calldata");
     }
 
     /* ─────────────────────────── calldata trampolines
@@ -435,12 +432,5 @@ contract IntegrationV2Test is VcTestBase {
         ERC7821.Call[] calldata calls
     ) external pure returns (bytes32) {
         return LibCalls.typehash(nonce, mode, calls);
-    }
-
-    function exposedEncodeRunVM(
-        bytes calldata body,
-        bytes[] memory registers
-    ) external pure returns (bytes memory) {
-        return LibValidationVM.encodeRunVM(body, registers);
     }
 }

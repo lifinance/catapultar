@@ -9,6 +9,7 @@ import {
   type Factory,
   type Outcome,
   type Owner,
+  type ValidationCommand,
   type ValidationCommitment,
 } from "../types/types";
 import { ValidationError } from "../errors";
@@ -35,10 +36,10 @@ export type CatExecuteOptions = {
    */
   validator?: `0x${string}`;
   /**
-   * `CATValidatorV2` only: the committed program body (33 bytes per command).
+   * `CATValidatorV2` only: the committed program, the `runVM` command array.
    * Must hash to the commitment's `validationProgramHash`. Default empty.
    */
-  validationProgram?: `0x${string}`;
+  validationProgram?: readonly ValidationCommand[];
   /**
    * `CATValidatorV2` only: the committed param words, encoded as `bytes32[]`.
    * Must hash to the commitment's `paramsHash`. Default empty.
@@ -282,7 +283,7 @@ export class ConstrainedAssetTransaction {
     spends: AllowanceSpend[];
     outcomes: Outcome[];
     validation?: {
-      validationProgram: `0x${string}`;
+      validationProgram: readonly ValidationCommand[];
       validationParams: `0x${string}`[];
     };
   }): Call {
@@ -331,7 +332,7 @@ export class ConstrainedAssetTransaction {
     const {
       executionTarget,
       executionPayload,
-      validationProgram = "0x",
+      validationProgram = [],
       validationParams = [],
     } = opt;
     const validator = this.resolveValidator(opt.validator);
@@ -398,7 +399,7 @@ export class ConstrainedAssetTransaction {
       spends: allowanceSpends,
       outcomes: refundOutcomes,
       validation: this.validationCommitment && {
-        validationProgram: "0x",
+        validationProgram: [],
         validationParams: [],
       },
     });

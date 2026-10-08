@@ -198,11 +198,21 @@ export const ExecutionConstraintTyped = {
 // Typehashed ExecutionConstraint (CATValidatorV2)
 
 /**
+ * One command of a validation program: an LI.FI VirtualMachine `runVM` command
+ * (`VMCommand` in `LibValidationVM`). `op` is a `uint8` opcode, `data` its
+ * 32-byte argument word.
+ */
+export type ValidationCommand = {
+  op: number;
+  data: `0x${string}`;
+};
+
+/**
  * The commitment that binds a constraint to an LI.FI VirtualMachine validation
- * program: `validationProgramHash` is `keccak256` of the canonical program body,
- * `paramsHash` is `keccak256` of the concatenated 32-byte param words. Zero
- * hashes mean "no program" (and "no params"), which `CATValidatorV2` settles
- * exactly like v1.
+ * program: `validationProgramHash` is `keccak256` of the ABI-encoded command
+ * array, `paramsHash` is `keccak256` of the concatenated 32-byte param words.
+ * Zero hashes mean "no program" (and "no params"), which `CATValidatorV2`
+ * settles exactly like v1.
  */
 export type ValidationCommitment = {
   validationProgramHash: `0x${string}`;

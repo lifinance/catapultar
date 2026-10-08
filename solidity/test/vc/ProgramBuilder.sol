@@ -3,11 +3,10 @@ pragma solidity ^0.8.30;
 
 /**
  * @title ProgramBuilder
- * @notice Test-only helpers that pack validation-program commands exactly as the
- * deployed VirtualMachine expects and concatenate them into the canonical body,
- * 33 bytes per command (`uint8 op ++ bytes32 data`). Paths of the form
- * `vm/src/...` refer to the LI.FI VirtualMachine sources; packing follows
- * `vm/src/CommandPacking.sol`.
+ * @notice Test-only helpers that pack the data words of validation-program
+ * commands exactly as the deployed VirtualMachine expects. A test program is a
+ * `VMCommand[]` built from these words. Paths of the form `vm/src/...` refer to
+ * the LI.FI VirtualMachine sources; packing follows `vm/src/CommandPacking.sol`.
  *
  * The VM sources are never imported: each packer mirrors the layout documented
  * in the referenced `CommandPacking.pack*` function, so a test program is fully
@@ -93,16 +92,8 @@ library ProgramBuilder {
         }
     }
 
-    /* ─────────────────────────── Body assembly
+    /* ─────────────────────────── Blueprint and RPN tokens
     ────────────────────────────── */
-
-    /// @dev One canonical command: op byte followed by the 32-byte data word.
-    function cmd(
-        uint8 op,
-        bytes32 data
-    ) internal pure returns (bytes memory) {
-        return abi.encodePacked(op, data);
-    }
 
     /// @dev Static register token (the register must hold exactly 32 bytes).
     function bpStatic(

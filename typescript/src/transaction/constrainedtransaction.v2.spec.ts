@@ -33,6 +33,7 @@ import {
   hashValidationProgram,
 } from "../protocol/constraint";
 import { ValidationError } from "../errors";
+import type { ValidationCommand } from "../types/types";
 
 const WETH: Hex = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2";
 const DEST: Hex = "0x1111111111111111111111111111111111111111";
@@ -41,8 +42,11 @@ const VALIDATOR: Hex = "0x3333333333333333333333333333333333333333";
 const ACCOUNT: Hex = "0x4444444444444444444444444444444444444444";
 const TARGET: Hex = "0x5555555555555555555555555555555555555555";
 
-// Two 33-byte commands (op ++ bytes32) and two 32-byte param words.
-const PROGRAM: Hex = `0x01${"aa".repeat(32)}02${"bb".repeat(32)}`;
+// Two runVM commands and two 32-byte param words.
+const PROGRAM: ValidationCommand[] = [
+  { op: 1, data: `0x${"aa".repeat(32)}` },
+  { op: 2, data: `0x${"bb".repeat(32)}` },
+];
 const PARAMS: Hex[] = [`0x${"11".repeat(32)}`, `0x${"22".repeat(32)}`];
 const COMMITMENT = {
   validationProgramHash: hashValidationProgram(PROGRAM),
@@ -96,15 +100,15 @@ describe("ConstrainedAssetTransaction v2", () => {
       )!;
       expect(toFunctionSelector(entry)).toBe(
         toFunctionSelector(
-          "entry(address,bytes,address,uint256,(address,uint256,uint256)[],(address,uint256,address)[],bytes,bytes32[],bytes)",
+          "entry(address,bytes,address,uint256,(address,uint256,uint256)[],(address,uint256,address)[],(uint8,bytes32)[],bytes32[],bytes)",
         ),
       );
-      expect(toFunctionSelector(entry)).toBe("0xb82ff7fa");
+      expect(toFunctionSelector(entry)).toBe("0x62551d8f");
     });
 
     it("keeps the inherited 7-argument entry, which shares v1's selector", () => {
       expect(entries.map((i) => toFunctionSelector(i)).sort()).toEqual([
-        "0xb82ff7fa",
+        "0x62551d8f",
         "0xe5ce4787",
       ]);
       const v1Entry = CAT_VALIDATOR_ABI.find(
@@ -121,7 +125,6 @@ describe("ConstrainedAssetTransaction v2", () => {
         "AllocationTooSmall",
         "BadSignature",
         "BadValidationParams",
-        "BadValidationProgram",
         "BalanceOfFailed",
         "InvalidTokenAmount",
         "InvalidVirtualMachine",
@@ -219,7 +222,7 @@ describe("ConstrainedAssetTransaction v2", () => {
       });
       expect(exec.to).toBe(VALIDATOR);
       expect(exec.value).toBe(0n);
-      expect(exec.data.slice(0, 10)).toBe("0xb82ff7fa");
+      expect(exec.data.slice(0, 10)).toBe("0x62551d8f");
       const { functionName, args } = decodeFunctionData({
         abi: CAT_VALIDATOR_V2_ABI,
         data: exec.data,
@@ -316,7 +319,7 @@ describe("ConstrainedAssetTransaction v2", () => {
           },
         ],
         [{ token: WETH, amount: 2000000000000000000n, destination: DEST }],
-        "0x",
+        [],
         [],
         "0x",
       ]);
@@ -333,7 +336,7 @@ describe("ConstrainedAssetTransaction v2", () => {
         abi: CAT_VALIDATOR_V2_ABI,
         data: exec.data,
       });
-      expect(args.slice(6)).toEqual(["0x", [], "0x"]);
+      expect(args.slice(6)).toEqual([[], [], "0x"]);
     });
 
     it("requires an explicit validator", () => {
@@ -362,7 +365,7 @@ describe("ConstrainedAssetTransaction v2", () => {
 
     it("fails closed on program or params that do not match the commitment", () => {
       const cases: {
-        validationProgram?: Hex;
+        validationProgram?: ValidationCommand[];
         validationParams?: Hex[];
         message: RegExp;
       }[] = [
@@ -375,12 +378,12 @@ describe("ConstrainedAssetTransaction v2", () => {
           message: /validationParams.*BadSignature/,
         },
         {
-          validationProgram: `0x03${"cc".repeat(32)}`,
+          validationProgram: [{ op: 3, data: `0x${"cc".repeat(32)}` }],
           validationParams: PARAMS,
           message: /validationProgram.*BadSignature/,
         },
         {
-          validationProgram: `${PROGRAM}00`,
+          validationProgram: [...PROGRAM, { op: 0, data: zeroHash }],
           validationParams: PARAMS,
           message: /validationProgram.*BadSignature/,
         },
@@ -472,7 +475,7 @@ describe("ConstrainedAssetTransaction v2", () => {
     async function deployFundedAccount(
       recipient: Hex,
       validation: {
-        program: Hex;
+        program: ValidationCommand[];
         params: Hex[];
       },
     ) {
@@ -578,7 +581,7 @@ describe("ConstrainedAssetTransaction v2", () => {
       async () => {
         const recipient = random(20);
         const { account, executeCall, amount1, amount2 } =
-          await deployFundedAccount(recipient, { program: "0x", params: [] });
+          await deployFundedAccount(recipient, { program: [], params: [] });
         // A rejecting VM proves the empty program never reaches it.
         await testClient.setCode({
           address: virtualMachine,
@@ -605,7 +608,7 @@ describe("ConstrainedAssetTransaction v2", () => {
         const recipient = random(20);
         const { account, executeCall, amount1 } = await deployFundedAccount(
           recipient,
-          { program: "0x", params: [] },
+          { program: [], params: [] },
         );
         const decoded = decodeFunctionData({
           abi: CAT_VALIDATOR_V2_ABI,
@@ -630,7 +633,7 @@ describe("ConstrainedAssetTransaction v2", () => {
               nonce,
               spends,
               outcomes,
-              "0x",
+              [],
               [PARAMS[0]!],
               "0x",
             ],

@@ -32,7 +32,10 @@ byte-for-byte. Never hand-edit it.
   `canonicalBody` (33 bytes per command: `uint8 op ++ bytes32 data`), the
   `validationProgramHash` (`keccak256(canonicalBody)`), the committed `params`
   (each with its 32-byte ABI `word`), the `canonicalParams` concatenation, and
-  the `paramsHash`.
+  the `paramsHash`. `canonicalBody` and `validationProgramHash` follow the
+  earlier program rule and are superseded: `CATValidatorV2` now takes the
+  `commands` array itself and commits `keccak256(abi.encode(commands))`. No
+  test reads either field until the compiler regenerates the vectors.
 - `paramsVectors[]`: standalone params cases: `empty-params` (hashes to
   `bytes32(0)`: zero when empty), `two-words` (an address word and a uint word),
   and `constants-words` (a `bytes32` RPN program word and a `uint8` operand
@@ -62,22 +65,26 @@ delivery address. Their committed params follow the compiler's order
 `[deliveryAddress] ++ [outcome minAmounts] ++ [invariant thresholds] ++
 [rpnProgram, rpnOpsCount]`, the last pair present when at least one outcome is
 committed. Parity for the current layout is unproven until the compose
-compiler regenerates the vectors against it. The hashes pinned here cover body
-and params encoding only: `keccak256(canonicalBody)`, the params concatenation
-rule, and the `runVM` ABI encoding of a given register file. They say nothing
-about whether a compiled program reads the right register under the current
-layout.
+compiler regenerates the vectors against it. The values checked here cover
+params encoding and the `runVM` ABI encoding of a given command array and
+register file. They say nothing about whether a compiled program reads the
+right register under the current layout, and they do not pin the current
+program hash rule.
 
 ## Who asserts it
 
-- `test/vc/HashParity.t.sol` recomputes every body hash and params hash, checks
-  the decoded `commands` against the body, and re-encodes the `runVM` calldata
-  through `LibValidationVM.encodeRunVM` byte-for-byte. It needs no fork.
-- `test/vc/IntegrationV2.t.sol` executes the `uc1-user-a` program on the
-  canonical VM on a mainnet fork, re-encoded through `encodeRunVM` with the
-  fixture's own register file. It does not settle the fixture program through
+- `test/vc/HashParity.t.sol` recomputes every params hash, and re-encodes the
+  `runVM` calldata from the decoded `commands` and `registers` byte for byte.
+  It also checks that the two uc1 users share one program hash under the
+  current rule. It needs no fork.
+- `test/vc/IntegrationV2.t.sol` executes the `uc1-user-a` pinned `runVM`
+  calldata, with the fixture's own register file, on the canonical VM on a
+  mainnet fork. It does not settle the fixture program through
   `CATValidatorV2.entry()`, because `entry()` builds the current register
   layout and the fixture program reads the earlier one.
+- `test/CATValidatorV2.t.sol` pins the current program hash rule on a vector
+  computed outside both codebases with `cast`; the TS SDK spec pins the same
+  vector.
 
 ## How to regenerate
 

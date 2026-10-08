@@ -4,6 +4,7 @@ import {
   hashStruct,
   hashTypedData,
   keccak256,
+  pad,
   toBytes,
   zeroAddress,
   zeroHash,
@@ -260,6 +261,9 @@ describe("protocol/constraint v2", () => {
   const WETH = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2" as const;
   const USDC = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48" as const;
   const DEST = "0x1111111111111111111111111111111111111111" as const;
+  // Opaque commitment values for the digest vectors below. PROGRAM_HASH is the
+  // uc1 hash of the hash-parity fixture under the earlier tight-packed program
+  // rule; the digest treats it as any other bytes32.
   const PROGRAM_HASH =
     "0xd71a5feb2589caa974cee8d91b3420319fed8975bf2c5cccdf3a42ce10eb3c55" as const;
   const PARAMS_HASH =
@@ -415,11 +419,21 @@ describe("protocol/constraint v2", () => {
     expect(v2).not.toBe(constraintDigest(domain, base));
   });
 
-  it("hashes programs and params like LibValidationVM", () => {
-    const program = `0x01${"aa".repeat(32)}02${"bb".repeat(32)}` as const;
+  it("hashes programs and params like CATValidatorV2", () => {
+    // The same vector `CATValidatorV2.t.sol` pins, computed outside both
+    // codebases: cast keccak $(cast abi-encode "f((uint8,bytes32)[])" "[(8,…0104),(0,…beef)]").
+    const program = [
+      { op: 8, data: pad("0x0104") },
+      { op: 0, data: pad("0xbeef") },
+    ];
     const params = [`0x${"11".repeat(32)}`, `0x${"22".repeat(32)}`] as const;
-    expect(hashValidationProgram("0x")).toBe(zeroHash);
-    expect(hashValidationProgram(program)).toBe(keccak256(program));
+    expect(hashValidationProgram([])).toBe(zeroHash);
+    expect(hashValidationProgram(program)).toBe(
+      "0x6c12f1a4273f6fa591a0943ebadbd27d46496a9090c3ee169da9e3df911845d5",
+    );
+    expect(() =>
+      hashValidationProgram([{ op: 256, data: zeroHash }]),
+    ).toThrow();
     expect(hashValidationParams([])).toBe(zeroHash);
     expect(hashValidationParams([...params])).toBe(keccak256(concat(params)));
     expect(() => hashValidationParams(["0x1234"])).toThrow(ValidationError);

@@ -7,7 +7,7 @@ import { Tstorish } from "tstorish/src/Tstorish.sol";
 import { CATValidator } from "./CATValidator.sol";
 import { AllowanceSpend, Outcome } from "./libs/LibExecutionConstraint.sol";
 import { LibExecutionConstraintV2 } from "./libs/LibExecutionConstraintV2.sol";
-import { LibValidationVM } from "./libs/LibValidationVM.sol";
+import { LibValidationVM, VMCommand, VMState } from "./libs/LibValidationVM.sol";
 
 /**
  * @title Constrained Asset Transaction Validator V2 – C.A.T Validator V2
@@ -21,12 +21,12 @@ import { LibValidationVM } from "./libs/LibValidationVM.sol";
  * `staticcall`. A program that reverts reverts the settlement, so the escrow
  * keeps its funds and can refund.
  *
- * The constraint commits `keccak256` of the program body and `keccak256` of
- * the per-user parameter words through the EIP-712 digest, and therefore
- * through the escrow's counterfactual address. The hashes are derived from the
- * `validationProgram` and `validationParams` calldata, so `entry` takes neither
- * as an argument. An empty program commits `bytes32(0)` and settles exactly as
- * v1, without touching the VirtualMachine.
+ * The constraint commits `keccak256` of the ABI-encoded program commands and
+ * `keccak256` of the per-user parameter words through the EIP-712 digest, and
+ * therefore through the escrow's counterfactual address. The hashes are derived
+ * from the `validationProgram` and `validationParams` calldata, so `entry` takes
+ * neither as an argument. An empty program commits `bytes32(0)` and settles
+ * exactly as v1, without touching the VirtualMachine.
  *
  * The program sees, as registers, the committed params, the escrow address,
  * the spend v1 resolved per allowance (`spent`) and the amount v1 forwarded per
@@ -48,8 +48,6 @@ import { LibValidationVM } from "./libs/LibValidationVM.sol";
  * a V2 escrow signs V2 digests only.
  */
 contract CATValidatorV2 is CATValidator, Tstorish {
-    /// @dev The program body length is not a multiple of 33.
-    error BadValidationProgram();
     /// @dev Params were supplied without a program, or the injected register
     /// prefix would reach the VM's void register.
     error BadValidationParams();
@@ -108,8 +106,8 @@ contract CATValidatorV2 is CATValidator, Tstorish {
      * current balance (v1 semantics). The fill must deliver each outcome token to this
      * contract. When `validationProgram` is non-empty, this contract settles as v1
      * while recording the spends and payments, and then runs the program.
-     * @param validationProgram Canonical program body, 33 bytes per command. Empty
-     * commits `validationProgramHash = 0` and settles exactly as v1.
+     * @param validationProgram The `runVM` command array. Empty commits
+     * `validationProgramHash = 0` and settles exactly as v1.
      * @param validationParams Committed parameter words. Must be empty when the
      * program is empty.
      */
@@ -120,7 +118,7 @@ contract CATValidatorV2 is CATValidator, Tstorish {
         uint256 nonce,
         AllowanceSpend[] calldata allowances,
         Outcome[] calldata outcomes,
-        bytes calldata validationProgram,
+        VMCommand[] calldata validationProgram,
         bytes32[] calldata validationParams,
         bytes calldata signature
     ) external nonReentrant {
@@ -147,15 +145,14 @@ contract CATValidatorV2 is CATValidator, Tstorish {
         if (verified) _runValidation(account, validationProgram, validationParams, spent, _takePaid(outcomes.length));
     }
 
-    /// @dev `bytes32(0)` for an empty body, else `keccak256` of a body that is a
-    /// whole number of commands.
+    /// @dev `bytes32(0)` for an empty program, else `keccak256` of the ABI-encoded
+    /// command array. `abi.encode` of an array of static tuples is canonical, and
+    /// `_runValidation` encodes the same calldata commands for the VM, so the
+    /// hash commits exactly the commands the VM runs.
     function _programHashOf(
-        bytes calldata validationProgram
+        VMCommand[] calldata validationProgram
     ) internal pure returns (bytes32) {
-        uint256 length = validationProgram.length;
-        if (length == 0) return bytes32(0);
-        if (length % LibValidationVM.COMMAND_SIZE != 0) revert BadValidationProgram();
-        return keccak256(validationProgram);
+        return validationProgram.length == 0 ? bytes32(0) : keccak256(abi.encode(validationProgram));
     }
 
     /// @dev Params hash per `LibValidationVM.paramsHashOf`. Params without a
@@ -256,7 +253,7 @@ contract CATValidatorV2 is CATValidator, Tstorish {
      */
     function _runValidation(
         address account,
-        bytes calldata validationProgram,
+        VMCommand[] calldata validationProgram,
         bytes32[] calldata validationParams,
         uint256[] memory spent,
         uint256[] memory paid
@@ -264,8 +261,9 @@ contract CATValidatorV2 is CATValidator, Tstorish {
         if (VIRTUAL_MACHINE.code.length == 0) revert InvalidVirtualMachine();
 
         bytes[] memory registers = LibValidationVM.buildRegisters(validationParams, account, spent, paid);
-        (bool success, bytes memory ret) =
-            VIRTUAL_MACHINE.staticcall(LibValidationVM.encodeRunVM(validationProgram, registers));
+        (bool success, bytes memory ret) = VIRTUAL_MACHINE.staticcall(
+            abi.encodeWithSelector(LibValidationVM.RUN_VM_SELECTOR, validationProgram, VMState(registers))
+        );
         if (!success) revert ValidationFailed(ret);
     }
 

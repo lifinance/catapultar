@@ -27,13 +27,6 @@ contract LibValidationVMHarness {
     ) external pure returns (bytes[] memory) {
         return LibValidationVM.buildRegisters(params, account, spent, paid);
     }
-
-    function encodeRunVM(
-        bytes calldata body,
-        bytes[] memory registers
-    ) external pure returns (bytes memory) {
-        return LibValidationVM.encodeRunVM(body, registers);
-    }
 }
 
 /// @dev Exposes the transient payment record, which must read 0 outside a
@@ -229,38 +222,24 @@ contract CATValidatorV2Test is Test {
         }
     }
 
-    function test_encodeRunVM_roundTrip() external view {
-        bytes memory body = abi.encodePacked(uint8(8), bytes32(uint256(0x0104)), uint8(0), bytes32(uint256(0xBEEF)));
-        bytes[] memory registers =
-            lib.buildRegisters(new bytes32[](0), address(0xA), new uint256[](0), new uint256[](0));
-
-        bytes memory payload = lib.encodeRunVM(body, registers);
-
-        (VMCommand[] memory commands, VMState memory state) = decodeRunVM(payload);
-        assertEq(commands.length, 2);
-        assertEq(commands[0].op, 8);
-        assertEq(commands[0].data, bytes32(uint256(0x0104)));
-        assertEq(commands[1].op, 0);
-        assertEq(commands[1].data, bytes32(uint256(0xBEEF)));
-        assertEq(state.registers.length, 123);
-    }
-
-    function decodeRunVM(
-        bytes memory payload
-    ) internal pure returns (VMCommand[] memory commands, VMState memory state) {
-        assertEq(bytes4(payload), LibValidationVM.RUN_VM_SELECTOR);
-        bytes memory args = new bytes(payload.length - 4);
-        for (uint256 i; i < args.length; ++i) {
-            args[i] = payload[i + 4];
-        }
-        (commands, state) = abi.decode(args, (VMCommand[], VMState));
-    }
-
     /* ─────────────────────────── helpers
     ─────────────────────────── */
 
-    function dummyBody() internal pure returns (bytes memory) {
-        return abi.encodePacked(uint8(8), bytes32(0));
+    function dummyProgram() internal pure returns (VMCommand[] memory program) {
+        program = new VMCommand[](1);
+        program[0] = VMCommand({ op: 8, data: bytes32(0) });
+    }
+
+    function noProgram() internal pure returns (VMCommand[] memory) {
+        return new VMCommand[](0);
+    }
+
+    /// @dev The program hash rule; `test_entry_programHashIsKeccakOfAbiEncodedCommands`
+    /// pins it against an independently computed vector.
+    function hashProgram(
+        VMCommand[] memory program
+    ) internal pure returns (bytes32) {
+        return program.length == 0 ? bytes32(0) : keccak256(abi.encode(program));
     }
 
     function oneOutcome(
@@ -318,14 +297,16 @@ contract CATValidatorV2Test is Test {
     }
 
     function expectedRunVM(
-        bytes memory body,
+        VMCommand[] memory program,
         bytes32[] memory params,
         uint256[] memory spent,
         uint256[] memory paid
     ) internal view returns (bytes memory) {
         return abi.encodeWithSelector(
             CATValidatorV2.ValidationFailed.selector,
-            lib.encodeRunVM(body, lib.buildRegisters(params, signer, spent, paid))
+            abi.encodeWithSelector(
+                LibValidationVM.RUN_VM_SELECTOR, program, VMState(lib.buildRegisters(params, signer, spent, paid))
+            )
         );
     }
 
@@ -386,13 +367,12 @@ contract CATValidatorV2Test is Test {
         bytes memory payload,
         AllowanceSpend[] memory allowances,
         Outcome[] memory outcomes,
-        bytes memory body,
+        VMCommand[] memory program,
         bytes32[] memory params
     ) internal {
-        bytes32 programHash = body.length == 0 ? bytes32(0) : keccak256(body);
-        bytes memory sig = sign(target, 1, allowances, outcomes, programHash, hashParams(params));
+        bytes memory sig = sign(target, 1, allowances, outcomes, hashProgram(program), hashParams(params));
         vm.prank(executor);
-        target.entry(execTarget, payload, signer, 1, allowances, outcomes, body, params, sig);
+        target.entry(execTarget, payload, signer, 1, allowances, outcomes, program, params, sig);
     }
 
     function settle(
@@ -400,9 +380,9 @@ contract CATValidatorV2Test is Test {
         address execTarget,
         bytes memory payload,
         Outcome[] memory outcomes,
-        bytes memory body
+        VMCommand[] memory program
     ) internal {
-        settle(target, execTarget, payload, noAllowances(), outcomes, body, noParams());
+        settle(target, execTarget, payload, noAllowances(), outcomes, program, noParams());
     }
 
     /* ─────────────────────────── domain and v1 entry
@@ -431,33 +411,24 @@ contract CATValidatorV2Test is Test {
     /* ─────────────────────────── input validation
     ─────────────────────────── */
 
-    function test_entry_rejectsProgramNotMultipleOf33() external {
-        bytes memory body = hex"08deadbeef";
-        Outcome[] memory outcomes = oneOutcome(address(token), 0, destination);
-        bytes memory sig = sign(validator, 1, noAllowances(), outcomes, keccak256(body), bytes32(0));
-        vm.prank(executor);
-        vm.expectRevert(CATValidatorV2.BadValidationProgram.selector);
-        validator.entry(address(fill), hex"", signer, 1, noAllowances(), outcomes, body, noParams(), sig);
-    }
-
     function test_entry_rejectsParamsWithoutProgram() external {
         bytes32[] memory params = words(1);
         Outcome[] memory outcomes = oneOutcome(address(token), 0, destination);
         bytes memory sig = sign(validator, 1, noAllowances(), outcomes, bytes32(0), hashParams(params));
         vm.prank(executor);
         vm.expectRevert(CATValidatorV2.BadValidationParams.selector);
-        validator.entry(address(fill), hex"", signer, 1, noAllowances(), outcomes, hex"", params, sig);
+        validator.entry(address(fill), hex"", signer, 1, noAllowances(), outcomes, noProgram(), params, sig);
     }
 
     function test_entry_rejectsPrefixPastVoidRegister() external {
         // 121 params + account + paid[0] = highest index 122, the void register.
         Outcome[] memory outcomes = oneOutcome(address(token), 0, destination);
-        bytes memory body = dummyBody();
+        VMCommand[] memory program = dummyProgram();
         bytes32[] memory params = words(121);
-        bytes memory sig = sign(validator, 1, noAllowances(), outcomes, keccak256(body), hashParams(params));
+        bytes memory sig = sign(validator, 1, noAllowances(), outcomes, hashProgram(program), hashParams(params));
         vm.prank(executor);
         vm.expectRevert(CATValidatorV2.BadValidationParams.selector);
-        validator.entry(address(fill), hex"", signer, 1, noAllowances(), outcomes, body, params, sig);
+        validator.entry(address(fill), hex"", signer, 1, noAllowances(), outcomes, program, params, sig);
     }
 
     function test_entry_acceptsPrefixEndingAtMax() external {
@@ -468,7 +439,7 @@ contract CATValidatorV2Test is Test {
             hex"",
             noAllowances(),
             oneOutcome(address(token), 0, destination),
-            dummyBody(),
+            dummyProgram(),
             words(120)
         );
         assertTrue(validator.spentNonces(signer, 1));
@@ -480,23 +451,40 @@ contract CATValidatorV2Test is Test {
     function test_entry_signatureCommitsProgramHash() external {
         // A signature over the empty program does not authorize a program.
         Outcome[] memory outcomes = oneOutcome(address(token), 0, destination);
-        bytes memory body = dummyBody();
+        VMCommand[] memory program = dummyProgram();
         bytes memory sig = sign(validator, 1, noAllowances(), outcomes, bytes32(0), bytes32(0));
         vm.prank(executor);
         vm.expectRevert(CATValidator.BadSignature.selector);
-        validator.entry(address(fill), hex"", signer, 1, noAllowances(), outcomes, body, noParams(), sig);
+        validator.entry(address(fill), hex"", signer, 1, noAllowances(), outcomes, program, noParams(), sig);
     }
 
     function test_entry_signatureCommitsParamsHash() external {
         // The same program with different params is a different digest.
         Outcome[] memory outcomes = oneOutcome(address(token), 0, destination);
-        bytes memory body = dummyBody();
+        VMCommand[] memory program = dummyProgram();
         bytes32[] memory supplied = new bytes32[](1);
         supplied[0] = bytes32(uint256(99));
-        bytes memory sig = sign(validator, 1, noAllowances(), outcomes, keccak256(body), hashParams(words(1)));
+        bytes memory sig = sign(validator, 1, noAllowances(), outcomes, hashProgram(program), hashParams(words(1)));
         vm.prank(executor);
         vm.expectRevert(CATValidator.BadSignature.selector);
-        validator.entry(address(fill), hex"", signer, 1, noAllowances(), outcomes, body, supplied, sig);
+        validator.entry(address(fill), hex"", signer, 1, noAllowances(), outcomes, program, supplied, sig);
+    }
+
+    function test_entry_programHashIsKeccakOfAbiEncodedCommands() external {
+        // The pinned hash is `cast keccak $(cast abi-encode "f((uint8,bytes32)[])"
+        // "[(8,0x…0104),(0,0x…beef)]")`, computed outside Solidity. The SDK spec pins
+        // the same vector.
+        VMCommand[] memory program = new VMCommand[](2);
+        program[0] = VMCommand({ op: 8, data: bytes32(uint256(0x0104)) });
+        program[1] = VMCommand({ op: 0, data: bytes32(uint256(0xBEEF)) });
+        bytes32 pinned = 0x6c12f1a4273f6fa591a0943ebadbd27d46496a9090c3ee169da9e3df911845d5;
+        Outcome[] memory outcomes = oneOutcome(address(token), 0, destination);
+        bytes memory sig = sign(validator, 1, noAllowances(), outcomes, pinned, bytes32(0));
+
+        vm.prank(executor);
+        validator.entry(address(fill), hex"", signer, 1, noAllowances(), outcomes, program, noParams(), sig);
+
+        assertTrue(validator.spentNonces(signer, 1), "the pinned program hash settles");
     }
 
     function test_entry_v1DigestNotAccepted() external {
@@ -530,7 +518,7 @@ contract CATValidatorV2Test is Test {
 
         vm.prank(executor);
         vm.expectRevert(CATValidator.BadSignature.selector);
-        validator.entry(address(fill), hex"", signer, 1, noAllowances(), outcomes, hex"", noParams(), sig);
+        validator.entry(address(fill), hex"", signer, 1, noAllowances(), outcomes, noProgram(), noParams(), sig);
     }
 
     /* ─────────────────────────── empty program = v1
@@ -538,7 +526,7 @@ contract CATValidatorV2Test is Test {
 
     function test_entry_emptyProgramSettlesLikeV1() external {
         bytes memory payload = abi.encodeCall(OutcomeFill.mint, (token, address(validator), 1.5 ether));
-        settle(validator, address(fill), payload, oneOutcome(address(token), 1 ether, destination), hex"");
+        settle(validator, address(fill), payload, oneOutcome(address(token), 1 ether, destination), noProgram());
 
         assertEq(token.balanceOf(destination), 1.5 ether, "full held balance forwarded");
         assertEq(token.balanceOf(address(validator)), 0);
@@ -550,7 +538,7 @@ contract CATValidatorV2Test is Test {
         // A codeless VM address is fine when no program is committed.
         CATValidatorV2 codeless = new CATValidatorV2(makeAddr("codelessVm"));
         bytes memory payload = abi.encodeCall(OutcomeFill.mint, (token, address(codeless), 1 ether));
-        settle(codeless, address(fill), payload, oneOutcome(address(token), 1 ether, destination), hex"");
+        settle(codeless, address(fill), payload, oneOutcome(address(token), 1 ether, destination), noProgram());
         assertTrue(codeless.spentNonces(signer, 1));
     }
 
@@ -561,7 +549,7 @@ contract CATValidatorV2Test is Test {
         bytes memory sig = sign(validator, 1, noAllowances(), outcomes, bytes32(0), bytes32(0));
         vm.prank(executor);
         vm.expectRevert(abi.encodeWithSelector(CATValidator.InvalidTokenAmount.selector, 1 ether, 0));
-        validator.entry(address(fill), payload, signer, 1, noAllowances(), outcomes, hex"", noParams(), sig);
+        validator.entry(address(fill), payload, signer, 1, noAllowances(), outcomes, noProgram(), noParams(), sig);
     }
 
     /* ─────────────────────────── register file
@@ -575,7 +563,7 @@ contract CATValidatorV2Test is Test {
         fundEscrow(echoValidator, 3 ether);
         AllowanceSpend[] memory allowances = oneAllowance(address(inToken), 1 << 255);
         Outcome[] memory outcomes = oneOutcome(address(token), 1 ether, destination);
-        bytes memory body = dummyBody();
+        VMCommand[] memory program = dummyProgram();
         bytes32[] memory params = words(2);
         bytes memory payload =
             abi.encodeCall(OutcomeFill.mintTwo, (token, address(echoValidator), 2 ether, destination, 5 ether));
@@ -585,27 +573,27 @@ contract CATValidatorV2Test is Test {
         uint256[] memory paid = new uint256[](1);
         paid[0] = 2 ether;
 
-        bytes memory sig = sign(echoValidator, 1, allowances, outcomes, keccak256(body), hashParams(params));
-        bytes memory expected = expectedRunVM(body, params, spent, paid);
+        bytes memory sig = sign(echoValidator, 1, allowances, outcomes, hashProgram(program), hashParams(params));
+        bytes memory expected = expectedRunVM(program, params, spent, paid);
         vm.prank(executor);
         vm.expectRevert(expected);
-        echoValidator.entry(address(fill), payload, signer, 1, allowances, outcomes, body, params, sig);
+        echoValidator.entry(address(fill), payload, signer, 1, allowances, outcomes, program, params, sig);
     }
 
     function test_entry_literalSpendIsRecordedAsSpent() external {
         fundEscrow(echoValidator, 3 ether);
         AllowanceSpend[] memory allowances = oneAllowance(address(inToken), 1 ether);
         Outcome[] memory outcomes = new Outcome[](0);
-        bytes memory body = dummyBody();
+        VMCommand[] memory program = dummyProgram();
 
         uint256[] memory spent = new uint256[](1);
         spent[0] = 1 ether;
 
-        bytes memory sig = sign(echoValidator, 1, allowances, outcomes, keccak256(body), bytes32(0));
-        bytes memory expected = expectedRunVM(body, noParams(), spent, new uint256[](0));
+        bytes memory sig = sign(echoValidator, 1, allowances, outcomes, hashProgram(program), bytes32(0));
+        bytes memory expected = expectedRunVM(program, noParams(), spent, new uint256[](0));
         vm.prank(executor);
         vm.expectRevert(expected);
-        echoValidator.entry(address(fill), hex"", signer, 1, allowances, outcomes, body, noParams(), sig);
+        echoValidator.entry(address(fill), hex"", signer, 1, allowances, outcomes, program, noParams(), sig);
     }
 
     function test_entry_repeatedMagicSpendSeesRemainingBalance() external {
@@ -617,18 +605,18 @@ contract CATValidatorV2Test is Test {
         allowances[1] = AllowanceSpend({ token: address(inToken), allocated: type(uint256).max, spend: 1 << 255 });
         allowances[2] = AllowanceSpend({ token: address(inToken), allocated: type(uint256).max, spend: 1 << 255 });
         Outcome[] memory outcomes = new Outcome[](0);
-        bytes memory body = dummyBody();
+        VMCommand[] memory program = dummyProgram();
 
         uint256[] memory spent = new uint256[](3);
         spent[0] = 1 ether;
         spent[1] = 2 ether;
         spent[2] = 0;
 
-        bytes memory sig = sign(echoValidator, 1, allowances, outcomes, keccak256(body), bytes32(0));
-        bytes memory expected = expectedRunVM(body, noParams(), spent, new uint256[](0));
+        bytes memory sig = sign(echoValidator, 1, allowances, outcomes, hashProgram(program), bytes32(0));
+        bytes memory expected = expectedRunVM(program, noParams(), spent, new uint256[](0));
         vm.prank(executor);
         vm.expectRevert(expected);
-        echoValidator.entry(address(fill), hex"", signer, 1, allowances, outcomes, body, noParams(), sig);
+        echoValidator.entry(address(fill), hex"", signer, 1, allowances, outcomes, program, noParams(), sig);
         assertEq(inToken.balanceOf(signer), 3 ether, "reverted settlement leaves the escrow intact");
     }
 
@@ -642,7 +630,7 @@ contract CATValidatorV2Test is Test {
         Outcome[] memory outcomes = new Outcome[](2);
         outcomes[0] = Outcome({ token: address(0), amount: 1 ether, destination: address(cb) });
         outcomes[1] = Outcome({ token: address(token), amount: 1 ether, destination: destination });
-        bytes memory body = dummyBody();
+        VMCommand[] memory program = dummyProgram();
         bytes memory payload = abi.encodeCall(OutcomeFill.sendNative, (payable(address(echoValidator)), 1 ether));
         token.mint(address(echoValidator), 1 ether);
 
@@ -650,11 +638,11 @@ contract CATValidatorV2Test is Test {
         paid[0] = 1 ether;
         paid[1] = 5 ether;
 
-        bytes memory sig = sign(echoValidator, 1, noAllowances(), outcomes, keccak256(body), bytes32(0));
-        bytes memory expected = expectedRunVM(body, noParams(), new uint256[](0), paid);
+        bytes memory sig = sign(echoValidator, 1, noAllowances(), outcomes, hashProgram(program), bytes32(0));
+        bytes memory expected = expectedRunVM(program, noParams(), new uint256[](0), paid);
         vm.prank(executor);
         vm.expectRevert(expected);
-        echoValidator.entry(address(fill), payload, signer, 1, noAllowances(), outcomes, body, noParams(), sig);
+        echoValidator.entry(address(fill), payload, signer, 1, noAllowances(), outcomes, program, noParams(), sig);
     }
 
     /* ─────────────────────────── program execution
@@ -662,7 +650,7 @@ contract CATValidatorV2Test is Test {
 
     function test_entry_programRunsAfterPaymentAndSettles() external {
         bytes memory payload = abi.encodeCall(OutcomeFill.mint, (token, address(validator), 1 ether));
-        settle(validator, address(fill), payload, oneOutcome(address(token), 1 ether, destination), dummyBody());
+        settle(validator, address(fill), payload, oneOutcome(address(token), 1 ether, destination), dummyProgram());
 
         assertEq(token.balanceOf(destination), 1 ether);
         assertTrue(validator.spentNonces(signer, 1));
@@ -673,13 +661,13 @@ contract CATValidatorV2Test is Test {
         fundEscrow(echoValidator, 5 ether);
         AllowanceSpend[] memory allowances = oneAllowance(address(inToken), 5 ether);
         Outcome[] memory outcomes = oneOutcome(address(token), 1 ether, destination);
-        bytes memory body = dummyBody();
+        VMCommand[] memory program = dummyProgram();
         bytes memory payload = abi.encodeCall(OutcomeFill.mint, (token, address(echoValidator), 1 ether));
-        bytes memory sig = sign(echoValidator, 1, allowances, outcomes, keccak256(body), bytes32(0));
+        bytes memory sig = sign(echoValidator, 1, allowances, outcomes, hashProgram(program), bytes32(0));
 
         vm.prank(executor);
         vm.expectRevert(); // ValidationFailed(payload); the payload is asserted above
-        echoValidator.entry(address(fill), payload, signer, 1, allowances, outcomes, body, noParams(), sig);
+        echoValidator.entry(address(fill), payload, signer, 1, allowances, outcomes, program, noParams(), sig);
 
         assertFalse(echoValidator.spentNonces(signer, 1), "nonce unspent after a validation failure");
         assertEq(inToken.balanceOf(signer), 5 ether, "escrow funds untouched after a validation failure");
@@ -689,21 +677,21 @@ contract CATValidatorV2Test is Test {
     function test_entry_floorFailsBeforeProgramRuns() external {
         // EchoVM would surface ValidationFailed; the floor reverts first.
         Outcome[] memory outcomes = oneOutcome(address(token), 1 ether, destination);
-        bytes memory body = dummyBody();
-        bytes memory sig = sign(echoValidator, 1, noAllowances(), outcomes, keccak256(body), bytes32(0));
+        VMCommand[] memory program = dummyProgram();
+        bytes memory sig = sign(echoValidator, 1, noAllowances(), outcomes, hashProgram(program), bytes32(0));
         vm.prank(executor);
         vm.expectRevert(abi.encodeWithSelector(CATValidator.InvalidTokenAmount.selector, 1 ether, 0));
-        echoValidator.entry(address(fill), hex"", signer, 1, noAllowances(), outcomes, body, noParams(), sig);
+        echoValidator.entry(address(fill), hex"", signer, 1, noAllowances(), outcomes, program, noParams(), sig);
     }
 
     function test_entry_vmInvalidOpcodeFailsClosed() external {
         CATValidatorV2 target = new CATValidatorV2(address(new InvalidVM()));
         Outcome[] memory outcomes = oneOutcome(address(token), 0, destination);
-        bytes memory body = dummyBody();
-        bytes memory sig = sign(target, 1, noAllowances(), outcomes, keccak256(body), bytes32(0));
+        VMCommand[] memory program = dummyProgram();
+        bytes memory sig = sign(target, 1, noAllowances(), outcomes, hashProgram(program), bytes32(0));
         vm.prank(executor);
         vm.expectRevert(abi.encodeWithSelector(CATValidatorV2.ValidationFailed.selector, hex""));
-        target.entry(address(fill), hex"", signer, 1, noAllowances(), outcomes, body, noParams(), sig);
+        target.entry(address(fill), hex"", signer, 1, noAllowances(), outcomes, program, noParams(), sig);
     }
 
     function test_entry_vmOutOfGasFailsClosed() external {
@@ -711,22 +699,24 @@ contract CATValidatorV2Test is Test {
         // wrap the failure, and nothing settles.
         CATValidatorV2 target = new CATValidatorV2(address(new BurnVM()));
         Outcome[] memory outcomes = oneOutcome(address(token), 0, destination);
-        bytes memory body = dummyBody();
-        bytes memory sig = sign(target, 1, noAllowances(), outcomes, keccak256(body), bytes32(0));
+        VMCommand[] memory program = dummyProgram();
+        bytes memory sig = sign(target, 1, noAllowances(), outcomes, hashProgram(program), bytes32(0));
         vm.prank(executor);
         vm.expectRevert(abi.encodeWithSelector(CATValidatorV2.ValidationFailed.selector, hex""));
-        target.entry{ gas: 3_000_000 }(address(fill), hex"", signer, 1, noAllowances(), outcomes, body, noParams(), sig);
+        target.entry{ gas: 3_000_000 }(
+            address(fill), hex"", signer, 1, noAllowances(), outcomes, program, noParams(), sig
+        );
         assertFalse(target.spentNonces(signer, 1));
     }
 
     function test_entry_codelessVmWithProgramFailsClosed() external {
         CATValidatorV2 codeless = new CATValidatorV2(makeAddr("codelessVm"));
         Outcome[] memory outcomes = oneOutcome(address(token), 0, destination);
-        bytes memory body = dummyBody();
-        bytes memory sig = sign(codeless, 1, noAllowances(), outcomes, keccak256(body), bytes32(0));
+        VMCommand[] memory program = dummyProgram();
+        bytes memory sig = sign(codeless, 1, noAllowances(), outcomes, hashProgram(program), bytes32(0));
         vm.prank(executor);
         vm.expectRevert(CATValidatorV2.InvalidVirtualMachine.selector);
-        codeless.entry(address(fill), hex"", signer, 1, noAllowances(), outcomes, body, noParams(), sig);
+        codeless.entry(address(fill), hex"", signer, 1, noAllowances(), outcomes, program, noParams(), sig);
         assertFalse(codeless.spentNonces(signer, 1));
     }
 
@@ -737,7 +727,7 @@ contract CATValidatorV2Test is Test {
         // Anyone can send 1 wei to the validator; a non-payable fill still settles.
         vm.deal(address(validator), 1 wei);
         bytes memory payload = abi.encodeCall(OutcomeFill.mint, (token, address(validator), 1 ether));
-        settle(validator, address(fill), payload, oneOutcome(address(token), 1 ether, destination), hex"");
+        settle(validator, address(fill), payload, oneOutcome(address(token), 1 ether, destination), noProgram());
 
         assertEq(token.balanceOf(destination), 1 ether);
         assertEq(address(validator).balance, 1 wei, "the fill received no native value");
@@ -746,14 +736,14 @@ contract CATValidatorV2Test is Test {
     function test_entry_fillCannotReenter() external {
         Outcome[] memory outcomes = oneOutcome(address(token), 0, destination);
         bytes memory inner = abi.encodeWithSignature(
-            "entry(address,bytes,address,uint256,(address,uint256,uint256)[],(address,uint256,address)[],bytes,bytes32[],bytes)",
+            "entry(address,bytes,address,uint256,(address,uint256,uint256)[],(address,uint256,address)[],(uint8,bytes32)[],bytes32[],bytes)",
             address(fill),
             hex"",
             signer,
             2,
             noAllowances(),
             outcomes,
-            hex"",
+            noProgram(),
             noParams(),
             hex""
         );
@@ -761,7 +751,7 @@ contract CATValidatorV2Test is Test {
         bytes memory sig = sign(validator, 1, noAllowances(), outcomes, bytes32(0), bytes32(0));
         vm.prank(executor);
         vm.expectRevert(ReentrancyGuard.Reentrancy.selector);
-        validator.entry(address(fill), payload, signer, 1, noAllowances(), outcomes, hex"", noParams(), sig);
+        validator.entry(address(fill), payload, signer, 1, noAllowances(), outcomes, noProgram(), noParams(), sig);
     }
 
     function test_entry_bubblesLongRevertDataVerbatim() external {
@@ -784,7 +774,7 @@ contract CATValidatorV2Test is Test {
             1,
             noAllowances(),
             outcomes,
-            hex"",
+            noProgram(),
             noParams(),
             sig
         );

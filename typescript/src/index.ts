@@ -48,7 +48,6 @@ export {
   CAT_VALIDATOR_DOMAIN_NAME,
   CAT_VALIDATOR_DOMAIN_VERSION,
   CAT_VALIDATOR_V2_DOMAIN_VERSION,
-  VALIDATION_COMMAND_SIZE,
   OUTCOME_TO_SIGNER,
   SPEND_FULL_BALANCE,
 } from "./protocol/constraint";
@@ -157,6 +156,7 @@ export type {
   Outcome,
   ExecutionConstraint,
   ExecutionConstraintV2,
+  ValidationCommand,
   ValidationCommitment,
   WebAuthnSignature,
   Factory,

@@ -1,24 +1,29 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 pragma solidity ^0.8.30;
 
-import { LibValidationVM } from "../../src/libs/LibValidationVM.sol";
+import { LibValidationVM, VMCommand, VMState } from "../../src/libs/LibValidationVM.sol";
 import { VcTestBase } from "./VcTestBase.sol";
 
 /**
- * @notice Hash parity between LI.FI's compose compiler and the validator. The
+ * @notice Encoding parity between LI.FI's compose compiler and the validator. The
  * fixture `test/vc/fixtures/hash-parity/vectors.json` (schema
  * `c1-hash-parity/v1`) is produced by the compiler, which asserts the same
- * vectors on its side; this suite proves the Foundry/on-chain hashing reproduces them:
- * `keccak256(canonicalBody)` for the program hash, concatenated 32-byte words
- * (zero when empty) for the params hash, and `LibValidationVM.encodeRunVM`
- * reproducing the production compiler's `runVM` calldata byte-for-byte.
+ * vectors on its side. This suite proves that the `runVM` encoding the
+ * validator sends, `RUN_VM_SELECTOR` with the command array and the register
+ * file, reproduces the compiler's `runVM` calldata byte for byte, and that the
+ * params hash rule (concatenated 32-byte words, zero when empty) reproduces the
+ * pinned `paramsHash`.
  *
- * These are pure encoding and hash identities with no VM execution. The
- * fixture's register files use the earlier `params ++ [account] ++ preBalances`
- * layout, so the calldata check pins the `runVM` ABI encoding of a given
- * register file, not the register layout `CATValidatorV2` builds (see the
- * fixture README). Executing the pinned uc1 program on the canonical VM is
- * covered by `test/vc/IntegrationV2.t.sol`.
+ * Program-hash parity is not proven here. The fixture predates the current
+ * rule: its `canonicalBody` and `validationProgramHash` describe the earlier
+ * tight-packed body, while the validator commits
+ * `keccak256(abi.encode(commands))`. The compiler must regenerate the vectors
+ * under the current rule before V2 is audited or deployed (see the fixture
+ * README). The fixture's register files also use the earlier
+ * `params ++ [account] ++ preBalances` layout, so the calldata check pins the
+ * `runVM` ABI encoding of a given register file, not the register layout
+ * `CATValidatorV2` builds. Executing the pinned uc1 program on the canonical VM
+ * is covered by `test/vc/IntegrationV2.t.sol`.
  */
 contract HashParityTest is VcTestBase {
     string json;
@@ -30,7 +35,7 @@ contract HashParityTest is VcTestBase {
     /* ─────────────────────────── programVectors
     ─────────────────────────── */
 
-    function test_programVectors_bodyHashAndCalldataParity() external view {
+    function test_programVectors_runVMCalldataAndParamsParity() external view {
         uint256 count = jsonArrayLength(json, ".programVectors");
         assertGt(count, 0, "fixture has no programVectors");
 
@@ -38,51 +43,41 @@ contract HashParityTest is VcTestBase {
             string memory p = string.concat(".programVectors[", vm.toString(i), "]");
             string memory name = vm.parseJsonString(json, string.concat(p, ".name"));
 
-            bytes memory body = vm.parseJsonBytes(json, string.concat(p, ".canonicalBody"));
-            assertGt(body.length, 0, string.concat(name, ": empty body"));
-            assertEq(body.length % LibValidationVM.COMMAND_SIZE, 0, string.concat(name, ": body not 33-byte packed"));
-
-            // The committed program hash is keccak256 of exactly the canonical body.
-            bytes32 pinnedBodyHash = vm.parseJsonBytes32(json, string.concat(p, ".validationProgramHash"));
-            assertEq(keccak256(body), pinnedBodyHash, string.concat(name, ": body hash mismatch"));
-
             // The committed params hash, through the production paramsHashOf.
             bytes memory canonicalParams = vm.parseJsonBytes(json, string.concat(p, ".canonicalParams"));
             bytes32 pinnedParamsHash = vm.parseJsonBytes32(json, string.concat(p, ".paramsHash"));
             _assertParamsHashParity(name, canonicalParams, pinnedParamsHash);
 
-            // The fixture's decoded `commands` decomposition must stay in sync
-            // with the canonical body it claims to decode (33-byte framing:
-            // uint8 op ++ bytes32 data per command).
-            _assertCommandsMatchBody(name, string.concat(p, ".commands"), body);
-
-            // Re-encoding the body against the fixture's own register file must
-            // reproduce the production compiler's runVM calldata byte-for-byte.
-            // This pins LibValidationVM.RUN_VM_SELECTOR and the command/register ABI encoding
-            // against real compiler output, independent of execution semantics.
-            bytes memory registersEncoded =
-                this.exposedEncodeRunVM(body, vm.parseJsonBytesArray(json, string.concat(p, ".registers")));
-            bytes memory pinnedCalldata = vm.parseJsonBytes(json, string.concat(p, ".calldata"));
-            assertEq(registersEncoded, pinnedCalldata, string.concat(name, ": runVM calldata mismatch"));
-            // Taking the leading 4 bytes is the intent: they are the selector.
-            // forge-lint: disable-next-line(unsafe-typecast)
-            bytes4 pinnedSelector = bytes4(pinnedCalldata);
-            assertEq(pinnedSelector, LibValidationVM.RUN_VM_SELECTOR, string.concat(name, ": selector mismatch"));
+            // The validator's runVM encoding of the fixture's commands and register
+            // file must reproduce the production compiler's runVM calldata
+            // byte for byte. This pins RUN_VM_SELECTOR and the VMCommand and
+            // VMState ABI shapes against real compiler output.
+            VMCommand[] memory commands = _commands(p);
+            assertGt(commands.length, 0, string.concat(name, ": no commands"));
+            bytes[] memory registers = vm.parseJsonBytesArray(json, string.concat(p, ".registers"));
+            assertEq(
+                abi.encodeWithSelector(LibValidationVM.RUN_VM_SELECTOR, commands, VMState(registers)),
+                vm.parseJsonBytes(json, string.concat(p, ".calldata")),
+                string.concat(name, ": runVM calldata mismatch")
+            );
         }
     }
 
-    /// @dev Body sharing: the same operation for two users pins one body
-    /// hash and distinct params hashes — per-user values live only in params.
+    /// @dev Body sharing: the same operation for two users has one program hash
+    /// and distinct params hashes — per-user values live only in params.
     function test_programVectors_uc1BodySharing() external view {
-        bytes32 hashA = vm.parseJsonBytes32(json, ".programVectors[0].validationProgramHash");
-        bytes32 hashB = vm.parseJsonBytes32(json, ".programVectors[1].validationProgramHash");
-        bytes32 paramsA = vm.parseJsonBytes32(json, ".programVectors[0].paramsHash");
-        bytes32 paramsB = vm.parseJsonBytes32(json, ".programVectors[1].paramsHash");
-
         assertEq(vm.parseJsonString(json, ".programVectors[0].name"), "uc1-user-a", "unexpected fixture vector order");
         assertEq(vm.parseJsonString(json, ".programVectors[1].name"), "uc1-user-b", "unexpected fixture vector order");
-        assertEq(hashA, hashB, "uc1 users must share one body hash");
-        assertNotEq(paramsA, paramsB, "uc1 users must have distinct params hashes");
+        assertEq(
+            hashProgram(_commands(".programVectors[0]")),
+            hashProgram(_commands(".programVectors[1]")),
+            "uc1 users must share one program hash"
+        );
+        assertNotEq(
+            vm.parseJsonBytes32(json, ".programVectors[0].paramsHash"),
+            vm.parseJsonBytes32(json, ".programVectors[1].paramsHash"),
+            "uc1 users must have distinct params hashes"
+        );
     }
 
     /* ─────────────────────────── paramsVectors
@@ -128,30 +123,18 @@ contract HashParityTest is VcTestBase {
         if (numWords == 0) assertEq(pinnedParamsHash, bytes32(0), string.concat(name, ": empty params must pin zero"));
     }
 
-    function _assertCommandsMatchBody(
-        string memory name,
-        string memory commandsPath,
-        bytes memory body
-    ) internal view {
-        uint256 numCommands = jsonArrayLength(json, commandsPath);
-        assertEq(numCommands, body.length / LibValidationVM.COMMAND_SIZE, string.concat(name, ": command count"));
-
-        for (uint256 i; i < numCommands; ++i) {
-            string memory c = string.concat(commandsPath, "[", vm.toString(i), "]");
-            uint256 base = i * LibValidationVM.COMMAND_SIZE;
-
-            assertEq(
-                uint256(uint8(body[base])),
-                vm.parseJsonUint(json, string.concat(c, ".op")),
-                string.concat(name, ": command op drift")
-            );
-            bytes32 data;
-            for (uint256 j; j < 32; ++j) {
-                data |= bytes32(body[base + 1 + j]) >> (j * 8);
-            }
-            assertEq(
-                data, vm.parseJsonBytes32(json, string.concat(c, ".data")), string.concat(name, ": command data drift")
-            );
+    /// @dev The fixture's decoded `commands` of the vector at `vectorPath`.
+    function _commands(
+        string memory vectorPath
+    ) internal view returns (VMCommand[] memory commands) {
+        string memory path = string.concat(vectorPath, ".commands");
+        commands = new VMCommand[](jsonArrayLength(json, path));
+        for (uint256 i; i < commands.length; ++i) {
+            string memory c = string.concat(path, "[", vm.toString(i), "]");
+            uint256 op = vm.parseJsonUint(json, string.concat(c, ".op"));
+            assertLt(op, 256, "command op is not a uint8");
+            // forge-lint: disable-next-line(unsafe-typecast)
+            commands[i] = VMCommand({ op: uint8(op), data: vm.parseJsonBytes32(json, string.concat(c, ".data")) });
         }
     }
 
@@ -160,12 +143,5 @@ contract HashParityTest is VcTestBase {
         bytes32[] calldata params
     ) external pure returns (bytes32) {
         return LibValidationVM.paramsHashOf(params);
-    }
-
-    function exposedEncodeRunVM(
-        bytes calldata body,
-        bytes[] memory registers
-    ) external pure returns (bytes memory) {
-        return LibValidationVM.encodeRunVM(body, registers);
     }
 }

@@ -184,8 +184,20 @@ export const CAT_VALIDATOR_V2_ABI = [
       },
       {
         name: "validationProgram",
-        type: "bytes",
-        internalType: "bytes",
+        type: "tuple[]",
+        internalType: "struct VMCommand[]",
+        components: [
+          {
+            name: "op",
+            type: "uint8",
+            internalType: "uint8",
+          },
+          {
+            name: "data",
+            type: "bytes32",
+            internalType: "bytes32",
+          },
+        ],
       },
       {
         name: "validationParams",
@@ -326,11 +338,6 @@ export const CAT_VALIDATOR_V2_ABI = [
   {
     type: "error",
     name: "BadValidationParams",
-    inputs: [],
-  },
-  {
-    type: "error",
-    name: "BadValidationProgram",
     inputs: [],
   },
   {

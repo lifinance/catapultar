@@ -4,6 +4,7 @@ pragma solidity ^0.8.30;
 import { Test } from "forge-std/src/Test.sol";
 
 import { AllowanceSpend, Outcome } from "../../src/libs/LibExecutionConstraint.sol";
+import { VMCommand } from "../../src/libs/LibValidationVM.sol";
 
 /**
  * @title Validation-program test base
@@ -22,7 +23,7 @@ abstract contract VcTestBase is Test {
     address internal constant INVARIANT_CHECKER = 0xe17006F4DfE8Aa2bf80589E497ad98D470f66fef;
     address internal constant ARITHMETIC_PROCESSOR = 0x25407266A1229c83d03ececfff8eD7d92754b285;
 
-    /// @dev Ethereum mainnet tokens; the uc1 fixture program bakes both into its body.
+    /// @dev Ethereum mainnet tokens; the uc1 fixture program bakes both into its commands.
     address internal constant WETH = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
     address internal constant USDC = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48;
 
@@ -131,6 +132,13 @@ abstract contract VcTestBase is Test {
             )
         );
         return keccak256(abi.encodePacked("\x19\x01", domainSeparator, structHash));
+    }
+
+    /// @notice `keccak256` of the ABI-encoded command array, `bytes32(0)` when empty.
+    function hashProgram(
+        VMCommand[] memory program
+    ) internal pure returns (bytes32) {
+        return program.length == 0 ? bytes32(0) : keccak256(abi.encode(program));
     }
 
     /// @notice `keccak256` of the concatenated words, `bytes32(0)` when empty.
