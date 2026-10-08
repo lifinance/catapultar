@@ -1,0 +1,178 @@
+{
+  "instructions": [
+    {
+      "kind": "GetTokenBalance",
+      "token": "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
+      "owner": {
+        "id": 0,
+        "kind": "address",
+        "data": "0x0000000000000000000000001111111111111111111111111111111111111111"
+      },
+      "result": {
+        "id": 7,
+        "kind": "uint256"
+      }
+    },
+    {
+      "kind": "ProtocolInvocation",
+      "target": "0x25407266a1229c83d03ececfff8ed7d92754b285",
+      "parameters": [
+        {
+          "Array": [
+            {
+              "Register": {
+                "id": 6,
+                "kind": "uint256",
+                "data": "0x0000000000000000000000000000000000000000000000000000000000000000"
+              }
+            },
+            {
+              "Register": {
+                "id": 1,
+                "kind": "uint256",
+                "data": "0x0000000000000000000000000000000000000000000000000de0b6b3a7640000"
+              }
+            }
+          ]
+        },
+        {
+          "Register": {
+            "id": 3,
+            "kind": "bytes32",
+            "data": "0x8081000000000000000000000000000000000000000000000000000000000000"
+          }
+        },
+        {
+          "Register": {
+            "id": 4,
+            "kind": "uint8",
+            "data": "0x0000000000000000000000000000000000000000000000000000000000000003"
+          }
+        }
+      ],
+      "result": {
+        "id": 8,
+        "kind": "uint256"
+      },
+      "metadata": {
+        "function_signature": "function evaluateRPN(uint256[],bytes32,uint8) pure returns (uint256)",
+        "approvals": [],
+        "call_type": "StaticCall"
+      }
+    },
+    {
+      "kind": "AssertRawInvariant",
+      "Binary": [
+        {
+          "id": 7,
+          "kind": "uint256"
+        },
+        {
+          "id": 8,
+          "kind": "uint256"
+        },
+        "GreaterThanEqual"
+      ]
+    },
+    {
+      "kind": "GetTokenBalance",
+      "token": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+      "owner": {
+        "id": 0,
+        "kind": "address",
+        "data": "0x0000000000000000000000001111111111111111111111111111111111111111"
+      },
+      "result": {
+        "id": 9,
+        "kind": "uint256"
+      }
+    },
+    {
+      "kind": "AssertRawInvariant",
+      "Binary": [
+        {
+          "id": 9,
+          "kind": "uint256"
+        },
+        {
+          "id": 2,
+          "kind": "uint256",
+          "data": "0x000000000000000000000000000000000000000000000000000000001dcd6500"
+        },
+        "GreaterThanEqual"
+      ]
+    }
+  ],
+  "initial_literals": [
+    {
+      "mem": {
+        "id": 0,
+        "kind": "address"
+      },
+      "data": {
+        "sol_type": "address",
+        "value": "0x0000000000000000000000001111111111111111111111111111111111111111"
+      }
+    },
+    {
+      "mem": {
+        "id": 1,
+        "kind": "uint256"
+      },
+      "data": {
+        "sol_type": "uint256",
+        "value": "0x0000000000000000000000000000000000000000000000000de0b6b3a7640000"
+      }
+    },
+    {
+      "mem": {
+        "id": 2,
+        "kind": "uint256"
+      },
+      "data": {
+        "sol_type": "uint256",
+        "value": "0x000000000000000000000000000000000000000000000000000000001dcd6500"
+      }
+    },
+    {
+      "mem": {
+        "id": 3,
+        "kind": "bytes32"
+      },
+      "data": {
+        "sol_type": "bytes32",
+        "value": "0x8081000000000000000000000000000000000000000000000000000000000000"
+      }
+    },
+    {
+      "mem": {
+        "id": 4,
+        "kind": "uint8"
+      },
+      "data": {
+        "sol_type": "uint8",
+        "value": "0x0000000000000000000000000000000000000000000000000000000000000003"
+      }
+    },
+    {
+      "mem": {
+        "id": 5,
+        "kind": "address"
+      },
+      "data": {
+        "sol_type": "address",
+        "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    },
+    {
+      "mem": {
+        "id": 6,
+        "kind": "uint256"
+      },
+      "data": {
+        "sol_type": "uint256",
+        "value": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    }
+  ]
+}

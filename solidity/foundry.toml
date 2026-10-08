@@ -7,6 +7,17 @@ solc_version = "0.8.35"
 optimizer = true
 optimizer_runs = 100_000_000
 bytecode_hash = 'none'
+# Write access exists solely for the regeneration-gated fixture test
+# (VC_REGEN_VM_FIXTURE); normal runs only read.
+fs_permissions = [
+    { access = "read-write", path = "test/vc/fixtures" },
+]
+
+# Ethereum mainnet fork for the CATValidatorV2 test suites (test/vc/*).
+# The canonical VirtualMachine / InvariantChecker / ArithmeticProcessor are
+# deployed there; tests skip cleanly when VC_MAINNET_RPC_URL is unset.
+[rpc_endpoints]
+mainnet = "${VC_MAINNET_RPC_URL}"
 
 [profile.tron]
 src = "src"

@@ -1,0 +1,25 @@
+{
+  "chainId": 1,
+  "committedOutcomes": [
+    {
+      "token": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+      "minAmount": "1000000000000000000",
+      "destination": "0x1111111111111111111111111111111111111111",
+      "chainId": 1
+    }
+  ],
+  "invariants": [
+    {
+      "kind": "erc20BalanceGte",
+      "chainId": 1,
+      "token": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+      "owner": "delivery",
+      "minAmount": "500000000"
+    }
+  ],
+  "fundingAsset": {
+    "token": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+    "amount": "1000000000"
+  },
+  "deliveryAddress": "0x1111111111111111111111111111111111111111"
+}

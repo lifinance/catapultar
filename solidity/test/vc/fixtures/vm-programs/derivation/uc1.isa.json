@@ -1,0 +1,435 @@
+{
+  "commands": [
+    {
+      "CalldataBuild": {
+        "dest_reg": {
+          "idx": 8,
+          "reg_type": "bytes"
+        },
+        "fn_sig": "function balanceOf(address owner) returns (uint256)",
+        "src_blueprints": [
+          {
+            "Register": {
+              "idx": 0,
+              "reg_type": "address"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "Call": {
+        "call_type": "StaticCall",
+        "dest_reg": {
+          "idx": 9,
+          "reg_type": "uint256"
+        },
+        "src_reg": {
+          "idx": 8,
+          "reg_type": "bytes"
+        },
+        "target": "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
+        "value_reg": {
+          "idx": 7,
+          "reg_type": "uint256"
+        }
+      }
+    },
+    {
+      "CalldataBuild": {
+        "dest_reg": {
+          "idx": 11,
+          "reg_type": "bytes"
+        },
+        "fn_sig": "function evaluateRPN(uint256[], bytes32, uint8) pure returns (uint256)",
+        "src_blueprints": [
+          {
+            "Array": [
+              {
+                "Register": {
+                  "idx": 6,
+                  "reg_type": "uint256"
+                }
+              },
+              {
+                "Register": {
+                  "idx": 1,
+                  "reg_type": "uint256"
+                }
+              }
+            ]
+          },
+          {
+            "Register": {
+              "idx": 3,
+              "reg_type": "bytes32"
+            }
+          },
+          {
+            "Register": {
+              "idx": 4,
+              "reg_type": "uint8"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "Call": {
+        "call_type": "StaticCall",
+        "dest_reg": {
+          "idx": 12,
+          "reg_type": "uint256"
+        },
+        "src_reg": {
+          "idx": 11,
+          "reg_type": "bytes"
+        },
+        "target": "0x25407266a1229c83d03ececfff8ed7d92754b285",
+        "value_reg": {
+          "idx": 10,
+          "reg_type": "uint256"
+        }
+      }
+    },
+    {
+      "CalldataBuild": {
+        "dest_reg": {
+          "idx": 13,
+          "reg_type": "bytes"
+        },
+        "fn_sig": "assertGreaterThanEqual(uint256,uint256)",
+        "src_blueprints": [
+          {
+            "Register": {
+              "idx": 9,
+              "reg_type": "uint256"
+            }
+          },
+          {
+            "Register": {
+              "idx": 12,
+              "reg_type": "uint256"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "Call": {
+        "call_type": "StaticCall",
+        "dest_reg": {
+          "idx": 15,
+          "reg_type": "()"
+        },
+        "src_reg": {
+          "idx": 13,
+          "reg_type": "bytes"
+        },
+        "target": "0xe17006f4dfe8aa2bf80589e497ad98d470f66fef",
+        "value_reg": {
+          "idx": 14,
+          "reg_type": "uint256"
+        }
+      }
+    },
+    {
+      "CalldataBuild": {
+        "dest_reg": {
+          "idx": 17,
+          "reg_type": "bytes"
+        },
+        "fn_sig": "function balanceOf(address owner) returns (uint256)",
+        "src_blueprints": [
+          {
+            "Register": {
+              "idx": 0,
+              "reg_type": "address"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "Call": {
+        "call_type": "StaticCall",
+        "dest_reg": {
+          "idx": 18,
+          "reg_type": "uint256"
+        },
+        "src_reg": {
+          "idx": 17,
+          "reg_type": "bytes"
+        },
+        "target": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+        "value_reg": {
+          "idx": 16,
+          "reg_type": "uint256"
+        }
+      }
+    },
+    {
+      "CalldataBuild": {
+        "dest_reg": {
+          "idx": 19,
+          "reg_type": "bytes"
+        },
+        "fn_sig": "assertGreaterThanEqual(uint256,uint256)",
+        "src_blueprints": [
+          {
+            "Register": {
+              "idx": 18,
+              "reg_type": "uint256"
+            }
+          },
+          {
+            "Register": {
+              "idx": 2,
+              "reg_type": "uint256"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "Call": {
+        "call_type": "StaticCall",
+        "dest_reg": {
+          "idx": 21,
+          "reg_type": "()"
+        },
+        "src_reg": {
+          "idx": 19,
+          "reg_type": "bytes"
+        },
+        "target": "0xe17006f4dfe8aa2bf80589e497ad98d470f66fef",
+        "value_reg": {
+          "idx": 20,
+          "reg_type": "uint256"
+        }
+      }
+    }
+  ],
+  "initial_register_layout": [
+    {
+      "data": {
+        "sol_type": "address",
+        "value": "0000000000000000000000001111111111111111111111111111111111111111"
+      },
+      "mem": {
+        "idx": 0,
+        "reg_type": "address"
+      }
+    },
+    {
+      "data": {
+        "sol_type": "uint256",
+        "value": "0000000000000000000000000000000000000000000000000de0b6b3a7640000"
+      },
+      "mem": {
+        "idx": 1,
+        "reg_type": "uint256"
+      }
+    },
+    {
+      "data": {
+        "sol_type": "uint256",
+        "value": "000000000000000000000000000000000000000000000000000000001dcd6500"
+      },
+      "mem": {
+        "idx": 2,
+        "reg_type": "uint256"
+      }
+    },
+    {
+      "data": {
+        "sol_type": "bytes32",
+        "value": "8081000000000000000000000000000000000000000000000000000000000000"
+      },
+      "mem": {
+        "idx": 3,
+        "reg_type": "bytes32"
+      }
+    },
+    {
+      "data": {
+        "sol_type": "uint8",
+        "value": "0000000000000000000000000000000000000000000000000000000000000003"
+      },
+      "mem": {
+        "idx": 4,
+        "reg_type": "uint8"
+      }
+    },
+    {
+      "data": {
+        "sol_type": "address",
+        "value": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "mem": {
+        "idx": 5,
+        "reg_type": "address"
+      }
+    },
+    {
+      "data": {
+        "sol_type": "uint256",
+        "value": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "mem": {
+        "idx": 6,
+        "reg_type": "uint256"
+      }
+    },
+    {
+      "data": {
+        "sol_type": "uint256",
+        "value": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "mem": {
+        "idx": 7,
+        "reg_type": "uint256"
+      }
+    },
+    {
+      "data": {
+        "sol_type": "uint256",
+        "value": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "mem": {
+        "idx": 8,
+        "reg_type": "bytes"
+      }
+    },
+    {
+      "data": {
+        "sol_type": "uint256",
+        "value": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "mem": {
+        "idx": 9,
+        "reg_type": "uint256"
+      }
+    },
+    {
+      "data": {
+        "sol_type": "uint256",
+        "value": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "mem": {
+        "idx": 10,
+        "reg_type": "uint256"
+      }
+    },
+    {
+      "data": {
+        "sol_type": "uint256",
+        "value": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "mem": {
+        "idx": 11,
+        "reg_type": "bytes"
+      }
+    },
+    {
+      "data": {
+        "sol_type": "uint256",
+        "value": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "mem": {
+        "idx": 12,
+        "reg_type": "uint256"
+      }
+    },
+    {
+      "data": {
+        "sol_type": "uint256",
+        "value": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "mem": {
+        "idx": 13,
+        "reg_type": "bytes"
+      }
+    },
+    {
+      "data": {
+        "sol_type": "uint256",
+        "value": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "mem": {
+        "idx": 14,
+        "reg_type": "uint256"
+      }
+    },
+    {
+      "data": {
+        "sol_type": "uint256",
+        "value": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "mem": {
+        "idx": 15,
+        "reg_type": "()"
+      }
+    },
+    {
+      "data": {
+        "sol_type": "uint256",
+        "value": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "mem": {
+        "idx": 16,
+        "reg_type": "uint256"
+      }
+    },
+    {
+      "data": {
+        "sol_type": "uint256",
+        "value": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "mem": {
+        "idx": 17,
+        "reg_type": "bytes"
+      }
+    },
+    {
+      "data": {
+        "sol_type": "uint256",
+        "value": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "mem": {
+        "idx": 18,
+        "reg_type": "uint256"
+      }
+    },
+    {
+      "data": {
+        "sol_type": "uint256",
+        "value": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "mem": {
+        "idx": 19,
+        "reg_type": "bytes"
+      }
+    },
+    {
+      "data": {
+        "sol_type": "uint256",
+        "value": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "mem": {
+        "idx": 20,
+        "reg_type": "uint256"
+      }
+    },
+    {
+      "data": {
+        "sol_type": "uint256",
+        "value": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "mem": {
+        "idx": 21,
+        "reg_type": "()"
+      }
+    }
+  ]
+}
