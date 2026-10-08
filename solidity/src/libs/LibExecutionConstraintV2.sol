@@ -13,10 +13,10 @@ import { AllowanceSpend, LibExecutionConstraint, Outcome } from "./LibExecutionC
  * @dev The type string appends `bytes32 validationProgramHash,bytes32 paramsHash`
  * at the END of the ExecutionConstraint(...) field list; the Allowance/Outcome
  * sub-type strings (and their hashing, reused from v1) are unchanged. This string
- * is independently encoded by the catapultar TS SDK (and, in a later PR of
- * this stack, the catapultar-utils mirror) — the encoders
- * are pinned to each other by the shared C2 fixture
- * (contract/fixtures/sca-parity/ in the umbrella workspace).
+ * is independently encoded by the catapultar TypeScript SDK's EIP-712 type
+ * definitions; the two must agree byte-for-byte, or a v2 digest (and the escrow
+ * address derived from it) computed off-chain will not match the one this
+ * library computes on-chain.
  */
 library LibExecutionConstraintV2 {
     using EfficientHashLib for bytes32;

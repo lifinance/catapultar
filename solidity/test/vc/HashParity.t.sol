@@ -5,18 +5,17 @@ import { LibValidationVM } from "../../src/libs/LibValidationVM.sol";
 import { VcTestBase } from "./VcTestBase.sol";
 
 /**
- * @notice C1 hash-parity — the Solidity side of the cross-repo seam
- * (umbrella `contract/fixtures/hash-parity/vectors.json`, schema
- * `c1-hash-parity/v1`). The TS side (yggdrasil, GD-2) asserts the same
- * vectors; this suite proves the Foundry/on-chain hashing reproduces them:
+ * @notice Hash parity between LI.FI's compose compiler and the validator. The
+ * fixture `test/vc/fixtures/hash-parity/vectors.json` (schema
+ * `c1-hash-parity/v1`) is produced by the compiler, which asserts the same
+ * vectors on its side; this suite proves the Foundry/on-chain hashing reproduces them:
  * `keccak256(canonicalBody)` for the program hash, concatenated 32-byte words
  * (zero when empty) for the params hash, and `LibValidationVM.encodeRunVM`
  * reproducing the production compiler's `runVM` calldata byte-for-byte.
  *
- * These are pure encoding/hash identities — no VM execution — so they are
- * unaffected by the uc1 register-convention defect (see the plan's
- * `Surprises & Discoveries`; execution asserts live in test/vc/VmPrograms.t.sol
- * and gate on the GD-7 re-pin).
+ * These are pure encoding/hash identities with no VM execution. Executing the
+ * pinned uc1 program on the canonical VM is covered by test/vc/Uc1Fork.t.sol;
+ * the hand-authored accept/reject matrix lives in test/vc/VmPrograms.t.sol.
  */
 contract HashParityTest is VcTestBase {
     string json;
@@ -66,7 +65,7 @@ contract HashParityTest is VcTestBase {
         }
     }
 
-    /// @dev G6 body-sharing: the same operation for two users pins one body
+    /// @dev Body sharing: the same operation for two users pins one body
     /// hash and distinct params hashes — per-user values live only in params.
     function test_programVectors_uc1BodySharing() external view {
         bytes32 hashA = vm.parseJsonBytes32(json, ".programVectors[0].validationProgramHash");

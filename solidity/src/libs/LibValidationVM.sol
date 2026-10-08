@@ -3,7 +3,7 @@ pragma solidity ^0.8.30;
 
 /**
  * @notice ABI mirror of the LI.FI VirtualMachine's command structure
- * (umbrella `vm/src/DataModel.sol`). The VM sources are never imported: the
+ * (`src/DataModel.sol` in the VirtualMachine sources). The VM sources are never imported: the
  * validator only needs to re-encode a canonical validation-program byte string
  * into the `runVM` calldata shape and let the deployed VM interpret it.
  */
@@ -20,7 +20,7 @@ struct VMState {
 /**
  * @title LibValidationVM
  * @notice Encoding and register-file construction for committed validation
- * programs (verified-continuations, cross-repo seams C1/C3).
+ * programs (verified continuations).
  *
  * A validation program travels as its canonical body: the `runVM` command array
  * tight-packed at 33 bytes per command (`uint8 op ++ bytes32 data`,
@@ -29,7 +29,7 @@ struct VMState {
  * 32-byte words; `keccak256` of their concatenation is the committed
  * `paramsHash` (`bytes32(0)` for an empty vector).
  *
- * The initial register file follows the frozen C1 layout convention:
+ * The initial register file follows the frozen register-layout convention:
  * `registers = validationParams ++ [account] ++ preBalances`, pre-balances in
  * committed-outcomes order, remaining registers zero (32-byte zero words, so an
  * unwritten scratch read behaves identically to a compiler-embedded zero
@@ -39,7 +39,7 @@ struct VMState {
  */
 library LibValidationVM {
     /// @dev `runVM((uint8,bytes32)[],(bytes[]))` on the canonical VirtualMachine
-    /// (umbrella `vm/src/VirtualMachine.sol`). Pinned; asserted against the
+    /// (`src/VirtualMachine.sol` in the VirtualMachine sources). Pinned; asserted against the
     /// shared hash-parity fixture's real compiler calldata in the test suite.
     bytes4 internal constant RUN_VM_SELECTOR = 0x00a32e6c;
 
@@ -80,7 +80,7 @@ library LibValidationVM {
         return (keccak256(buffer), true);
     }
 
-    /// @notice Builds the initial register file per the frozen C1 layout
+    /// @notice Builds the initial register file per the frozen register-layout
     /// convention. The caller must have validated the params vector (32-byte
     /// words) and that `params.length + preBalances.length` (the highest written
     /// register index — the account occupies `params.length`, the last

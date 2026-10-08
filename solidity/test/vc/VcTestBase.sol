@@ -8,16 +8,16 @@ import { LibExecutionConstraintV2 } from "../../src/libs/LibExecutionConstraintV
 
 /**
  * @title Verified-continuations test base
- * @notice Shared plumbing for the GD-4 test suites (test/vc/*): canonical platform
- * addresses, access to the cross-repo fixtures in the sibling umbrella workspace,
+ * @notice Shared plumbing for the CATValidatorV2 test suites (test/vc/*):
+ * canonical platform addresses, access to the fixtures in test/vc/fixtures/,
  * and the Ethereum-mainnet fork helper.
  *
- * Fixtures are the cross-repo source of truth: if a test and a fixture
- * disagree, the fixture wins.
+ * Fixtures are the source of truth: if a test and a fixture disagree, the
+ * fixture wins.
  */
 abstract contract VcTestBase is Test {
     /// @dev Canonical deterministic deployments, identical on all supported chains
-    /// (umbrella vm/DEPLOYMENTS.md).
+    /// (see `DEPLOYMENTS.md` in the VirtualMachine sources).
     address internal constant VM_ADDR = 0xb57Ce43Be47DF611C98EB0943e5D36EBDb36cc6D;
     address internal constant INVARIANT_CHECKER = 0xe17006F4DfE8Aa2bf80589E497ad98D470f66fef;
     address internal constant ARITHMETIC_PROCESSOR = 0x25407266A1229c83d03ececfff8eD7d92754b285;
@@ -31,15 +31,9 @@ abstract contract VcTestBase is Test {
     bytes4 internal constant RUN_VM_SELECTOR = 0x00a32e6c;
 
     string internal constant HASH_PARITY_VECTORS = "hash-parity/vectors.json";
-    string internal constant SCA_PARITY_VECTORS = "sca-parity/vectors.json";
 
-    /// @notice Root of the shared fixtures. Defaults to the vendored in-repo
-    /// mirror (`test/vc/fixtures/`, F5) so the suite is self-contained with no
-    /// umbrella checkout; set VC_UMBRELLA_DIR to assert against the umbrella
-    /// `contract/fixtures/` source of truth instead (continuity override).
-    function fixturesDir() internal view returns (string memory) {
-        string memory umbrella = vm.envOr("VC_UMBRELLA_DIR", string(""));
-        if (bytes(umbrella).length != 0) return string.concat(umbrella, "/contract/fixtures/");
+    /// @notice Root of the fixtures, relative to the Foundry project root.
+    function fixturesDir() internal pure returns (string memory) {
         return "test/vc/fixtures/";
     }
 

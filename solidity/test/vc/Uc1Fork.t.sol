@@ -25,16 +25,15 @@ contract Uc1MockFill {
 }
 
 /**
- * @title GD-4 M6 — the pinned uc1 vector on the canonical VM (fork)
- * @notice Proves the re-pinned (GD-7) uc1 hash-parity vector executes on the
- * real, unmodified VirtualMachine on an Ethereum mainnet fork, and settles
- * through `CATValidatorV2.entry()` when the delivery is funded. This replaces
- * the M1 defect spike (`ForkSpike.t.sol`, deleted): before the re-pin the
- * verbatim calldata reverted `InvalidRPNStack()` from one-based register
- * references landing one slot short; post-re-pin the very same program runs its
- * whole read → RPN → assert pipeline correctly and fails only on the genuine
- * invariant (the delivery `0x1111…1111` holds far less than 1e18 WETH on
- * mainnet), reaching `AssertGteFailed`.
+ * @title The pinned uc1 vector on the canonical VM (fork)
+ * @notice Proves the uc1 hash-parity vector executes on the real, unmodified
+ * VirtualMachine on an Ethereum mainnet fork, and settles through
+ * `CATValidatorV2.entry()` when the delivery is funded. The program runs its
+ * whole read → RPN → assert pipeline and fails only on the genuine invariant
+ * (the delivery `0x1111…1111` holds far less than 1e18 WETH on mainnet),
+ * reaching `AssertGteFailed`. A register-layout mismatch between the compiler
+ * and the validator (for example a reference landing one slot short) would
+ * instead revert inside the VM machinery, such as `InvalidRPNStack()`.
  *
  * The uc1 program (from `hash-parity/vectors.json` `programVectors[0]`,
  * `uc1-user-a`) asserts, in order:
@@ -83,8 +82,8 @@ contract Uc1ForkTest is VcTestBase {
     /// preBalances)` with the fixture's five param words, an escrow-shaped
     /// account, and a zero pre-balance — reaches the identical invariant. This
     /// proves `entry()`'s own `params ++ [account] ++ preBalances` construction
-    /// (not the fixture's pre-baked register file) executes the pinned body, the
-    /// exact claim the C1 register-convention defect blocked.
+    /// (not the fixture's pre-baked register file) executes the pinned body: the
+    /// compiler and the validator agree on the register layout.
     function test_uc1_conventionRebuiltExecutesToAssertGteFailed() external {
         if (!hasForkRpc()) return vm.skip(true);
 
@@ -104,7 +103,7 @@ contract Uc1ForkTest is VcTestBase {
     /* ─────────────────────────── settlement through entry()
     ─────────────── */
 
-    /// @notice The C3 "VM accepts valid" flip for uc1: the pinned program settles
+    /// @notice The "VM accepts a valid program" case for uc1: the pinned program settles
     /// through `entry()` when the delivery is funded so both asserts pass.
     function test_uc1_settlesThroughEntryWhenDeliveryFunded() external {
         if (!hasForkRpc()) return vm.skip(true);

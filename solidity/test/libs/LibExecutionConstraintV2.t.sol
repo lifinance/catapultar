@@ -6,7 +6,7 @@ import { Test } from "forge-std/src/Test.sol";
 import { Allowance, AllowanceSpend, LibExecutionConstraint, Outcome } from "../../src/libs/LibExecutionConstraint.sol";
 import { LibExecutionConstraintV2 } from "../../src/libs/LibExecutionConstraintV2.sol";
 
-/// @dev The frozen C2 type string: `bytes32 validationProgramHash,bytes32 paramsHash`
+/// @dev The frozen v2 type string: `bytes32 validationProgramHash,bytes32 paramsHash`
 /// appended at the END of the ExecutionConstraint(...) field list, sub-type strings
 /// unchanged after it. Written out literally here so a drift in the library constant
 /// fails against an independent copy.
@@ -71,7 +71,7 @@ contract LibExecutionConstraintV2Test is Test {
         assertEq(
             LibExecutionConstraintV2.EXECUTION_CONSTRAINT_V2_TYPE_HASH,
             keccak256(bytes(EXECUTION_CONSTRAINT_V2_TYPE)),
-            "type-hash constant drifted from the frozen C2 type string"
+            "type-hash constant drifted from the frozen v2 type string"
         );
     }
 

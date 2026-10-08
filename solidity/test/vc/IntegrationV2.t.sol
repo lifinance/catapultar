@@ -43,7 +43,7 @@ contract MockSwap {
 }
 
 /**
- * @title GD-4 M6 — CATValidatorV2 escrow flow end-to-end (fork)
+ * @title CATValidatorV2 escrow flow end-to-end (fork)
  * @notice Drives the production settlement path on an Ethereum mainnet fork: a
  * factory-deployed Catapultar escrow whose CREATE2 salt embeds the v2
  * constraint digest (and therefore the committed validation program + params),

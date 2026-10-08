@@ -29,7 +29,7 @@ contract Swapper {
 
 /**
  * @title v1/v2 behavioral parity at `validationProgramHash == 0`
- * @notice The G11 "hash==0 reproduces v1" matrix row, at the observable-behavior
+ * @notice The "hash == 0 reproduces v1" guarantee, at the observable-behavior
  * level: for identical inputs (modulo the version-2 digest, signed per
  * validator), v1 `CATValidator` and `CATValidatorV2` with empty validation
  * fields must produce identical outcomes — same revert selectors and args,

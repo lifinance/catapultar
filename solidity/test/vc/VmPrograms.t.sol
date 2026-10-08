@@ -59,7 +59,7 @@ contract MockSink {
 }
 
 /**
- * @title C3 vm-programs — staticcall accept/reject matrix on the real VM (fork)
+ * @title vm-programs — staticcall accept/reject matrix on the real VM (fork)
  * @notice Proves, against the canonical VirtualMachine deployed on an Ethereum
  * mainnet fork, that hand-authored assert-only validation programs execute
  * through `CATValidatorV2.entry()`'s gas-capped `staticcall` and that every
@@ -68,13 +68,14 @@ contract MockSink {
  * (a direct call to the VM) to show the op numbers in `vm/src/DataModel.sol`
  * drive the observed effects (SAFE_TRANSFER moves tokens, LOG emits, …).
  *
- * All programs are hand-authored zero-based per the frozen C1 register-layout
- * convention (`registers = validationParams ++ [account] ++ preBalances`), so —
- * unlike the pinned uc1 vector (see the plan's Surprises & Discoveries) — they
- * are fully under this repo's control and unaffected by the GD-7 re-pin.
+ * All programs are hand-authored with zero-based register references per the
+ * frozen register-layout convention
+ * (`registers = validationParams ++ [account] ++ preBalances`), so, unlike the
+ * compiler-produced uc1 vector in the hash-parity fixture, they are fully under
+ * this repo's control.
  *
- * The umbrella fixture `contract/fixtures/vm-programs/vectors.json` (schema
- * `c3-vm-programs/v1`) is the cross-repo authority; it is regenerated from the
+ * The fixture `test/vc/fixtures/vm-programs/vectors.json` (schema
+ * `c3-vm-programs/v1`) is the authority for these bodies; it is regenerated from the
  * ProgramBuilder output with `VC_REGEN_VM_FIXTURE=true` and asserted otherwise.
  */
 contract VmProgramsTest is VcTestBase {
@@ -146,13 +147,13 @@ contract VmProgramsTest is VcTestBase {
     /* ═══════════════════════════ fixture parity
     ═══════════════════════════ */
 
-    /// @notice The umbrella C3 fixture is the cross-repo authority: assert the
+    /// @notice The vm-programs fixture is the authority: assert the
     /// ProgramBuilder reproduces every pinned body byte-for-byte (and the
     /// self-describing header). Regenerates first when VC_REGEN_VM_FIXTURE=true.
     function test_fixtureParity() external {
         if (vm.envOr("VC_REGEN_VM_FIXTURE", false)) _regenerateFixture();
         // No fork gate: _programs() is pure and the fixture is read from disk, so
-        // this byte-for-byte parity check — the cross-repo authority — runs in
+        // this byte-for-byte parity check runs in
         // every CI job, with or without a fork RPC.
 
         string memory json = readFixture(VM_PROGRAMS_VECTORS);
@@ -225,7 +226,7 @@ contract VmProgramsTest is VcTestBase {
         }
     }
 
-    /// @dev FR-V5 bounded grief: a valid accept program run under a 50k gas cap
+    /// @dev Bounded grief: a valid accept program run under a 50k gas cap
     /// runs out of gas inside the staticcall and fails closed as ValidationFailed.
     function test_gasCapExhaustionFailsClosed() external {
         if (!hasForkRpc()) return vm.skip(true);
@@ -355,8 +356,8 @@ contract VmProgramsTest is VcTestBase {
     /* ═══════════════════════════ program authoring
     ════════════════════════ */
 
-    /// @dev The full C3 program set, in fixture order. Bodies are hand-authored
-    /// zero-based per the C1 convention; per-program register layouts are
+    /// @dev The full vm-programs set, in fixture order. Bodies are hand-authored
+    /// zero-based per the register-layout convention; per-program register layouts are
     /// documented on each builder below.
     function _programs() internal pure returns (Prog[] memory progs) {
         progs = new Prog[](9);

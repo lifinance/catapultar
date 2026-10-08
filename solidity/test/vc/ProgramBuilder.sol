@@ -4,17 +4,18 @@ pragma solidity ^0.8.30;
 /**
  * @title ProgramBuilder
  * @notice Test-only helpers that pack canonical validation-program commands
- * exactly as the deployed VirtualMachine expects (umbrella
- * `vm/src/CommandPacking.sol`) and concatenate them into the 33-bytes-per-command
- * canonical body (`uint8 op ++ bytes32 data`).
+ * exactly as the deployed VirtualMachine expects and concatenate them into the
+ * 33-bytes-per-command canonical body (`uint8 op ++ bytes32 data`). Paths of the
+ * form `vm/src/...` below refer to the LI.FI VirtualMachine sources; packing
+ * follows `vm/src/CommandPacking.sol`.
  *
  * The VM sources are never imported: each packer mirrors the layout documented
  * in the referenced `CommandPacking.pack*`/`unpack*` function so the hand-authored
- * C3 `vm-programs` fixture is fully under this repo's control. Op numbers follow
+ * `vm-programs` fixture is fully under this repo's control. Op numbers follow
  * `vm/src/DataModel.sol`'s frozen `OP` enum.
  *
- * Blueprints follow the `BlueprintEncoder` DSL (umbrella
- * `vm/src/BlueprintEncoder.sol`): static register token = index (0x00-0x79),
+ * Blueprints follow the `BlueprintEncoder` DSL
+ * (`vm/src/BlueprintEncoder.sol`): static register token = index (0x00-0x79),
  * dynamic register token = index | 0x80, container tokens 0x7B-0x7F.
  */
 library ProgramBuilder {
