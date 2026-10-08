@@ -139,8 +139,21 @@ contract V1ParityTest is Test {
         uint256 committedAmount,
         bytes memory signature
     ) internal {
+        settleTo(viaV2, nonce, deliverAmount, committedAmount, signature, viaV2 ? address(v2) : address(v1));
+    }
+
+    /// @param deliverTo Where the fill sends the outcome token. Both validators
+    /// require the validator itself; any other recipient fails the outcome check.
+    function settleTo(
+        bool viaV2,
+        uint256 nonce,
+        uint256 deliverAmount,
+        uint256 committedAmount,
+        bytes memory signature,
+        address deliverTo
+    ) internal {
         (AllowanceSpend[] memory allowances, Outcome[] memory outcomes) = constraintParts(committedAmount);
-        bytes memory payload = abi.encodeCall(Swapper.swap, (outToken, deliverAmount, destination));
+        bytes memory payload = abi.encodeCall(Swapper.swap, (outToken, deliverAmount, deliverTo));
 
         vm.prank(executor);
         if (viaV2) {
@@ -192,6 +205,8 @@ contract V1ParityTest is Test {
 
         assertEq(outToken.balanceOf(destination), destAfterV1 + DELIVER, "identical delivery");
         assertEq(inToken.balanceOf(address(swapper)), swapperAfterV1 + SPEND, "identical allowance pull");
+        assertEq(outToken.balanceOf(address(v1)), 0, "v1 forwarded everything");
+        assertEq(outToken.balanceOf(address(v2)), 0, "v2 forwarded everything");
     }
 
     function test_parity_floorViolation() external {
@@ -204,6 +219,21 @@ contract V1ParityTest is Test {
         bytes memory sigV2 = signatureFor(true, 1, DELIVER);
         vm.expectRevert(abi.encodeWithSelector(CATValidatorV2.InvalidTokenAmount.selector, DELIVER, DELIVER - 1));
         settle(true, 1, DELIVER - 1, DELIVER, sigV2);
+    }
+
+    /// @dev Zenith 6.1.1: a fill that pays the destination directly, bypassing
+    /// the validator, fails the outcome check on both validators even though
+    /// the destination received the full amount.
+    function test_parity_deliveryToDestinationRejected() external {
+        prepare(address(v1));
+        bytes memory sigV1 = signatureFor(false, 1, DELIVER);
+        vm.expectRevert(abi.encodeWithSelector(CATValidator.InvalidTokenAmount.selector, DELIVER, 0));
+        settleTo(false, 1, DELIVER, DELIVER, sigV1, destination);
+
+        prepare(address(v2));
+        bytes memory sigV2 = signatureFor(true, 1, DELIVER);
+        vm.expectRevert(abi.encodeWithSelector(CATValidatorV2.InvalidTokenAmount.selector, DELIVER, 0));
+        settleTo(true, 1, DELIVER, DELIVER, sigV2, destination);
     }
 
     function test_parity_nonceReuse() external {

@@ -18,8 +18,9 @@ import { LibValidationVM } from "./libs/LibValidationVM.sol";
  * @custom:version 2.0.0
  * @notice CATValidator extended with a committed validation program
  * (verified continuations). The v1 mechanics are unchanged: a pre-approved
- * asset allowance authorizes an executor-supplied transaction that must result
- * in a committed asset outcome (the per-token balance-delta floor).
+ * asset allowance authorizes an executor-supplied transaction that must deliver
+ * each committed outcome to this contract, which checks it holds at least the
+ * outcome amount and forwards its full balance to the outcome's destination.
  *
  * V2 additionally commits, through the EIP-712 constraint digest (and therefore
  * through the escrow account's counterfactual address), the content hash of an
@@ -35,6 +36,11 @@ import { LibValidationVM } from "./libs/LibValidationVM.sol";
  * Layering guarantees (never subtractive): the floor always runs, and runs
  * first; the program can only add constraints on top of it. A constraint with
  * `validationProgramHash == 0` behaves exactly like v1.
+ *
+ * This contract holds outcome assets only during settlement. Tokens sent to it
+ * outside `entry()` are forwarded to the next outcome destination of that
+ * token. Native value is also sent along with the next execution call, because
+ * `_call` forwards this contract's whole balance.
  *
  * The EIP-712 domain version is "2": v1 and v2 digests can never collide, so
  * existing v1 bundles and escrow addresses are unaffected.
@@ -96,6 +102,8 @@ contract CATValidatorV2 is EIP712, ReentrancyGuard {
         VALIDATION_GAS_CAP = validationGasCap;
     }
 
+    receive() external payable { }
+
     function _domainNameAndVersion() internal pure override returns (string memory name, string memory version) {
         name = "CAT Validator";
         version = "2";
@@ -110,7 +118,9 @@ contract CATValidatorV2 is EIP712, ReentrancyGuard {
      * @dev This function can only be called by the designated executor (embedded as
      * `msg.sender` in the typehash). Destination `address(0)` specifies the signer.
      * The `2**255` spend sentinel uses the signer's current balance; any other
-     * spend amount is used as supplied (v1 semantics, unchanged).
+     * spend amount is used as supplied (v1 semantics, unchanged). The execution
+     * must deliver each outcome token to this contract; the outcome check reads
+     * this contract's balance and forwards it to the destination.
      * @param validationProgramHash Committed content hash of the canonical
      * validation-program body (keccak256 of `validationProgram`); bytes32(0)
      * means "no program" and reproduces exact v1 behavior.
@@ -137,17 +147,13 @@ contract CATValidatorV2 is EIP712, ReentrancyGuard {
 
         _validateApproval(account, nonce, allowances, outcomes, validationProgramHash, paramsHash, signature);
 
-        uint256[] memory recordedBalances = _recordBalances(account, outcomes);
-
         _handleAllowances(execTarget, account, allowances);
 
         if (execPayload.length != 0) _call(execTarget, execPayload);
 
-        _compareOutcomes(account, outcomes, recordedBalances);
+        uint256[] memory preBalances = _validatePayment(account, outcomes, validationProgramHash != bytes32(0));
 
-        _runValidation(
-            account, validationProgramHash, paramsHash, validationProgram, validationParams, recordedBalances
-        );
+        _runValidation(account, validationProgramHash, paramsHash, validationProgram, validationParams, preBalances);
     }
 
     /**
@@ -164,8 +170,8 @@ contract CATValidatorV2 is EIP712, ReentrancyGuard {
      * @param paramsHash Hash that the supplied parameter vector must match.
      * @param validationProgram Canonical program body passed to the VM.
      * @param validationParams Committed 32-byte parameter words injected first.
-     * @param preBalances `_recordBalances` snapshot taken before allowance transfers
-     * and the fill.
+     * @param preBalances Destination balances `_validatePayment` read immediately
+     * before forwarding each outcome, in committed-outcomes order.
      */
     function _runValidation(
         address account,
@@ -263,51 +269,61 @@ contract CATValidatorV2 is EIP712, ReentrancyGuard {
     }
 
     /**
-     * @notice Wraps balanceOf call for ERC20 tokens and natives.
-     * @param account Fallback address for to read if outcome.destination is 0.
-     * @param outcome Description of the balance read: target and token. 0 token is native.
+     * @notice Returns the balance of `token` held by `target`.
+     * @param token ERC20 token address. address(0) returns the native balance of `target`.
+     * @param target Account to query.
      */
     function _balanceOf(
-        address account,
-        Outcome calldata outcome
+        address token,
+        address target
     ) internal view returns (uint256 bal) {
-        address destination = outcome.destination == address(0) ? account : outcome.destination;
-        bal = outcome.token == address(0) ? destination.balance : _safeBalanceOf(outcome.token, destination);
+        bal = token == address(0) ? target.balance : _safeBalanceOf(token, target);
     }
 
     /**
-     * @notice Record balances.
-     * @param account Fallback address if outcomes[].destination is 0.
-     * @param outcomes Description of balances to read: target and token.
-     * @return balances List of current balances of outcomes.
+     * @notice Transfer `amount` of `token` to `dest`.
+     * @dev Handles both ERC-20 and native tokens (token == address(0)).
+     * @param token ERC-20 token address, or address(0) for the native token.
+     * @param amount Amount to transfer.
+     * @param dest Recipient address.
      */
-    function _recordBalances(
-        address account,
-        Outcome[] calldata outcomes
-    ) internal view returns (uint256[] memory balances) {
-        balances = DynamicArrayLib.malloc(outcomes.length);
-        for (uint256 i; i < outcomes.length; ++i) {
-            Outcome calldata outcome = outcomes[i];
-            balances.set(i, _balanceOf(account, outcome));
-        }
+    function _transfer(
+        address token,
+        uint256 amount,
+        address dest
+    ) internal virtual {
+        token == address(0)
+            ? SafeTransferLib.safeTransferETH(dest, amount)
+            : SafeTransferLib.safeTransfer(token, dest, amount);
     }
 
     /**
-     * @notice Compare current balances to recorded balances.
-     * @param account Fallback address if outcomes[].destination is 0.
-     * @param outcomes Description of balances to compare: target, token, and difference.
-     * @param recordedBalances List of previously recorded balances.
+     * @notice Verify this contract holds enough of each outcome token, then forward it to the destination.
+     * @dev The executor must deliver outcome tokens to address(this) during execution. The full held
+     * balance is forwarded, so any surplus beyond outcome.amount also goes to the destination.
+     * When `recordPreBalances` is set, each destination's balance is read immediately before its
+     * forward. A committed program that subtracts it from the destination's current balance
+     * therefore sees exactly what this contract forwarded, never an unrelated transfer that reached
+     * the destination during execution.
+     * @param signer Token recipient if outcome.destination is 0.
+     * @param outcomes Tokens and minimum amounts that must be present at address(this).
+     * @param recordPreBalances Whether to record destination balances for the validation program.
+     * @return preBalances Destination balances before each forward, in outcome order; empty when not recorded.
      */
-    function _compareOutcomes(
-        address account,
+    function _validatePayment(
+        address signer,
         Outcome[] calldata outcomes,
-        uint256[] memory recordedBalances
-    ) internal view {
+        bool recordPreBalances
+    ) internal returns (uint256[] memory preBalances) {
+        if (recordPreBalances) preBalances = DynamicArrayLib.malloc(outcomes.length);
         for (uint256 i; i < outcomes.length; ++i) {
             Outcome calldata outcome = outcomes[i];
-            uint256 newBalance = _balanceOf(account, outcome);
-            uint256 diff = newBalance - recordedBalances[i];
-            if (diff < outcome.amount) revert InvalidTokenAmount(outcome.amount, diff);
+            uint256 payment = _balanceOf(outcome.token, address(this));
+            if (payment < outcome.amount) revert InvalidTokenAmount(outcome.amount, payment);
+
+            address destination = outcome.destination == address(0) ? signer : outcome.destination;
+            if (recordPreBalances) preBalances.set(i, _balanceOf(outcome.token, destination));
+            _transfer(outcome.token, payment, destination);
         }
     }
 

@@ -559,6 +559,126 @@ contract CATValidatorV2Test is Test {
         assertEq(token.balanceOf(signer), 5 ether, "funds untouched after validation failure");
     }
 
+    /* ─────────────────────────── Zenith 6.1.1: payment at the
+    validator
+    ─────────────────────────── */
+
+    /// @param expectedRevert Revert data `entry()` must produce; empty to expect success.
+    function settleWith(
+        CATValidatorV2 target,
+        address fill,
+        bytes memory payload,
+        Outcome[] memory outcomes,
+        bytes memory body,
+        bytes memory expectedRevert
+    ) internal {
+        bytes32 programHash = body.length == 0 ? bytes32(0) : keccak256(body);
+        bytes memory sig = signedEntryArgs(target, 1, outcomes, programHash, bytes32(0));
+        if (expectedRevert.length != 0) vm.expectRevert(expectedRevert);
+        vm.prank(executor);
+        target.entry(
+            fill,
+            payload,
+            signer,
+            1,
+            new AllowanceSpend[](0),
+            outcomes,
+            programHash,
+            bytes32(0),
+            body,
+            new bytes[](0),
+            sig
+        );
+    }
+
+    function oneOutcome(
+        address outToken,
+        uint256 amount,
+        address destination
+    ) internal pure returns (Outcome[] memory outcomes) {
+        outcomes = new Outcome[](1);
+        outcomes[0] = Outcome({ token: outToken, amount: amount, destination: destination });
+    }
+
+    function test_entry_deliveryToDestinationRejected() external {
+        // The destination is paid in full, but not through the validator: the
+        // outcome check reads the validator's own balance and finds nothing.
+        address destination = makeAddr("destination");
+        OutcomeFill fill = new OutcomeFill();
+        bytes memory payload = abi.encodeCall(OutcomeFill.mint, (token, destination, 1 ether));
+
+        settleWith(
+            validator,
+            address(fill),
+            payload,
+            oneOutcome(address(token), 1 ether, destination),
+            hex"",
+            abi.encodeWithSelector(CATValidatorV2.InvalidTokenAmount.selector, 1 ether, 0)
+        );
+    }
+
+    function test_entry_forwardsFullHeldBalance() external {
+        // The surplus above the committed amount belongs to the destination too.
+        address destination = makeAddr("destination");
+        OutcomeFill fill = new OutcomeFill();
+        bytes memory payload = abi.encodeCall(OutcomeFill.mint, (token, address(validator), 1.5 ether));
+
+        settleWith(validator, address(fill), payload, oneOutcome(address(token), 1 ether, destination), hex"", hex"");
+
+        assertEq(token.balanceOf(destination), 1.5 ether, "destination receives the full held balance");
+        assertEq(token.balanceOf(address(validator)), 0, "validator keeps nothing");
+    }
+
+    function test_entry_zeroDestinationForwardsToSigner() external {
+        OutcomeFill fill = new OutcomeFill();
+        bytes memory payload = abi.encodeCall(OutcomeFill.mint, (token, address(validator), 1 ether));
+
+        settleWith(validator, address(fill), payload, oneOutcome(address(token), 1 ether, address(0)), hex"", hex"");
+
+        assertEq(token.balanceOf(signer), 1 ether, "address(0) destination pays the signer");
+    }
+
+    function test_entry_nativeOutcomeForwarded() external {
+        address destination = makeAddr("destination");
+        OutcomeFill fill = new OutcomeFill();
+        vm.deal(address(fill), 1 ether);
+        bytes memory payload = abi.encodeCall(OutcomeFill.sendNative, (payable(address(validator)), 1 ether));
+
+        settleWith(validator, address(fill), payload, oneOutcome(address(0), 1 ether, destination), hex"", hex"");
+
+        assertEq(destination.balance, 1 ether, "native outcome forwarded");
+        assertEq(address(validator).balance, 0, "validator keeps no native balance");
+    }
+
+    function test_entry_programPreBalanceExcludesDirectTransfers() external {
+        // The destination starts with 2 ether. The fill pays the validator 1
+        // ether and the destination 5 ether directly. The program's pre-balance
+        // must be the destination's balance immediately before the validator
+        // forwards (7 ether), so that current - preBalance is exactly the
+        // forwarded 1 ether. EchoVM reverts with the runVM payload it received,
+        // which exposes the injected register file.
+        address destination = makeAddr("destination");
+        token.mint(destination, 2 ether);
+        OutcomeFill fill = new OutcomeFill();
+        bytes memory payload =
+            abi.encodeCall(OutcomeFill.mintTwo, (token, address(echoValidator), 1 ether, destination, 5 ether));
+        bytes memory body = dummyBody();
+
+        uint256[] memory preBalances = new uint256[](1);
+        preBalances[0] = 7 ether;
+        bytes memory expectedPayload =
+            echoValidator.encodeRunVM(body, echoValidator.buildRegisters(new bytes[](0), signer, preBalances));
+
+        settleWith(
+            echoValidator,
+            address(fill),
+            payload,
+            oneOutcome(address(token), 1 ether, destination),
+            body,
+            abi.encodeWithSelector(CATValidatorV2.ValidationFailed.selector, expectedPayload)
+        );
+    }
+
     /* ─────────────────────────── Zenith 6.2.1: failed balanceOf
     reads
     ─────────────────────────── */
@@ -645,6 +765,37 @@ contract CATValidatorV2Test is Test {
             new bytes[](0),
             sig
         );
+    }
+}
+
+/// @dev A fill reached through the validator's CallProxy. MockERC20's mint is
+/// permissionless, so the proxy can mint to any recipient.
+contract OutcomeFill {
+    function mint(
+        MockERC20 outToken,
+        address to,
+        uint256 amount
+    ) external payable {
+        outToken.mint(to, amount);
+    }
+
+    function mintTwo(
+        MockERC20 outToken,
+        address to,
+        uint256 amount,
+        address other,
+        uint256 otherAmount
+    ) external payable {
+        outToken.mint(to, amount);
+        outToken.mint(other, otherAmount);
+    }
+
+    function sendNative(
+        address payable to,
+        uint256 amount
+    ) external payable {
+        (bool ok,) = to.call{ value: amount }("");
+        require(ok, "native send failed");
     }
 }
 

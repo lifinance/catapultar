@@ -14,9 +14,10 @@ import { ProgramBuilder } from "./ProgramBuilder.sol";
 import { VcTestBase } from "./VcTestBase.sol";
 
 /// @dev A solver fill: receives the escrow's allowance token (moved to it by
-/// `entry()` before the fill) and delivers `outAmount` of `outToken` to the
-/// delivery address, producing the committed outcome. Payable: `entry()`'s
-/// CallProxy forwards the validator's balance as call value.
+/// `entry()` before the fill) and delivers `outAmount` of `outToken` to `to`.
+/// A correct fill names the validator, which checks the amount and forwards it
+/// to the committed delivery address. Payable: `entry()`'s CallProxy forwards
+/// the validator's balance as call value.
 contract MockSwap {
     function fill(
         address outToken,
@@ -24,6 +25,20 @@ contract MockSwap {
         uint256 outAmount
     ) external payable {
         SafeTransferLib.safeTransfer(outToken, to, outAmount);
+    }
+
+    /// @dev A fill that also pays `other` directly during execution, standing in
+    /// for any transfer to the delivery address that does not pass through the
+    /// validator.
+    function fillAndSend(
+        address outToken,
+        address to,
+        uint256 outAmount,
+        address other,
+        uint256 otherAmount
+    ) external payable {
+        SafeTransferLib.safeTransfer(outToken, to, outAmount);
+        SafeTransferLib.safeTransfer(outToken, other, otherAmount);
     }
 }
 
@@ -33,15 +48,17 @@ contract MockSwap {
  * factory-deployed Catapultar escrow whose CREATE2 salt embeds the v2
  * constraint digest (and therefore the committed validation program + params),
  * funded, then settled through `CATValidatorV2.entry()` with an empty signature
- * (the escrow pre-approves the digest via ERC-1271). The four rows prove the
+ * (the escrow pre-approves the digest via ERC-1271). The five rows prove the
  * core product claims:
  *   A. a passing committed program settles through the real factory/escrow path;
- *   B. a program strictly stronger than the balance-delta floor reverts
+ *   B. a program strictly stronger than the outcome floor reverts
  *      `ValidationFailed` (wrapping the inner `AssertGteFailed`) on a fill that
  *      clears the floor but not the program — funds/nonce untouched (refundable);
  *   C. a floor violation reverts `InvalidTokenAmount` before the program runs at
  *      all (the floor is enforced first, independently of the program);
- *   D. the pinned uc1 program is enforced end-to-end through the escrow path.
+ *   D. the pinned uc1 program is enforced end-to-end through the escrow path;
+ *   E. a transfer that reaches the delivery address without passing through
+ *      the validator does not count toward the program's balance check.
  *
  * Every test is fork-gated (`vm.skip(true)` when `VC_MAINNET_RPC_URL` is unset).
  * Extends the v1 `Integration.t.sol::test_validator` recipe to v2.
@@ -153,6 +170,34 @@ contract IntegrationV2Test is VcTestBase {
         assertFalse(validator.spentNonces(escrow, s.nonce), "nonce spent despite floor failure");
     }
 
+    /* ─────────────────────────── Row E — direct transfers do
+    not count
+    ───── */
+
+    function test_directTransferToDeliveryDoesNotSatisfyProgram() external {
+        if (!hasForkRpc()) return vm.skip(true);
+
+        // Zenith 6.1.1 at the program layer. The program demands WETH >=
+        // preBalance + 2 ether. The fill pays the validator the 1 ether floor
+        // and sends a further 1 ether straight to the delivery address. The
+        // delivery address ends 2 ether up, but entry() snapshots its balance
+        // after the fill and immediately before forwarding, so the program sees
+        // only the 1 ether the validator forwarded and rejects the settlement.
+        deal(WETH, DELIVERY, 0);
+        (bytes memory program, bytes[] memory params) = _erc20FloorProgram(WETH, DELIVERY, 2 ether);
+        Settlement memory s = _floorCase(program, params, FLOOR, FLOOR, 5);
+        s.fillPayload = abi.encodeCall(MockSwap.fillAndSend, (WETH, address(validator), FLOOR, DELIVERY, 1 ether));
+        deal(WETH, address(swap), 1 ether);
+
+        (bool ok, bytes memory ret, address escrow) = _settle(s);
+
+        assertFalse(ok, "a direct transfer to the delivery address satisfied the program");
+        assertEq(bytes4(ret), CATValidatorV2.ValidationFailed.selector, "not ValidationFailed");
+        bytes memory inner = abi.decode(_stripSelector(ret), (bytes));
+        assertEq(bytes4(inner), ASSERT_GTE_FAILED, "inner selector not AssertGteFailed");
+        assertFalse(validator.spentNonces(escrow, s.nonce), "nonce spent despite validation failure");
+    }
+
     /* ─────────────────────────── Row D — uc1 enforced
     end-to-end ────────── */
 
@@ -176,7 +221,7 @@ contract IntegrationV2Test is VcTestBase {
         s.outcomes = new Outcome[](1);
         s.outcomes[0] = Outcome({ token: WETH, amount: 0, destination: DELIVERY });
         s.allowances = _wethAllowance(1 ether);
-        s.fillPayload = abi.encodeCall(MockSwap.fill, (WETH, DELIVERY, 1 ether));
+        s.fillPayload = abi.encodeCall(MockSwap.fill, (WETH, address(validator), 1 ether));
 
         (bool ok,, address escrow) = _settle(s);
 
@@ -255,7 +300,7 @@ contract IntegrationV2Test is VcTestBase {
         uint256 floorAmount,
         uint256 deliverAmount,
         uint256 nonce
-    ) internal pure returns (Settlement memory s) {
+    ) internal view returns (Settlement memory s) {
         s.program = program;
         s.params = params;
         s.programHash = keccak256(program);
@@ -265,7 +310,7 @@ contract IntegrationV2Test is VcTestBase {
         s.outcomes = new Outcome[](1);
         s.outcomes[0] = Outcome({ token: WETH, amount: floorAmount, destination: DELIVERY });
         s.allowances = _wethAllowance(FLOOR);
-        s.fillPayload = abi.encodeCall(MockSwap.fill, (WETH, DELIVERY, deliverAmount));
+        s.fillPayload = abi.encodeCall(MockSwap.fill, (WETH, address(validator), deliverAmount));
     }
 
     function _wethAllowance(

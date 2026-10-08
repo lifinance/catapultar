@@ -9,9 +9,9 @@ import { LibValidationVM } from "../../src/libs/LibValidationVM.sol";
 import { VcTestBase } from "./VcTestBase.sol";
 
 /// @dev Test fill driven through `entry()`'s execTarget/execPayload path: moves a
-/// pre-funded token balance to the delivery address, standing in for a real
-/// solver fill that raises the delivery's balance between the pre-balance
-/// snapshot and the validation staticcall.
+/// pre-funded token balance to `to`, standing in for a real solver fill. A
+/// correct fill names the validator, which forwards the token to the delivery
+/// address between the pre-balance snapshot and the validation staticcall.
 contract Uc1MockFill {
     /// @dev Payable: `entry()`'s CallProxy forwards the validator's balance as
     /// call value, so a non-payable fill would revert on receipt.
@@ -120,24 +120,25 @@ contract Uc1ForkTest is VcTestBase {
         address delivery = vm.parseJsonAddress(json, ".programVectors[0].params[0].value");
 
         // One committed outcome: the WETH delivery whose pre-balance the program
-        // reads. `amount = 0` makes the balance-delta floor trivially satisfied,
-        // so the committed program — not the floor — is the binding constraint.
+        // reads. `amount = 0` makes the outcome floor trivially satisfied, so
+        // the committed program — not the floor — is the binding constraint.
         Outcome[] memory outcomes = new Outcome[](1);
         outcomes[0] = Outcome({ token: WETH, amount: 0, destination: delivery });
 
         // Funding math. The program asserts
         //   WETH.balanceOf(delivery) >= preBalance + outcomeMin (1e18)
         // where preBalance is entry()'s snapshot of WETH.balanceOf(delivery)
-        // taken BEFORE the fill (register 6). Start the delivery at 0 WETH so the
-        // snapshot is 0, then have the fill deliver exactly 1e18 — current
-        // (1e18) >= 0 + 1e18 clears it. The USDC invariant is absolute
-        // (>= 500e6, no snapshot), so fund the delivery with it directly.
+        // taken after the fill, immediately before the validator forwards the
+        // outcome (register 6). Start the delivery at 0 WETH so the snapshot is
+        // 0, then have the fill pay the validator exactly 1e18, which it
+        // forwards — current (1e18) >= 0 + 1e18 clears it. The USDC invariant
+        // is absolute (>= 500e6, no snapshot), so fund the delivery directly.
         deal(WETH, delivery, 0);
         deal(USDC, delivery, 500e6);
 
         Uc1MockFill fill = new Uc1MockFill();
         deal(WETH, address(fill), 1 ether);
-        bytes memory execPayload = abi.encodeCall(Uc1MockFill.deliver, (WETH, delivery, 1 ether));
+        bytes memory execPayload = abi.encodeCall(Uc1MockFill.deliver, (WETH, address(validator), 1 ether));
 
         uint256 nonce = 1;
         bytes memory sig = _sign(validator, executor, signerKey, nonce, outcomes, programHash, paramsHash);
