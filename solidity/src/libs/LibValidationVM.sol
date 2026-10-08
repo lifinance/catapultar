@@ -25,9 +25,9 @@ struct VMState {
  * A validation program travels as its canonical body: the `runVM` command array
  * tight-packed at 33 bytes per command (`uint8 op ++ bytes32 data`,
  * concatenated). `keccak256` of exactly those bytes is the committed
- * `validationProgramHash`. Committed per-user parameters travel as a vector of
- * 32-byte words; `keccak256` of their concatenation is the committed
- * `paramsHash` (`bytes32(0)` for an empty vector).
+ * `validationProgramHash`. Committed per-user parameters travel as a
+ * `bytes32[]`; `keccak256` of their concatenation is the committed `paramsHash`
+ * (`bytes32(0)` for an empty vector).
  *
  * The initial register file is `params ++ [account] ++ spent ++ paid`, then
  * zero words up to `NUM_REGISTERS`. `account` is the escrow address, `spent[i]`
@@ -59,30 +59,18 @@ library LibValidationVM {
     uint256 internal constant MAX_PREFIX_END = 121;
 
     /// @notice Computes the committed params hash for a supplied params vector.
-    /// @return h `bytes32(0)` when empty, else `keccak256` of the concatenated words.
-    /// @return ok False when any element is not exactly 32 bytes (malformed vector).
+    /// @return `bytes32(0)` when empty, else `keccak256` of the concatenated words.
     function paramsHashOf(
-        bytes[] calldata params
-    ) internal pure returns (bytes32 h, bool ok) {
-        uint256 numParams = params.length;
-        if (numParams == 0) return (bytes32(0), true);
-
-        bytes memory buffer = new bytes(numParams * 32);
-        for (uint256 i; i < numParams; ++i) {
-            bytes calldata word = params[i];
-            if (word.length != 32) return (bytes32(0), false);
-            assembly ("memory-safe") {
-                calldatacopy(add(add(buffer, 32), shl(5, i)), word.offset, 32)
-            }
-        }
-        return (keccak256(buffer), true);
+        bytes32[] calldata params
+    ) internal pure returns (bytes32) {
+        return params.length == 0 ? bytes32(0) : keccak256(abi.encodePacked(params));
     }
 
-    /// @notice Builds the initial register file. The caller must have validated
-    /// the params vector (32-byte words) and that the highest written index,
-    /// `params.length + spent.length + paid.length`, is at most `MAX_PREFIX_END`.
+    /// @notice Builds the initial register file. The caller must have checked
+    /// that the highest written index, `params.length + spent.length +
+    /// paid.length`, is at most `MAX_PREFIX_END`.
     function buildRegisters(
-        bytes[] calldata params,
+        bytes32[] calldata params,
         address account,
         uint256[] memory spent,
         uint256[] memory paid
@@ -96,7 +84,7 @@ library LibValidationVM {
         }
         uint256 next;
         for (; next < params.length; ++next) {
-            registers[next] = params[next];
+            registers[next] = abi.encodePacked(params[next]);
         }
         registers[next++] = abi.encodePacked(bytes32(uint256(uint160(account))));
         for (uint256 i; i < spent.length; ++i) {

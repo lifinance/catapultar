@@ -96,15 +96,15 @@ describe("ConstrainedAssetTransaction v2", () => {
       )!;
       expect(toFunctionSelector(entry)).toBe(
         toFunctionSelector(
-          "entry(address,bytes,address,uint256,(address,uint256,uint256)[],(address,uint256,address)[],bytes,bytes[],bytes)",
+          "entry(address,bytes,address,uint256,(address,uint256,uint256)[],(address,uint256,address)[],bytes,bytes32[],bytes)",
         ),
       );
-      expect(toFunctionSelector(entry)).toBe("0x25261c81");
+      expect(toFunctionSelector(entry)).toBe("0xb82ff7fa");
     });
 
     it("keeps the inherited 7-argument entry, which shares v1's selector", () => {
       expect(entries.map((i) => toFunctionSelector(i)).sort()).toEqual([
-        "0x25261c81",
+        "0xb82ff7fa",
         "0xe5ce4787",
       ]);
       const v1Entry = CAT_VALIDATOR_ABI.find(
@@ -219,7 +219,7 @@ describe("ConstrainedAssetTransaction v2", () => {
       });
       expect(exec.to).toBe(VALIDATOR);
       expect(exec.value).toBe(0n);
-      expect(exec.data.slice(0, 10)).toBe("0x25261c81");
+      expect(exec.data.slice(0, 10)).toBe("0xb82ff7fa");
       const { functionName, args } = decodeFunctionData({
         abi: CAT_VALIDATOR_V2_ABI,
         data: exec.data,
@@ -600,7 +600,7 @@ describe("ConstrainedAssetTransaction v2", () => {
     );
 
     it.skipIf(!hasArtifact)(
-      "reverts BadValidationParams on a 31-byte param word",
+      "reverts BadValidationParams on params without a program",
       async () => {
         const recipient = random(20);
         const { account, executeCall, amount1 } = await deployFundedAccount(
@@ -615,33 +615,27 @@ describe("ConstrainedAssetTransaction v2", () => {
           throw new Error("expected the 9-argument entry");
         const [target, payload, address, nonce, spends, outcomes] =
           decoded.args;
-        const shortWord: Hex = `0x${"22".repeat(31)}`;
-        // Both the program-less and the program-carrying shapes: the word
-        // length check runs before the signature check either way.
-        for (const [program, params] of [
-          ["0x", [shortWord]],
-          [PROGRAM, [PARAMS[0]!, shortWord]],
-        ] as const) {
-          await expect(
-            publicClient.simulateContract({
-              account: wallet.address,
-              address: validator,
-              abi: CAT_VALIDATOR_V2_ABI,
-              functionName: "entry",
-              args: [
-                target,
-                payload,
-                address,
-                nonce,
-                spends,
-                outcomes,
-                program,
-                [...params],
-                "0x",
-              ],
-            }),
-          ).rejects.toThrow(/BadValidationParams/);
-        }
+        // An empty program commits a zero params hash, so the params check
+        // runs before the signature check.
+        await expect(
+          publicClient.simulateContract({
+            account: wallet.address,
+            address: validator,
+            abi: CAT_VALIDATOR_V2_ABI,
+            functionName: "entry",
+            args: [
+              target,
+              payload,
+              address,
+              nonce,
+              spends,
+              outcomes,
+              "0x",
+              [PARAMS[0]!],
+              "0x",
+            ],
+          }),
+        ).rejects.toThrow(/BadValidationParams/);
         expect(await balanceOf(token1, account.address)).toBe(amount1);
       },
     );

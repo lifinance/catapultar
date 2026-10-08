@@ -189,8 +189,8 @@ export const CAT_VALIDATOR_V2_ABI = [
       },
       {
         name: "validationParams",
-        type: "bytes[]",
-        internalType: "bytes[]",
+        type: "bytes32[]",
+        internalType: "bytes32[]",
       },
       {
         name: "signature",

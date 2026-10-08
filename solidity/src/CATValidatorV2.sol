@@ -50,8 +50,8 @@ import { LibValidationVM } from "./libs/LibValidationVM.sol";
 contract CATValidatorV2 is CATValidator, Tstorish {
     /// @dev The program body length is not a multiple of 33.
     error BadValidationProgram();
-    /// @dev A param word is not 32 bytes, params were supplied without a
-    /// program, or the injected register prefix would reach the VM's void register.
+    /// @dev Params were supplied without a program, or the injected register
+    /// prefix would reach the VM's void register.
     error BadValidationParams();
     /// @dev The program call failed. Carries the inner revert data (empty when
     /// the VM ran out of gas or reverted without data).
@@ -110,8 +110,8 @@ contract CATValidatorV2 is CATValidator, Tstorish {
      * while recording the spends and payments, and then runs the program.
      * @param validationProgram Canonical program body, 33 bytes per command. Empty
      * commits `validationProgramHash = 0` and settles exactly as v1.
-     * @param validationParams Committed 32-byte parameter words. Must be empty when
-     * the program is empty.
+     * @param validationParams Committed parameter words. Must be empty when the
+     * program is empty.
      */
     function entry(
         address execTarget,
@@ -121,7 +121,7 @@ contract CATValidatorV2 is CATValidator, Tstorish {
         AllowanceSpend[] calldata allowances,
         Outcome[] calldata outcomes,
         bytes calldata validationProgram,
-        bytes[] calldata validationParams,
+        bytes32[] calldata validationParams,
         bytes calldata signature
     ) external nonReentrant {
         bytes32 validationProgramHash = _programHashOf(validationProgram);
@@ -161,13 +161,11 @@ contract CATValidatorV2 is CATValidator, Tstorish {
     /// @dev Params hash per `LibValidationVM.paramsHashOf`. Params without a
     /// program are rejected: an empty program commits a zero params hash.
     function _paramsHashOf(
-        bytes[] calldata validationParams,
+        bytes32[] calldata validationParams,
         bytes32 validationProgramHash
-    ) internal pure returns (bytes32 paramsHash) {
+    ) internal pure returns (bytes32) {
         if (validationProgramHash == bytes32(0) && validationParams.length != 0) revert BadValidationParams();
-        bool wellFormed;
-        (paramsHash, wellFormed) = LibValidationVM.paramsHashOf(validationParams);
-        if (!wellFormed) revert BadValidationParams();
+        return LibValidationVM.paramsHashOf(validationParams);
     }
 
     /**
@@ -259,7 +257,7 @@ contract CATValidatorV2 is CATValidator, Tstorish {
     function _runValidation(
         address account,
         bytes calldata validationProgram,
-        bytes[] calldata validationParams,
+        bytes32[] calldata validationParams,
         uint256[] memory spent,
         uint256[] memory paid
     ) internal view {

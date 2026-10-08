@@ -115,18 +115,16 @@ contract HashParityTest is VcTestBase {
         assertEq(canonicalParams.length % 32, 0, string.concat(name, ": canonicalParams not word-aligned"));
 
         uint256 numWords = canonicalParams.length / 32;
-        bytes[] memory words = new bytes[](numWords);
+        bytes32[] memory words = new bytes32[](numWords);
         for (uint256 i; i < numWords; ++i) {
-            bytes memory word = new bytes(32);
-            for (uint256 j; j < 32; ++j) {
-                word[j] = canonicalParams[i * 32 + j];
+            bytes32 word;
+            assembly ("memory-safe") {
+                word := mload(add(add(canonicalParams, 32), shl(5, i)))
             }
             words[i] = word;
         }
 
-        (bytes32 h, bool ok) = this.exposedParamsHashOf(words);
-        assertTrue(ok, string.concat(name, ": paramsHashOf rejected fixture words"));
-        assertEq(h, pinnedParamsHash, string.concat(name, ": params hash mismatch"));
+        assertEq(this.exposedParamsHashOf(words), pinnedParamsHash, string.concat(name, ": params hash mismatch"));
         if (numWords == 0) assertEq(pinnedParamsHash, bytes32(0), string.concat(name, ": empty params must pin zero"));
     }
 
@@ -159,8 +157,8 @@ contract HashParityTest is VcTestBase {
 
     /// @dev calldata trampolines for the library's calldata-typed arguments.
     function exposedParamsHashOf(
-        bytes[] calldata params
-    ) external pure returns (bytes32, bool) {
+        bytes32[] calldata params
+    ) external pure returns (bytes32) {
         return LibValidationVM.paramsHashOf(params);
     }
 

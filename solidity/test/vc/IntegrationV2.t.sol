@@ -111,7 +111,7 @@ contract IntegrationV2Test is VcTestBase {
         AllowanceSpend[] allowances;
         Outcome[] outcomes;
         bytes program;
-        bytes[] params;
+        bytes32[] params;
         bytes fillPayload;
         uint256 nonce;
     }
@@ -287,7 +287,7 @@ contract IntegrationV2Test is VcTestBase {
     function rateProgram(
         uint256 numerator,
         uint256 denominator
-    ) internal pure returns (bytes memory program, bytes[] memory params) {
+    ) internal pure returns (bytes memory program, bytes32[] memory params) {
         // regValues = [spent[0], num, den]; RPN: push 0, push 1, MUL, push 2, DIV_UP.
         bytes memory rpn = abi.encodePacked(
             ProgramBuilder.RPN_PUSH | 0,
@@ -296,11 +296,11 @@ contract IntegrationV2Test is VcTestBase {
             ProgramBuilder.RPN_PUSH | 2,
             ProgramBuilder.RPN_DIV_UP
         );
-        params = new bytes[](4);
-        params[R_RATE_NUM] = abi.encodePacked(bytes32(numerator));
-        params[R_RATE_DEN] = abi.encodePacked(bytes32(denominator));
-        params[R_RPN_WORD] = abi.encodePacked(ProgramBuilder.rpnWord(rpn));
-        params[R_RPN_LEN] = abi.encodePacked(bytes32(rpn.length));
+        params = new bytes32[](4);
+        params[R_RATE_NUM] = bytes32(numerator);
+        params[R_RATE_DEN] = bytes32(denominator);
+        params[R_RPN_WORD] = ProgramBuilder.rpnWord(rpn);
+        params[R_RPN_LEN] = bytes32(rpn.length);
 
         bytes memory bpRpn = abi.encodePacked(
             ProgramBuilder.START_ARRAY_DYNAMIC,

@@ -40,8 +40,8 @@ export type CatExecuteOptions = {
    */
   validationProgram?: `0x${string}`;
   /**
-   * `CATValidatorV2` only: the committed 32-byte param words. Must hash to the
-   * commitment's `paramsHash`. Default empty.
+   * `CATValidatorV2` only: the committed param words, encoded as `bytes32[]`.
+   * Must hash to the commitment's `paramsHash`. Default empty.
    */
   validationParams?: `0x${string}`[];
 };

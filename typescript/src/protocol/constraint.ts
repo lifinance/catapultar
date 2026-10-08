@@ -167,8 +167,8 @@ export function hashValidationProgram(program: `0x${string}`): `0x${string}` {
 /**
  * The committed `paramsHash` of a params vector, the mirror of
  * `LibValidationVM.paramsHashOf`: `bytes32(0)` when empty, else `keccak256` of
- * the concatenated words. Throws if any word is not exactly 32 bytes, which the
- * validator rejects as `BadValidationParams`.
+ * the concatenated words. Throws if any word is not exactly 32 bytes: `entry`
+ * types the params as `bytes32[]`, so such a word has no encoding.
  */
 export function hashValidationParams(params: `0x${string}`[]): `0x${string}` {
   if (params.length === 0) return zeroHash;
@@ -187,7 +187,8 @@ export function hashValidationParams(params: `0x${string}`[]): `0x${string}` {
  * checks the signature over them, so mismatching inputs produce a digest the
  * account never approved and the call reverts with `BadSignature`. The
  * remaining format checks (`BadValidationProgram`, `BadValidationParams`) are
- * the contract's; `hashValidationParams` still throws on a non-32-byte word.
+ * the contract's; `hashValidationParams` still throws on a word that is not 32
+ * bytes.
  */
 export function assertValidationInputs(
   commitment: ValidationCommitment,

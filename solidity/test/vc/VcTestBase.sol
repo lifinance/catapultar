@@ -133,14 +133,13 @@ abstract contract VcTestBase is Test {
         return keccak256(abi.encodePacked("\x19\x01", domainSeparator, structHash));
     }
 
-    /// @notice `keccak256` of the concatenated 32-byte words, `bytes32(0)` when empty.
+    /// @notice `keccak256` of the concatenated words, `bytes32(0)` when empty.
     function hashParams(
-        bytes[] memory params
+        bytes32[] memory params
     ) internal pure returns (bytes32) {
         if (params.length == 0) return bytes32(0);
         bytes memory buffer;
         for (uint256 i; i < params.length; ++i) {
-            require(params[i].length == 32, "param not 32 bytes");
             buffer = abi.encodePacked(buffer, params[i]);
         }
         return keccak256(buffer);

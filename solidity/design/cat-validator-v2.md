@@ -77,7 +77,7 @@ No consumer reads the hashes from `entry` calldata: off-chain they are identifie
 | ID | Requirement | Level | Kind |
 | --- | --- | --- | --- |
 | R1 | The EIP-712 constraint commits `validationProgramHash` and `paramsHash`, so the escrow address commits to both. A separate params hash is required: the program hash alone does not cover addresses and amounts (GD-5, intent-factory#223). | MUST | hard |
-| R2 | Program hash = `keccak256` of the tight-packed 33-byte commands. Params hash = `keccak256` of the concatenated 32-byte words. Both are `0` when empty. The TS SDK, the compiler and Solidity agree byte for byte. | MUST | hard |
+| R2 | Program hash = `keccak256` of the tight-packed 33-byte commands. Params hash = `keccak256` of the concatenated `bytes32` words. Both are `0` when empty. The TS SDK, the compiler and Solidity agree byte for byte. | MUST | hard |
 | R3 | V2 digests never collide with v1 digests. | MUST | hard property; mechanism is D5 |
 | R4 | The contract derives both hashes from the program and params in calldata. `entry` does not take them as arguments. | SHOULD | new (D4) |
 
@@ -99,7 +99,7 @@ No consumer reads the hashes from `entry` calldata: off-chain they are identifie
 | R11 | The VM address is exposed as the `VIRTUAL_MACHINE` getter. The VM call's gas is bounded by the executor's transaction gas limit; an immutable `VALIDATION_GAS_CAP` is optional and is decided in D9. | MUST (getter) | hard for the getter; convention for the cap (D9) |
 | R12 | A VM address without code fails closed (a STATICCALL to an address without code succeeds vacuously). | MUST | hard |
 | R13 | The register file is `params ++ [account] ++ spent[] ++ paid[]`, then zeroed scratch. `spent[i]` is the amount v1 pulls from the escrow for allowance `i`: a literal spend as written, a `SPEND_BALANCE_OF_MAGIC` spend as the escrow balance that remains when v1 reaches that allowance. `paid[j]` is the amount v1 forwards for outcome `j`, recorded at the moment of the transfer. The prefix ends below the VM's void register (`0x7A`). | MUST | hard for params; account is D3; flow registers are D2 |
-| R14 | Malformed inputs revert with `BadValidationProgram` (length not a multiple of 33) or `BadValidationParams` (a word that is not 32 bytes, or a prefix too long). The error names stay, because the solver decodes them. | MUST | hard |
+| R14 | Malformed inputs revert with `BadValidationProgram` (length not a multiple of 33) or `BadValidationParams` (params without a program, or a prefix too long). `entry` types the params as `bytes32[]`, so a word that is not 32 bytes cannot be encoded. The error names stay, because the solver decodes them. | MUST | hard |
 
 ### Non-functional
 
@@ -129,9 +129,9 @@ contract CATValidatorV2 is CATValidator, Tstorish {  // inherits main v1, audite
   immutable VIRTUAL_MACHINE                          // no gas cap: see D9
 
   entry(execTarget, execPayload, account, nonce,
-        allowances, outcomes, program, params, signature)   // 9 args
+        allowances, outcomes, program, bytes32[] params, signature)   // 9 args
     programHash = program.length == 0 ? 0 : keccak256(program)
-    paramsHash  = paramsHashOf(params)                // reverts on a non-32-byte word
+    paramsHash  = params.length == 0 ? 0 : keccak256(abi.encodePacked(params))
     if nonce != 0: _checkNonce(account, nonce)        // v1
     check signature over the V2 typehash(…, programHash, paramsHash)
     if programHash != 0: spent[] = replay of the v1 allowance order (literal spend, or
@@ -153,6 +153,7 @@ contract CATValidatorV2 is CATValidator, Tstorish {  // inherits main v1, audite
 | --- | --- | --- |
 | Subclass of v1 instead of a copy | G8: v1 fixes reach V2 automatically. The audit scope shrinks to the program step. | Add `virtual` to `_domainNameAndVersion`, `entry` and `_call` in v1 (bytecode-neutral, pinned by `script/check-v1-bytecode.sh`). |
 | Derive hashes on-chain (9-arg `entry`) | The supplied hashes are enforced equalities today, so they carry no information. Removes 2 stack slots and the duplicate checks in the SDK. | The `entry` ABI and selector change; SDK, solver and backend encoders update. No program body changes. |
+| Params as `bytes32[]`, not `bytes[]` | The type guarantees 32-byte words, so the params hash is one `keccak256` of the packed array and the "word is not 32 bytes" check disappears. Registers stay `bytes[]` because the VM's `VMState` sets them; `buildRegisters` wraps each word, as it already does for `spent` and `paid`. | Encoders pass `bytes32[]`; a word of the wrong size fails at ABI encoding instead of on-chain. The params hash rule and every committed hash are unchanged. |
 | Replace `preBalances` with `spent[]` and `paid[]` | Destination pre-balances measure the wrong thing: under pay-the-validator their delta equals the forwarded amount, which the floor already checks, and they carry no information about the deposit. Flow registers give programs the two amounts that relational checks need (D2). | Every program body hash changes, so fixtures and the compiler re-pin in lockstep. One extra `balanceOf` per magic-spend allowance, only when a program is committed. No v1 change. |
 | `paid[]` recorded by a `_transfer` hook in transient storage | v1's `_transfer` is already `virtual`. Recording the amount v1 forwards, at the iteration it forwards it, is the only reading that cannot drift from v1: a pre-read of the validator's balance before `_validatePayment` is wrong when an earlier outcome's transfer changes a later outcome's balance (a native outcome whose destination mints the next outcome's token in `receive()`). | One `TLOAD` per outcome on the empty-program path. Tstorish (`TSTORE` with an `SSTORE` fallback) keeps the contract deployable on chains without Cancun. |
 | `spent[]` replayed in memory, not hooked | v1 `_handleAllowances` has no hook, and adding one (`_transferFrom`) changes v1 bytecode. The replay mirrors v1's loop: a literal spend as written, a magic spend as the escrow balance less earlier spends of the same token. | One `balanceOf` per magic-spend allowance. |
@@ -263,7 +264,7 @@ No, not for safety. The current V2 forwards at most `VALIDATION_GAS_CAP` (5,000,
 
 1. **catapultar:** add `virtual` to v1 (bytecode-neutral, CI asserts the bytecode is unchanged); implement V2 as a subclass; port the TypeScript; open a new PR for the audit.
 2. **Yggdrasil (lockstep):** merge #2006; replace the pre-balance slots with `spent[]` and `paid[]` (D2); route results to the validator (D1-A); regenerate the hash-parity vectors once.
-3. **intent-factory:** vendor the new V2; update the `entry` encoders (9 arguments), the solver's receiver, the refund target and the fixtures; fix the descriptor's empty-params hash (`descriptor.ts` says keccak of empty bytes; the contract uses 0).
+3. **intent-factory:** vendor the new V2; update the `entry` encoders (9 arguments, params as `bytes32[]`), the solver's receiver, the refund target and the fixtures; fix the descriptor's empty-params hash (`descriptor.ts` says keccak of empty bytes; the contract uses 0).
 4. **Audit** V2 against VM v1.2.
 5. **Deploy** by CREATE2 on each chain; retire `0x48789d54…` and `0xc626…dcd7`.
 6. **Drill** on the Aspire fork: `yarn e2e:vc`, `yarn e2e:observed-exact`, `yarn e2e:compose`.

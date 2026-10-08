@@ -14,13 +14,13 @@ import { LibValidationVM, VMCommand, VMState } from "../src/libs/LibValidationVM
 /// @dev Calldata trampolines for the library's calldata-typed arguments.
 contract LibValidationVMHarness {
     function paramsHashOf(
-        bytes[] calldata params
-    ) external pure returns (bytes32 h, bool ok) {
+        bytes32[] calldata params
+    ) external pure returns (bytes32) {
         return LibValidationVM.paramsHashOf(params);
     }
 
     function buildRegisters(
-        bytes[] calldata params,
+        bytes32[] calldata params,
         address account,
         uint256[] calldata spent,
         uint256[] calldata paid
@@ -191,34 +191,23 @@ contract CATValidatorV2Test is Test {
     ─────────────────────────── */
 
     function test_paramsHashOf_emptyIsZero() external view {
-        (bytes32 h, bool ok) = lib.paramsHashOf(new bytes[](0));
-        assertTrue(ok);
-        assertEq(h, bytes32(0));
+        assertEq(lib.paramsHashOf(new bytes32[](0)), bytes32(0));
     }
 
     function test_paramsHashOf_concatKeccak(
         bytes32 a,
         bytes32 b
     ) external view {
-        bytes[] memory params = new bytes[](2);
-        params[0] = abi.encodePacked(a);
-        params[1] = abi.encodePacked(b);
-        (bytes32 h, bool ok) = lib.paramsHashOf(params);
-        assertTrue(ok);
-        assertEq(h, keccak256(abi.encodePacked(a, b)));
-    }
-
-    function test_paramsHashOf_rejectsNonWordElement() external view {
-        bytes[] memory params = new bytes[](1);
-        params[0] = hex"deadbeef";
-        (, bool ok) = lib.paramsHashOf(params);
-        assertFalse(ok);
+        bytes32[] memory params = new bytes32[](2);
+        params[0] = a;
+        params[1] = b;
+        assertEq(lib.paramsHashOf(params), keccak256(abi.encodePacked(a, b)));
     }
 
     function test_buildRegisters_layout() external view {
-        bytes[] memory params = new bytes[](2);
-        params[0] = abi.encodePacked(bytes32(uint256(0xAA)));
-        params[1] = abi.encodePacked(bytes32(uint256(0xBB)));
+        bytes32[] memory params = new bytes32[](2);
+        params[0] = bytes32(uint256(0xAA));
+        params[1] = bytes32(uint256(0xBB));
         uint256[] memory spent = new uint256[](2);
         spent[0] = 1 ether;
         spent[1] = 42;
@@ -229,8 +218,8 @@ contract CATValidatorV2Test is Test {
         bytes[] memory registers = lib.buildRegisters(params, account, spent, paid);
 
         assertEq(registers.length, 123, "fixed register-file size");
-        assertEq(registers[0], params[0]);
-        assertEq(registers[1], params[1]);
+        assertEq(registers[0], abi.encodePacked(bytes32(uint256(0xAA))), "params[0]");
+        assertEq(registers[1], abi.encodePacked(bytes32(uint256(0xBB))), "params[1]");
         assertEq(registers[2], abi.encodePacked(bytes32(uint256(uint160(account)))), "account after params");
         assertEq(registers[3], abi.encodePacked(bytes32(uint256(1 ether))), "spent[0]");
         assertEq(registers[4], abi.encodePacked(bytes32(uint256(42))), "spent[1]");
@@ -242,7 +231,8 @@ contract CATValidatorV2Test is Test {
 
     function test_encodeRunVM_roundTrip() external view {
         bytes memory body = abi.encodePacked(uint8(8), bytes32(uint256(0x0104)), uint8(0), bytes32(uint256(0xBEEF)));
-        bytes[] memory registers = lib.buildRegisters(new bytes[](0), address(0xA), new uint256[](0), new uint256[](0));
+        bytes[] memory registers =
+            lib.buildRegisters(new bytes32[](0), address(0xA), new uint256[](0), new uint256[](0));
 
         bytes memory payload = lib.encodeRunVM(body, registers);
 
@@ -294,21 +284,21 @@ contract CATValidatorV2Test is Test {
         return new AllowanceSpend[](0);
     }
 
-    function noParams() internal pure returns (bytes[] memory) {
-        return new bytes[](0);
+    function noParams() internal pure returns (bytes32[] memory) {
+        return new bytes32[](0);
     }
 
     function words(
         uint256 n
-    ) internal pure returns (bytes[] memory params) {
-        params = new bytes[](n);
+    ) internal pure returns (bytes32[] memory params) {
+        params = new bytes32[](n);
         for (uint256 i; i < n; ++i) {
-            params[i] = abi.encodePacked(bytes32(i));
+            params[i] = bytes32(i);
         }
     }
 
     function hashParams(
-        bytes[] memory params
+        bytes32[] memory params
     ) internal pure returns (bytes32) {
         if (params.length == 0) return bytes32(0);
         bytes memory buffer;
@@ -329,7 +319,7 @@ contract CATValidatorV2Test is Test {
 
     function expectedRunVM(
         bytes memory body,
-        bytes[] memory params,
+        bytes32[] memory params,
         uint256[] memory spent,
         uint256[] memory paid
     ) internal view returns (bytes memory) {
@@ -397,7 +387,7 @@ contract CATValidatorV2Test is Test {
         AllowanceSpend[] memory allowances,
         Outcome[] memory outcomes,
         bytes memory body,
-        bytes[] memory params
+        bytes32[] memory params
     ) internal {
         bytes32 programHash = body.length == 0 ? bytes32(0) : keccak256(body);
         bytes memory sig = sign(target, 1, allowances, outcomes, programHash, hashParams(params));
@@ -450,19 +440,8 @@ contract CATValidatorV2Test is Test {
         validator.entry(address(fill), hex"", signer, 1, noAllowances(), outcomes, body, noParams(), sig);
     }
 
-    function test_entry_rejectsNonWordParam() external {
-        bytes memory body = dummyBody();
-        bytes[] memory params = new bytes[](1);
-        params[0] = hex"01";
-        Outcome[] memory outcomes = oneOutcome(address(token), 0, destination);
-        bytes memory sig = sign(validator, 1, noAllowances(), outcomes, keccak256(body), keccak256(hex"01"));
-        vm.prank(executor);
-        vm.expectRevert(CATValidatorV2.BadValidationParams.selector);
-        validator.entry(address(fill), hex"", signer, 1, noAllowances(), outcomes, body, params, sig);
-    }
-
     function test_entry_rejectsParamsWithoutProgram() external {
-        bytes[] memory params = words(1);
+        bytes32[] memory params = words(1);
         Outcome[] memory outcomes = oneOutcome(address(token), 0, destination);
         bytes memory sig = sign(validator, 1, noAllowances(), outcomes, bytes32(0), hashParams(params));
         vm.prank(executor);
@@ -474,7 +453,7 @@ contract CATValidatorV2Test is Test {
         // 121 params + account + paid[0] = highest index 122, the void register.
         Outcome[] memory outcomes = oneOutcome(address(token), 0, destination);
         bytes memory body = dummyBody();
-        bytes[] memory params = words(121);
+        bytes32[] memory params = words(121);
         bytes memory sig = sign(validator, 1, noAllowances(), outcomes, keccak256(body), hashParams(params));
         vm.prank(executor);
         vm.expectRevert(CATValidatorV2.BadValidationParams.selector);
@@ -512,8 +491,8 @@ contract CATValidatorV2Test is Test {
         // The same program with different params is a different digest.
         Outcome[] memory outcomes = oneOutcome(address(token), 0, destination);
         bytes memory body = dummyBody();
-        bytes[] memory supplied = new bytes[](1);
-        supplied[0] = abi.encodePacked(bytes32(uint256(99)));
+        bytes32[] memory supplied = new bytes32[](1);
+        supplied[0] = bytes32(uint256(99));
         bytes memory sig = sign(validator, 1, noAllowances(), outcomes, keccak256(body), hashParams(words(1)));
         vm.prank(executor);
         vm.expectRevert(CATValidator.BadSignature.selector);
@@ -597,7 +576,7 @@ contract CATValidatorV2Test is Test {
         AllowanceSpend[] memory allowances = oneAllowance(address(inToken), 1 << 255);
         Outcome[] memory outcomes = oneOutcome(address(token), 1 ether, destination);
         bytes memory body = dummyBody();
-        bytes[] memory params = words(2);
+        bytes32[] memory params = words(2);
         bytes memory payload =
             abi.encodeCall(OutcomeFill.mintTwo, (token, address(echoValidator), 2 ether, destination, 5 ether));
 
@@ -767,7 +746,7 @@ contract CATValidatorV2Test is Test {
     function test_entry_fillCannotReenter() external {
         Outcome[] memory outcomes = oneOutcome(address(token), 0, destination);
         bytes memory inner = abi.encodeWithSignature(
-            "entry(address,bytes,address,uint256,(address,uint256,uint256)[],(address,uint256,address)[],bytes,bytes[],bytes)",
+            "entry(address,bytes,address,uint256,(address,uint256,uint256)[],(address,uint256,address)[],bytes,bytes32[],bytes)",
             address(fill),
             hex"",
             signer,
