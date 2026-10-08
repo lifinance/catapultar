@@ -614,6 +614,49 @@ contract CATValidatorV2Test is Test {
             sig
         );
     }
+
+    /* ─────────────────────────── revert bubbling
+    ─────────────────────────── */
+
+    function test_entry_bubblesLongRevertDataVerbatim() external {
+        LongReverter target = new LongReverter();
+        uint256[6] memory words;
+        for (uint256 i; i < words.length; ++i) {
+            words[i] = uint256(keccak256(abi.encode(i)));
+        }
+        bytes memory expected = abi.encodeWithSelector(LongReverter.LongRevert.selector, words);
+        assertEq(expected.length, 196);
+
+        Outcome[] memory outcomes = new Outcome[](0);
+        bytes memory sig = signedEntryArgs(validator, 1, outcomes, bytes32(0), bytes32(0));
+
+        vm.prank(executor);
+        vm.expectRevert(expected);
+        validator.entry(
+            address(target),
+            abi.encodeCall(LongReverter.boom, (words)),
+            signer,
+            1,
+            new AllowanceSpend[](0),
+            outcomes,
+            bytes32(0),
+            bytes32(0),
+            hex"",
+            new bytes[](0),
+            sig
+        );
+    }
+}
+
+/// @dev Reverts with 196 bytes, longer than the 64-byte scratch space.
+contract LongReverter {
+    error LongRevert(uint256[6] words);
+
+    function boom(
+        uint256[6] calldata words
+    ) external pure {
+        revert LongRevert(words);
+    }
 }
 
 contract RevertingBalanceOf {

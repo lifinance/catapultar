@@ -366,10 +366,11 @@ contract CATValidatorV2 is EIP712, ReentrancyGuard {
                 )
 
             if iszero(success) {
-                returndatacopy(0x00, 0x00, returndatasize())
-                if iszero(success) {
-                    revert(0x00, returndatasize())
-                }
+                // Copy to the free memory pointer, not offset 0: return data
+                // longer than the 64-byte scratch space would otherwise break
+                // this block's memory-safe annotation.
+                returndatacopy(m, 0x00, returndatasize())
+                revert(m, returndatasize())
             }
         }
     }
