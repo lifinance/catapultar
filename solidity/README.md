@@ -325,6 +325,14 @@ Since `CATValidator` relies on standing approvals, it is unsafe to execute arbit
 
 The signed `Outcome`s are validated after the external call: the executor must deliver each `Outcome.token` to `CATValidator` during execution, and the transaction reverts if the validator's balance of a token is less than `Outcome.amount`. The full held balance — including any surplus — is then forwarded to `Outcome.destination` (or the signer if the destination is `address(0)`). Note that fee-on-transfer tokens are charged on both legs: the balance check sees the amount net of the inbound fee, and the outbound forwarding incurs a further fee, so the destination may receive less than `Outcome.amount`.
 
+### CATValidatorV2: committed validation program
+
+`CATValidatorV2` subclasses `CATValidator` and adds one step after the outcome payment: it runs a validation program, signed into the constraint, on the LI.FI VirtualMachine. The constraint commits `keccak256` of the program body (`validationProgramHash`) and `keccak256` of the concatenated 32-byte parameter words (`paramsHash`). Both hashes are derived on-chain from the `validationProgram` and `validationParams` calldata, so the 9-argument `entry` takes the bytes, never the hashes. An empty program commits `bytes32(0)` and settles exactly as v1 without calling the VirtualMachine.
+
+The program sees a register file of `params ++ [account] ++ spent ++ paid` (123 registers, scratch zeroed). `spent[i]` is the amount v1 pulled for allowance `i`, and `paid[j]` is the amount v1 forwarded for outcome `j`, recorded at the moment of each transfer in transient storage (Tstorish: `TSTORE` where supported, `SSTORE` otherwise). The program runs under `staticcall` and any failure reverts `ValidationFailed(bytes)`, so the escrow keeps its funds and can refund. The EIP-712 domain version is "2"; the inherited 7-argument `entry` reverts `V1EntryDisabled`. `design/cat-validator-v2.md` records the design and the accepted decisions.
+
+`CATValidator` itself only gained `virtual` on `entry`, `_domainNameAndVersion` and `_call`. `script/check-v1-bytecode.sh` proves that its creation bytecode, and therefore its CREATE2 address and audit status, is unchanged against `snapshots/v1-bytecode.json`; CI runs the check on every push.
+
 ## Development
 
 ### Build
@@ -339,10 +347,25 @@ $ forge build
 $ forge test
 ```
 
-### Coverage
+`test/vc/IntegrationV2.t.sol` runs the committed-program path against the canonical VirtualMachine on an Ethereum mainnet fork. Set `VC_MAINNET_RPC_URL` to run it; without the variable the test skips.
 
 ```shell
-$ forge coverage --no-match-coverage "(script|test)" [--report lcov]
+$ VC_MAINNET_RPC_URL=https://... forge test --match-path 'test/vc/*'
+```
+
+### Audited bytecode check
+
+```shell
+$ ./script/check-v1-bytecode.sh            # compare CATValidator and CATValidatorTron with the pin
+$ ./script/check-v1-bytecode.sh --update   # deliberate v1 change or toolchain bump only
+```
+
+### Coverage
+
+`CATValidatorV2` needs the IR pipeline, so coverage runs with `--ir-minimum`.
+
+```shell
+$ forge coverage --ir-minimum --no-match-coverage "(script|test)" [--report lcov]
 ```
 
 ### Deploy
