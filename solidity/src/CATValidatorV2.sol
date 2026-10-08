@@ -222,7 +222,7 @@ contract CATValidatorV2 is EIP712, ReentrancyGuard {
     ) internal {
         bool spent = spentNonces[account][nonce];
         if (spent) revert NonceAlreadySpent();
-        spentNonces[account][nonce] = !spent;
+        spentNonces[account][nonce] = true;
     }
 
     /**
