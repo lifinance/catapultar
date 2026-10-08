@@ -7,23 +7,16 @@ import { VcTestBase } from "./VcTestBase.sol";
 /**
  * @notice Encoding parity between LI.FI's compose compiler and the validator. The
  * fixture `test/vc/fixtures/hash-parity/vectors.json` (schema
- * `c1-hash-parity/v1`) is produced by the compiler, which asserts the same
- * vectors on its side. This suite proves that the `runVM` encoding the
- * validator sends, `RUN_VM_SELECTOR` with the command array and the register
- * file, reproduces the compiler's `runVM` calldata byte for byte, and that the
- * params hash rule (concatenated 32-byte words, zero when empty) reproduces the
- * pinned `paramsHash`.
- *
- * Program-hash parity is not proven here. The fixture predates the current
- * rule: its `canonicalBody` and `validationProgramHash` describe the earlier
- * tight-packed body, while the validator commits
- * `keccak256(abi.encode(commands))`. The compiler must regenerate the vectors
- * under the current rule before V2 is audited or deployed (see the fixture
- * README). The fixture's register files also use the earlier
- * `params ++ [account] ++ preBalances` layout, so the calldata check pins the
- * `runVM` ABI encoding of a given register file, not the register layout
- * `CATValidatorV2` builds. Executing the pinned uc1 program on the canonical VM
- * is covered by `test/vc/IntegrationV2.t.sol`.
+ * `c1-hash-parity/v2`) is produced by the compiler, which asserts the same
+ * vectors on its side. This suite proves three things against that output:
+ * the compiler's `validationProgram` is the ABI encoding of its `commands` and
+ * hashes to the pinned `validationProgramHash` under the validator's rule
+ * (`keccak256(abi.encode(commands))`); the params hash rule (concatenated
+ * 32-byte words, zero when empty) reproduces the pinned `paramsHash`; and the
+ * `runVM` encoding the validator sends, `RUN_VM_SELECTOR` with the command
+ * array and the register file, reproduces the compiler's `runVM` calldata byte
+ * for byte. Executing the pinned uc1 program on the canonical VM is covered by
+ * `test/vc/IntegrationV2.t.sol`.
  */
 contract HashParityTest is VcTestBase {
     string json;
@@ -48,12 +41,25 @@ contract HashParityTest is VcTestBase {
             bytes32 pinnedParamsHash = vm.parseJsonBytes32(json, string.concat(p, ".paramsHash"));
             _assertParamsHashParity(name, canonicalParams, pinnedParamsHash);
 
+            // The committed program: the compiler's wire bytes are the ABI encoding
+            // of its commands, and both sides hash them to the same value.
+            VMCommand[] memory commands = _commands(p);
+            assertGt(commands.length, 0, string.concat(name, ": no commands"));
+            assertEq(
+                abi.encode(commands),
+                vm.parseJsonBytes(json, string.concat(p, ".validationProgram")),
+                string.concat(name, ": validationProgram is not abi.encode(commands)")
+            );
+            assertEq(
+                hashProgram(commands),
+                vm.parseJsonBytes32(json, string.concat(p, ".validationProgramHash")),
+                string.concat(name, ": program hash mismatch")
+            );
+
             // The validator's runVM encoding of the fixture's commands and register
             // file must reproduce the production compiler's runVM calldata
             // byte for byte. This pins RUN_VM_SELECTOR and the VMCommand and
             // VMState ABI shapes against real compiler output.
-            VMCommand[] memory commands = _commands(p);
-            assertGt(commands.length, 0, string.concat(name, ": no commands"));
             bytes[] memory registers = vm.parseJsonBytesArray(json, string.concat(p, ".registers"));
             assertEq(
                 abi.encodeWithSelector(LibValidationVM.RUN_VM_SELECTOR, commands, VMState(registers)),

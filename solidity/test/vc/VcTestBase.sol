@@ -17,13 +17,15 @@ import { VMCommand } from "../../src/libs/LibValidationVM.sol";
  * fixture wins.
  */
 abstract contract VcTestBase is Test {
-    /// @dev Canonical deterministic deployments, identical on every supported chain
-    /// (`DEPLOYMENTS.md` in the VirtualMachine sources).
-    address internal constant VM_ADDR = 0xb57Ce43Be47DF611C98EB0943e5D36EBDb36cc6D;
-    address internal constant INVARIANT_CHECKER = 0xe17006F4DfE8Aa2bf80589E497ad98D470f66fef;
-    address internal constant ARITHMETIC_PROCESSOR = 0x25407266A1229c83d03ececfff8eD7d92754b285;
+    /// @dev Canonical deterministic v1.2 deployments, identical on every supported
+    /// chain (`deployments/v1.2.json` in the VirtualMachine sources). The deploy
+    /// script points CATValidatorV2 at the same VM.
+    address internal constant VM_ADDR = 0xA9f22b951d5A9CBBD0eC8d2741EA44BFDD2D11fd;
+    address internal constant INVARIANT_CHECKER = 0xe450D45C03745909e08B5C46A87016c33F16a4A6;
+    address internal constant ARITHMETIC_PROCESSOR = 0x0DC20AF039443DC9A8a193f0f42F0AF2Ea611e8a;
 
-    /// @dev Ethereum mainnet tokens; the uc1 fixture program bakes both into its commands.
+    /// @dev Ethereum mainnet tokens. The uc1 fixture program bakes USDC into its
+    /// commands; the rate program settles WETH.
     address internal constant WETH = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
     address internal constant USDC = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48;
 

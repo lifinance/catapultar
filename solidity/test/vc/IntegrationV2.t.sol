@@ -245,19 +245,22 @@ contract IntegrationV2Test is VcTestBase {
     ─────────────────────────── */
 
     /// @notice The compose compiler's pinned `uc1-user-a` `runVM` calldata, with the
-    /// fixture's own register file (the earlier `params ++ [account] ++
-    /// preBalances` layout), runs its whole read, RPN and assert pipeline on the
-    /// canonical VM and fails only on its business invariants: first the WETH
-    /// floor, then the USDC threshold. `HashParity.t.sol` proves this calldata is
-    /// the `runVM` encoding of the fixture's commands and registers.
-    function test_uc1Fixture_failsOnlyOnItsInvariants() external onlyFork {
+    /// fixture's own register file, runs its whole read and assert pipeline on the
+    /// canonical VM and fails only on its business invariant: the delivery's USDC
+    /// balance must reach the 500 USDC threshold. The program is invariant-only;
+    /// the validator's outcome floor covers the committed WETH outcome.
+    /// `HashParity.t.sol` proves this calldata is the `runVM` encoding of the
+    /// fixture's commands and registers.
+    function test_uc1Fixture_failsOnlyOnItsInvariant() external onlyFork {
         bytes memory payload = _uc1Payload();
 
+        // The check reads the live post-state balance (design K1), so pin it: the
+        // fixture's delivery address holds USDC on mainnet.
+        deal(USDC, DELIVERY, 0);
         (bool ok, bytes memory ret) = VM_ADDR.staticcall(payload);
         assertFalse(ok, "uc1 passed with an unfunded delivery");
-        assertEq(ret, abi.encodeWithSelector(ASSERT_GTE_FAILED, 0, 1 ether), "WETH floor not the failing invariant");
+        assertEq(ret, abi.encodeWithSelector(ASSERT_GTE_FAILED, 0, 500e6), "USDC threshold not the failing invariant");
 
-        deal(WETH, DELIVERY, 1 ether);
         deal(USDC, DELIVERY, 500e6 - 1);
         (ok, ret) = VM_ADDR.staticcall(payload);
         assertFalse(ok, "uc1 passed below the USDC threshold");
@@ -267,10 +270,9 @@ contract IntegrationV2Test is VcTestBase {
     }
 
     /// @notice The same pinned program passes on the canonical VM once the
-    /// delivery address satisfies both invariants.
+    /// delivery address holds the threshold.
     function test_uc1Fixture_passesWhenDeliveryFunded() external onlyFork {
         bytes memory payload = _uc1Payload();
-        deal(WETH, DELIVERY, 1 ether);
         deal(USDC, DELIVERY, 500e6);
 
         (bool ok, bytes memory ret) = VM_ADDR.staticcall(payload);
