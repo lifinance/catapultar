@@ -195,6 +195,48 @@ export const ExecutionConstraintTyped = {
   ],
 } as const;
 
+// Typehashed ExecutionConstraint (CATValidatorV2)
+
+/**
+ * One command of a validation program: an LI.FI VirtualMachine `runVM` command
+ * (`VMCommand` in `LibValidationVM`). `op` is a `uint8` opcode, `data` its
+ * 32-byte argument word.
+ */
+export type ValidationCommand = {
+  op: number;
+  data: `0x${string}`;
+};
+
+/**
+ * The commitment that binds a constraint to an LI.FI VirtualMachine validation
+ * program: `validationProgramHash` is `keccak256` of the ABI-encoded command
+ * array, `paramsHash` is `keccak256` of the concatenated 32-byte param words.
+ * Zero hashes mean "no program" (and "no params"), which `CATValidatorV2`
+ * settles exactly like v1.
+ */
+export type ValidationCommitment = {
+  validationProgramHash: `0x${string}`;
+  paramsHash: `0x${string}`;
+};
+
+/**
+ * The `CATValidatorV2` constraint: an {@link ExecutionConstraint} that also
+ * commits a {@link ValidationCommitment}. Signed under EIP-712 domain version
+ * "2", so it can never collide with a v1 digest.
+ */
+export type ExecutionConstraintV2 = ExecutionConstraint & ValidationCommitment;
+
+/** EIP-712 type table for {@link ExecutionConstraintV2} (mirrors `LibExecutionConstraintV2`). */
+export const ExecutionConstraintV2Typed = {
+  ExecutionConstraint: [
+    ...ExecutionConstraintTyped.ExecutionConstraint,
+    { name: "validationProgramHash", type: "bytes32" },
+    { name: "paramsHash", type: "bytes32" },
+  ],
+  Allowance: ExecutionConstraintTyped.Allowance,
+  Outcome: ExecutionConstraintTyped.Outcome,
+} as const;
+
 //-- Factory pattern types --//
 
 /**

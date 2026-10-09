@@ -1,8 +1,22 @@
-import { hashTypedData, zeroAddress, type PublicClient } from "viem";
+import {
+  concat,
+  encodeAbiParameters,
+  hashTypedData,
+  keccak256,
+  size,
+  zeroAddress,
+  zeroHash,
+  type PublicClient,
+} from "viem";
 import {
   ExecutionConstraintTyped,
+  ExecutionConstraintV2Typed,
   type ExecutionConstraint,
+  type ExecutionConstraintV2,
+  type ValidationCommand,
+  type ValidationCommitment,
 } from "../types/types";
+import { ValidationError } from "../errors";
 import { CAT_VALIDATOR_ABI } from "../abi/CATValidator";
 
 /**
@@ -77,9 +91,10 @@ export function constraintDigest(
 }
 
 /**
- * Read whether a constraint `nonce` has already been spent for `account` on the
- * `CATValidator` (`spentNonces` view). Nonce 0 is the perpetual constraint and
- * is never marked spent, so this always returns `false` for it.
+ * Read whether a constraint `nonce` has already been spent for `account` on a
+ * CAT validator (`spentNonces` view, identical on `CATValidator` and
+ * `CATValidatorV2`). Nonce 0 is the perpetual constraint and is never marked
+ * spent, so this always returns `false` for it.
  */
 export async function isConstraintNonceSpent(
   client: PublicClient,
@@ -96,4 +111,124 @@ export async function isConstraintNonceSpent(
     functionName: "spentNonces",
     args: [options.account, options.nonce],
   });
+}
+
+// --- CATValidatorV2 --- //
+
+/** Domain version of `CATValidatorV2`. The domain name is {@link CAT_VALIDATOR_DOMAIN_NAME}. */
+export const CAT_VALIDATOR_V2_DOMAIN_VERSION = "2";
+
+/** Build the EIP-712 domain object for `CATValidatorV2`. */
+export function constraintV2Domain(domain: CatValidatorDomain) {
+  return {
+    name: CAT_VALIDATOR_DOMAIN_NAME,
+    version: CAT_VALIDATOR_V2_DOMAIN_VERSION,
+    chainId: domain.chainId,
+    verifyingContract: domain.verifyingContract,
+  } as const;
+}
+
+/** Build the EIP-712 typed-data object for an {@link ExecutionConstraintV2}. */
+export function constraintV2TypedData(
+  domain: CatValidatorDomain,
+  constraint: ExecutionConstraintV2,
+) {
+  return {
+    domain: constraintV2Domain(domain),
+    types: ExecutionConstraintV2Typed,
+    primaryType: "ExecutionConstraint",
+    message: constraint,
+  } as const;
+}
+
+/**
+ * Full EIP-712 digest for an {@link ExecutionConstraintV2}, the mirror of
+ * `CATValidatorV2._hashTypedData(LibExecutionConstraintV2.typehash(...))`. This
+ * is the value an account approves so `CATValidatorV2.entry` accepts the
+ * constraint with an empty signature.
+ */
+export function constraintV2Digest(
+  domain: CatValidatorDomain,
+  constraint: ExecutionConstraintV2,
+): `0x${string}` {
+  return hashTypedData(constraintV2TypedData(domain, constraint));
+}
+
+/** ABI shape of a validation program: the `runVM` command array `(uint8 op, bytes32 data)[]`. */
+const VALIDATION_PROGRAM_ABI = [
+  {
+    type: "tuple[]",
+    components: [
+      { name: "op", type: "uint8" },
+      { name: "data", type: "bytes32" },
+    ],
+  },
+] as const;
+
+/**
+ * The committed `validationProgramHash` of a program, the mirror of
+ * `CATValidatorV2._programHashOf`: `bytes32(0)` when empty, else `keccak256` of
+ * the ABI-encoded command array. Throws viem's encoding error if an `op` is not
+ * a `uint8` or a `data` word is not 32 bytes: `entry` could not encode it either.
+ */
+export function hashValidationProgram(
+  program: readonly ValidationCommand[],
+): `0x${string}` {
+  return program.length === 0
+    ? zeroHash
+    : keccak256(encodeAbiParameters(VALIDATION_PROGRAM_ABI, [program]));
+}
+
+/**
+ * The committed `paramsHash` of a params vector, the mirror of
+ * `LibValidationVM.paramsHashOf`: `bytes32(0)` when empty, else `keccak256` of
+ * the concatenated words. Throws if any word is not exactly 32 bytes: `entry`
+ * types the params as `bytes32[]`, so such a word has no encoding.
+ */
+export function hashValidationParams(
+  params: readonly `0x${string}`[],
+): `0x${string}` {
+  if (params.length === 0) return zeroHash;
+  params.forEach((word, i) => {
+    if (size(word) !== 32)
+      throw new ValidationError(
+        `validationParams[${i}] is ${size(word)} bytes; every param word must be exactly 32 bytes.`,
+      );
+  });
+  return keccak256(concat(params));
+}
+
+/**
+ * Assert that the program and params supplied to `CATValidatorV2.entry` hash to
+ * the commitment. The validator derives both hashes from the calldata and
+ * checks the signature over them, so mismatching inputs produce a digest the
+ * account never approved and the call reverts with `BadSignature`. Params
+ * without a program are refused too: `entry` reverts `BadValidationParams`
+ * on them before it checks the signature. `hashValidationProgram` and
+ * `hashValidationParams` still throw on an input that `entry` cannot encode.
+ */
+export function assertValidationInputs(
+  commitment: ValidationCommitment,
+  validationProgram: readonly ValidationCommand[],
+  validationParams: readonly `0x${string}`[],
+): void {
+  if (validationProgram.length === 0 && validationParams.length > 0)
+    throw new ValidationError(
+      "validationParams require a validationProgram: CATValidatorV2 reverts BadValidationParams on params without a program.",
+    );
+  // Hex digits may arrive in either case; keccak256 and zeroHash are lowercase.
+  if (
+    hashValidationProgram(validationProgram) !==
+    commitment.validationProgramHash.toLowerCase()
+  )
+    throw new ValidationError(
+      "validationProgram does not hash to the committed validationProgramHash, so CATValidatorV2 would reject the call with BadSignature (the digest commits a different hash); pass the committed program commands (none when the hash is zero).",
+    );
+  if (
+    hashValidationParams(validationParams) !==
+    commitment.paramsHash.toLowerCase()
+  )
+    throw new ValidationError(
+      "validationParams do not hash to the committed paramsHash, so CATValidatorV2 would reject the call with BadSignature (the digest commits a different hash); pass the committed param words (none when the hash is zero).",
+    );
 }

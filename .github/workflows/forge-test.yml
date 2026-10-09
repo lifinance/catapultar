@@ -40,13 +40,23 @@ jobs:
         id: build
         working-directory: solidity
 
+      - name: Check audited v1 bytecode is unchanged
+        # CATValidatorV2 subclasses CATValidator; this proves the `virtual` hooks
+        # (and any later v1 edit) leave the deployed bytes, and so the CREATE2
+        # address and audit status, untouched. See solidity/snapshots/v1-bytecode.json.
+        run: ./script/check-v1-bytecode.sh
+        id: bytecode
+        working-directory: solidity
+
       - name: Run Forge tests
         run: forge test -vvv
         id: test
         working-directory: solidity
 
       - name: Run Forge coverage
-        run: forge coverage --no-match-coverage "(script|test)" --report lcov
+        # --ir-minimum: CATValidatorV2 does not compile under the legacy
+        # (non-IR) pipeline coverage otherwise uses, because of stack depth.
+        run: forge coverage --ir-minimum --no-match-coverage "(script|test)" --report lcov
         id: coverage
         working-directory: solidity
 

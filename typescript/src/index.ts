@@ -47,6 +47,7 @@ export {
 export {
   CAT_VALIDATOR_DOMAIN_NAME,
   CAT_VALIDATOR_DOMAIN_VERSION,
+  CAT_VALIDATOR_V2_DOMAIN_VERSION,
   OUTCOME_TO_SIGNER,
   SPEND_FULL_BALANCE,
 } from "./protocol/constraint";
@@ -73,6 +74,7 @@ export {
 export { default as catapultarAbi } from "./abi/catapultar";
 export { default as catapultarFactoryAbi } from "./abi/catapultarFactory";
 export { CAT_VALIDATOR_ABI as catValidatorAbi } from "./abi/CATValidator";
+export { CAT_VALIDATOR_V2_ABI as catValidatorV2Abi } from "./abi/CATValidatorV2";
 
 // --- Deployment addresses --- //
 
@@ -121,10 +123,19 @@ export {
   constraintDomain,
   constraintDigest,
   isConstraintNonceSpent,
+  constraintV2TypedData,
+  constraintV2Domain,
+  constraintV2Digest,
+  hashValidationProgram,
+  hashValidationParams,
 } from "./protocol/constraint";
 
 // EIP-712 type tables (shared with the contracts).
-export { CallsTyped, ExecutionConstraintTyped } from "./types/types";
+export {
+  CallsTyped,
+  ExecutionConstraintTyped,
+  ExecutionConstraintV2Typed,
+} from "./types/types";
 
 // --- Types --- //
 
@@ -144,6 +155,9 @@ export type {
   AllowanceSpend,
   Outcome,
   ExecutionConstraint,
+  ExecutionConstraintV2,
+  ValidationCommand,
+  ValidationCommitment,
   WebAuthnSignature,
   Factory,
   EmbeddedDigest,
