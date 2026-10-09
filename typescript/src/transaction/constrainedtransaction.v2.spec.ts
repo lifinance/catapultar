@@ -371,7 +371,7 @@ describe("ConstrainedAssetTransaction v2", () => {
       }[] = [
         {
           validationParams: PARAMS,
-          message: /validationProgram.*BadSignature/,
+          message: /BadValidationParams/,
         },
         {
           validationProgram: PROGRAM,
@@ -405,15 +405,15 @@ describe("ConstrainedAssetTransaction v2", () => {
       }
     });
 
-    it("rejects params on a zero-hash commitment", () => {
+    it("rejects params without a program, as entry does with BadValidationParams", () => {
       const tx = wethTx().setValidationCommitment({
         validationProgramHash: zeroHash,
-        paramsHash: zeroHash,
+        paramsHash: hashValidationParams(PARAMS),
       });
       const build = () =>
         tx.asExecuteCall({ ...execute, validationParams: PARAMS });
       expect(build).toThrow(ValidationError);
-      expect(build).toThrow(/validationParams.*BadSignature/);
+      expect(build).toThrow(/BadValidationParams/);
     });
   });
 

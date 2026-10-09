@@ -44,7 +44,7 @@ export type CatExecuteOptions = {
    * `CATValidatorV2` only: the committed param words, encoded as `bytes32[]`.
    * Must hash to the commitment's `paramsHash`. Default empty.
    */
-  validationParams?: `0x${string}`[];
+  validationParams?: readonly `0x${string}`[];
 };
 
 /** Options for {@link ConstrainedAssetTransaction.asRefundCall}. */
@@ -284,7 +284,7 @@ export class ConstrainedAssetTransaction {
     outcomes: Outcome[];
     validation?: {
       validationProgram: readonly ValidationCommand[];
-      validationParams: `0x${string}`[];
+      validationParams: readonly `0x${string}`[];
     };
   }): Call {
     const { validation } = opt;

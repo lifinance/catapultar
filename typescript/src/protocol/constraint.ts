@@ -185,7 +185,9 @@ export function hashValidationProgram(
  * the concatenated words. Throws if any word is not exactly 32 bytes: `entry`
  * types the params as `bytes32[]`, so such a word has no encoding.
  */
-export function hashValidationParams(params: `0x${string}`[]): `0x${string}` {
+export function hashValidationParams(
+  params: readonly `0x${string}`[],
+): `0x${string}` {
   if (params.length === 0) return zeroHash;
   params.forEach((word, i) => {
     if (size(word) !== 32)
@@ -200,16 +202,20 @@ export function hashValidationParams(params: `0x${string}`[]): `0x${string}` {
  * Assert that the program and params supplied to `CATValidatorV2.entry` hash to
  * the commitment. The validator derives both hashes from the calldata and
  * checks the signature over them, so mismatching inputs produce a digest the
- * account never approved and the call reverts with `BadSignature`. The
- * remaining format check (`BadValidationParams`) is the contract's;
- * `hashValidationProgram` and `hashValidationParams` still throw on an input
- * that `entry` cannot encode.
+ * account never approved and the call reverts with `BadSignature`. Params
+ * without a program are refused too: `entry` reverts `BadValidationParams`
+ * on them before it checks the signature. `hashValidationProgram` and
+ * `hashValidationParams` still throw on an input that `entry` cannot encode.
  */
 export function assertValidationInputs(
   commitment: ValidationCommitment,
   validationProgram: readonly ValidationCommand[],
-  validationParams: `0x${string}`[],
+  validationParams: readonly `0x${string}`[],
 ): void {
+  if (validationProgram.length === 0 && validationParams.length > 0)
+    throw new ValidationError(
+      "validationParams require a validationProgram: CATValidatorV2 reverts BadValidationParams on params without a program.",
+    );
   // Hex digits may arrive in either case; keccak256 and zeroHash are lowercase.
   if (
     hashValidationProgram(validationProgram) !==
