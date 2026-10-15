@@ -63,7 +63,7 @@ G1-G7: Yggdrasil PRD G1-G8, D1-D5. Threat model (PRD D9): "settlement is trustle
 | Compose compiler (Yggdrasil `derive.ts`, intentFactory provider) | Both hashes in the digest; hash 0 = v1 behaviour; program hash = `keccak256(abi.encode(commands))` over the `runVM` command array; params hash rule; STATICCALL `runVM` (the compiler emits only the assert-only command subset); register layout baked into every program; program runs after the floor; generous gas cap (the compiler has no gas model); one outcome per settle node, with `amount = minAmount`. |
 | intent-factory backend | `prepare-bundle` builds the V2 digest and CREATE2 address from the hashes. The DB stores hashes, program and params (migration 0030). `execute-bundle` re-checks the solver's program-hash echo. The descriptor discloses asserted predicates to the user (disclosure only; nothing reads it at runtime). |
 | intent-factory solver | Encodes `entry`; delivers V2 outcomes to the validator (`v2OutcomeReceiver`); decodes `ValidationFailed` and `BadValidationParams` in simulation errors. |
-| Refunds (`submit-refund`, SDK) | A zero-hash refund constraint signed in the escrow batch; the refund call targets the validator. |
+| Refunds (`submit-refund`, SDK) | A zero-hash refund constraint signed in the escrow batch, bound to the refund wallet (D10); the refund call targets the refund wallet with an empty payload. |
 | COM-1647 observed-exact (PR #354) | Reads the `VALIDATION_GAS_CAP` and `VIRTUAL_MACHINE` getters; one absolute third-party predicate. It needs neither pre-balances nor the account register. The gas-cap read is a pre-check in a drill script (`observed-exact.ts:592`) and changes with D9. |
 
 No consumer reads the hashes from `entry` calldata: off-chain they are identifiers in the digest, the DB and the echo. No emitted program reads the account register. After Yggdrasil#2006, no emitted program reads a pre-balance register. IfConsumersV2 §2, ComposeCompilerV2 §2c-b/c.
@@ -88,7 +88,7 @@ No consumer reads the hashes from `entry` calldata: off-chain they are identifie
 | R5 | Settlement is v1's pay-the-validator model, inherited from `main`: the fill pays the validator, the validator checks its own balance against each outcome amount and forwards its full balance; destination `address(0)` means the signer. Duplicate outcome tokens stay unsupported (audit 6.1.1 note). | MUST | hard |
 | R6 | Allowances, executor binding, nonces (including perpetual nonce 0) and `BalanceOfFailed` behave exactly as v1, because V2 calls the v1 code. | MUST | hard |
 | R7 | An empty program gives exact v1 behaviour at about v1 gas cost. Non-empty params with an empty program revert with `BadValidationParams`. | MUST | hard (Yggdrasil#2006 commits zero hashes when there are no invariants) |
-| R8 | Every V2 escrow can refund through a zero-hash constraint whose call targets the validator. | MUST | hard |
+| R8 | Every V2 escrow can refund through a zero-hash constraint bound to the refund wallet (D10): `executionTarget` = refund wallet, `payloadHash` = `keccak256("")`. The refund call targets the refund wallet with an empty payload, so `_handleAllowances` moves the funds from the escrow to the wallet in one hop. | MUST | hard |
 | R9 | The fill call forwards no native value from the validator to the execution target. **Reason:** v1's `_call` forwards `selfbalance()` into the call proxy. Before the fill, the validator never holds native value legitimately: `entry` is not payable, `_handleAllowances` moves ERC-20 only (`safeTransferFrom`), and `_validatePayment` forwards the full balance after each settlement. So the only native balance the call can carry is stray or force-fed ETH. Anyone can send 1 wei through `receive()`; every fill whose target function is not payable then reverts, including `IntentExecutor.executeAndSweep`. Forwarding zero removes that block and loses no legitimate flow. intent-factory's `CATValidatorV1_1._call` already forwards zero for this reason (`CATValidatorV1_1.sol:274`). | SHOULD | new (D6) |
 
 ### Program execution
@@ -129,11 +129,14 @@ contract CATValidatorV2 is CATValidator, Tstorish {  // inherits main v1, audite
   immutable VIRTUAL_MACHINE                          // no gas cap: see D9
 
   entry(execTarget, execPayload, account, nonce,
-        allowances, outcomes, program, bytes32[] params, signature)   // 9 args
+        allowances, outcomes, binding, program, bytes32[] params, signature)   // 10 args
+    binding = (executionTarget, payloadHash)          // calldata struct: see D4, D10
+    if executionTarget != 0 && executionTarget != execTarget: revert TargetNotCommitted
+    if payloadHash != 0 && payloadHash != keccak256(execPayload): revert PayloadNotCommitted
     programHash = program.length == 0 ? 0 : keccak256(program)
     paramsHash  = params.length == 0 ? 0 : keccak256(abi.encodePacked(params))
     if nonce != 0: _checkNonce(account, nonce)        // v1
-    check signature over the V2 typehash(…, programHash, paramsHash)
+    check signature over the V2 typehash(…, executionTarget, payloadHash, programHash, paramsHash)
     if programHash != 0: spent[] = replay of the v1 allowance order (literal spend, or
                                    remaining escrow balance for a MAGIC spend)
     _handleAllowances(execTarget, account, allowances) // v1
@@ -167,7 +170,7 @@ contract CATValidatorV2 is CATValidator, Tstorish {  // inherits main v1, audite
 - Derived hashes (15 slots) and a validation struct (12 slots) compile only with `--ir-minimum`.
 - Only an ABI that packs the order into one struct (6 slots) compiles under the legacy coverage that upstream CI runs.
 
-D4 chooses between those options. Measured on the shipped contract: `forge build` and `forge coverage --ir-minimum` compile, legacy coverage does not, so CI runs coverage with `--ir-minimum` (D4-A). The `spent[]` and `paid[]` arrays live in memory and are built in helpers, so they add no `entry` stack slots.
+D4 chooses between those options. Measured on the shipped contract: `forge build` and `forge coverage --ir-minimum` compile, legacy coverage does not, so CI runs coverage with `--ir-minimum` (D4-A). The `spent[]` and `paid[]` arrays live in memory and are built in helpers, so they add no `entry` stack slots. The D10 binding fields, passed as two more flat arguments, fail `--ir-minimum` coverage by one slot ("Cannot swap Variable var_signature_length with Slot RET[modifier_nonReentrant]"). Passed as one `ExecutionBinding` calldata struct, they compile under both profiles with zero spare slots, so any future `entry` argument needs another struct.
 
 ## 8. Decisions
 
@@ -261,11 +264,28 @@ No, not for safety. The current V2 forwards at most `VALIDATION_GAS_CAP` (5,000,
 
 > Decision: A. It removes a constructor argument, keeps one address on every chain, and gives up no safety property.
 
+### D10. Bind the fill target and payload
+
+The V2 digest did not cover `execTarget` or `execPayload`. A refund constraint shaped as a balance sweep (allocation `maxUint256`, `SPEND_BALANCE_OF_MAGIC`, outcome `{token, 0, refundWallet}`, no program) could be called with `execTarget = attacker`: `_handleAllowances` sent the whole escrow balance to the attacker, and `_validatePayment` checked `>= 0` and passed. The sweep shape must stay, because a 1:1 floor fails for under-funded deposits, deposits above the allowance, amount-flexible allowances and tokens that lose wei per transfer (stETH). So the destination is bound, not the amount.
+
+- **A (chosen).** Commit `address executionTarget` and `bytes32 payloadHash` in the EIP-712 constraint, as intent-factory's audited `CATValidatorV1_1` does. Zero means unconstrained. `entry` reverts `TargetNotCommitted()` or `PayloadNotCommitted()` before any transfer. An execute constraint signs `0`/`0` and fills exactly as before. A refund signs the refund wallet and `keccak256("")`, so the only call that settles it sends the allowances to the wallet and makes no payload call.
+- **B.** A 1:1 amount floor on the refund. It fails the four sweep cases above.
+
+Type string, with the two fields after `nonce` where V1_1 puts them, so the V2 field list is the V1_1 list followed by the program commitment:
+
+```text
+ExecutionConstraint(Allowance[] allowances,Outcome[] outcomes,address executor,uint256 nonce,address executionTarget,bytes32 payloadHash,bytes32 validationProgramHash,bytes32 paramsHash)Allowance(address token,uint256 amount)Outcome(address token,uint256 amount,address destination)
+```
+
+`entry` takes the binding as the calldata struct `ExecutionBinding(address executionTarget, bytes32 payloadHash)` (stack budget, D4); the selector moves from `0x62551d8f` to `0x9b998f63`. The refund keeps sharing the execute constraint's nonce. The SDK refund drops its outcomes: the tokens never reach the validator, so a validator-balance floor would always revert, and a zero-amount outcome would make a 0-value transfer that some tokens reject.
+
+> Decision: A. Measured `entry` execution gas: a fill with an empty program costs 695 more (164,786 → 165,481); the bound refund costs 80,423 against 107,155 for the previous 1:1 refund through the validator, a route change rather than binding overhead. Residual limits are K7.
+
 ## 9. Rollout and migration
 
 1. **catapultar:** add `virtual` to v1 (bytecode-neutral, CI asserts the bytecode is unchanged); implement V2 as a subclass; take the program as a `VMCommand[]`; port the TypeScript; open a new PR for the audit.
 2. **Yggdrasil (lockstep):** merge #2006; replace the pre-balance slots with `spent[]` and `paid[]` (D2); route results to the validator (D1-A); emit the program as a command array hashed as `keccak256(abi.encode(commands))`; regenerate the hash-parity vectors once.
-3. **intent-factory:** vendor the new V2; update the `entry` encoders (9 arguments, program as `VMCommand[]`, params as `bytes32[]`), the stored program shape, the solver's receiver and error table, the refund target and the fixtures; fix the descriptor's empty-params hash (`descriptor.ts` says keccak of empty bytes; the contract uses 0).
+3. **intent-factory:** vendor the new V2; update the `entry` encoders (10 arguments, the `ExecutionBinding` struct, program as `VMCommand[]`, params as `bytes32[]`), the V2 typehash and digest (D10), the stored program shape, the solver's receiver and error table, the refund target and binding, and the fixtures; fix the descriptor's empty-params hash (`descriptor.ts` says keccak of empty bytes; the contract uses 0). The type string and the selector change together, so every V2 digest producer and `entry` encoder cuts over in lockstep: a digest signed under the old type string cannot authorize a call on the new validator.
 4. **Audit** V2 against VM v1.2.
 5. **Deploy** by CREATE2 on each chain; retire `0x48789d54…` and `0xc626…dcd7`.
 6. **Drill** on the Aspire fork: `yarn e2e:vc`, `yarn e2e:observed-exact`, `yarn e2e:compose`.
@@ -285,6 +305,8 @@ No V2 bundles exist in production, so no escrow needs migrating.
 > **K5. Gas cap per chain.** If D9 keeps an immutable cap, one CREATE2 address assumes equal gas metering of the VM on every chain (ERC7821LIFI audit 6.1.2 is the same class). D9-A removes this risk.
 
 > **K6. Validator selection in intent-factory.** No policy rejects a V2 validator without a validation group, and `validator-version.ts` maps the V2 address to version "1". [INFERENCE] Such an escrow could not settle. Fix in the intent-factory migration.
+
+> **K7. Limits of the D10 binding.** (a) The spend is not signed. An untrusted executor can run the bound refund with spend 0 or a partial spend; either call consumes the nonzero nonce the refund shares with the execute constraint, which disables both signed paths at that nonce and leaves the rest of the deposit in the escrow. Funds can only move to the signed wallet, so this is griefing, not theft; recovery needs the owner's direct call on the escrow. (b) A perpetual (nonce 0) refund can be replayed, but only to the refund wallet. (c) An execute constraint signed `0`/`0` with a zero outcome floor stays drainable; execute constraints need a real floor. (d) The binding fixes only the destination of the validator's `transferFrom`. A callback-capable token (ERC-777 hooks) can still run refund-wallet code, and a nested `entry` hits `nonReentrant`. A refund wallet that is the validator, the escrow or the token contract does not yield a usable refund; choosing the wallet is the producer's responsibility, and the SDK rejects only the zero address, which would mean unconstrained.
 
 ## 11. Sources
 
