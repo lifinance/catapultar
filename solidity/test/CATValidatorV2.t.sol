@@ -155,7 +155,8 @@ contract LongReverter {
     }
 }
 
-contract CATValidatorV2Test is Test {
+/// @dev Shared state, deployment and helpers for the V2 test contracts.
+abstract contract CATValidatorV2TestBase is Test {
     CATValidatorV2Harness validator; // backed by AcceptVM
     CATValidatorV2 echoValidator; // backed by EchoVM
     LibValidationVMHarness lib;
@@ -179,48 +180,6 @@ contract CATValidatorV2Test is Test {
         token = new MockERC20("Outcome", "OUT", 18);
         inToken = new MockERC20("Allowance", "IN", 18);
         fill = new OutcomeFill();
-    }
-
-    /* ─────────────────────────── LibValidationVM
-    ─────────────────────────── */
-
-    function test_paramsHashOf_emptyIsZero() external view {
-        assertEq(lib.paramsHashOf(new bytes32[](0)), bytes32(0));
-    }
-
-    function test_paramsHashOf_concatKeccak(
-        bytes32 a,
-        bytes32 b
-    ) external view {
-        bytes32[] memory params = new bytes32[](2);
-        params[0] = a;
-        params[1] = b;
-        assertEq(lib.paramsHashOf(params), keccak256(abi.encodePacked(a, b)));
-    }
-
-    function test_buildRegisters_layout() external view {
-        bytes32[] memory params = new bytes32[](2);
-        params[0] = bytes32(uint256(0xAA));
-        params[1] = bytes32(uint256(0xBB));
-        uint256[] memory spent = new uint256[](2);
-        spent[0] = 1 ether;
-        spent[1] = 42;
-        uint256[] memory paid = new uint256[](1);
-        paid[0] = 7;
-        address account = address(0xE5c);
-
-        bytes[] memory registers = lib.buildRegisters(params, account, spent, paid);
-
-        assertEq(registers.length, 123, "fixed register-file size");
-        assertEq(registers[0], abi.encodePacked(bytes32(uint256(0xAA))), "params[0]");
-        assertEq(registers[1], abi.encodePacked(bytes32(uint256(0xBB))), "params[1]");
-        assertEq(registers[2], abi.encodePacked(bytes32(uint256(uint160(account)))), "account after params");
-        assertEq(registers[3], abi.encodePacked(bytes32(uint256(1 ether))), "spent[0]");
-        assertEq(registers[4], abi.encodePacked(bytes32(uint256(42))), "spent[1]");
-        assertEq(registers[5], abi.encodePacked(bytes32(uint256(7))), "paid[0]");
-        for (uint256 i = 6; i < registers.length; ++i) {
-            assertEq(registers[i], new bytes(32), "scratch is a 32-byte zero word");
-        }
     }
 
     /* ─────────────────────────── helpers
@@ -404,6 +363,50 @@ contract CATValidatorV2Test is Test {
         VMCommand[] memory program
     ) internal {
         settle(target, execTarget, payload, noAllowances(), outcomes, program, noParams());
+    }
+}
+
+contract CATValidatorV2Test is CATValidatorV2TestBase {
+    /* ─────────────────────────── LibValidationVM
+    ─────────────────────────── */
+
+    function test_paramsHashOf_emptyIsZero() external view {
+        assertEq(lib.paramsHashOf(new bytes32[](0)), bytes32(0));
+    }
+
+    function test_paramsHashOf_concatKeccak(
+        bytes32 a,
+        bytes32 b
+    ) external view {
+        bytes32[] memory params = new bytes32[](2);
+        params[0] = a;
+        params[1] = b;
+        assertEq(lib.paramsHashOf(params), keccak256(abi.encodePacked(a, b)));
+    }
+
+    function test_buildRegisters_layout() external view {
+        bytes32[] memory params = new bytes32[](2);
+        params[0] = bytes32(uint256(0xAA));
+        params[1] = bytes32(uint256(0xBB));
+        uint256[] memory spent = new uint256[](2);
+        spent[0] = 1 ether;
+        spent[1] = 42;
+        uint256[] memory paid = new uint256[](1);
+        paid[0] = 7;
+        address account = address(0xE5c);
+
+        bytes[] memory registers = lib.buildRegisters(params, account, spent, paid);
+
+        assertEq(registers.length, 123, "fixed register-file size");
+        assertEq(registers[0], abi.encodePacked(bytes32(uint256(0xAA))), "params[0]");
+        assertEq(registers[1], abi.encodePacked(bytes32(uint256(0xBB))), "params[1]");
+        assertEq(registers[2], abi.encodePacked(bytes32(uint256(uint160(account)))), "account after params");
+        assertEq(registers[3], abi.encodePacked(bytes32(uint256(1 ether))), "spent[0]");
+        assertEq(registers[4], abi.encodePacked(bytes32(uint256(42))), "spent[1]");
+        assertEq(registers[5], abi.encodePacked(bytes32(uint256(7))), "paid[0]");
+        for (uint256 i = 6; i < registers.length; ++i) {
+            assertEq(registers[i], new bytes(32), "scratch is a 32-byte zero word");
+        }
     }
 
     /* ─────────────────────────── domain and v1 entry
