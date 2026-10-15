@@ -4,9 +4,10 @@
  *
  * Mirrors the `solidity/src/CATValidatorV2.sol` forge artifact; the
  * `CATValidatorV2 ABI matches the forge artifact` spec guards it against drift.
- * The 9-argument `entry` takes v1's inputs with `validationProgram` and
+ * The 10-argument `entry` takes v1's inputs with the signed `binding`
+ * (`executionTarget`, `payloadHash`), `validationProgram` and
  * `validationParams` inserted between `outcomes` and `signature`; the
- * contract derives both committed hashes itself. The inherited 7-argument
+ * contract derives both program hashes itself. The inherited 7-argument
  * `entry` always reverts `V1EntryDisabled()`.
  */
 export const CAT_VALIDATOR_V2_ABI = [
@@ -179,6 +180,23 @@ export const CAT_VALIDATOR_V2_ABI = [
             name: "destination",
             type: "address",
             internalType: "address",
+          },
+        ],
+      },
+      {
+        name: "binding",
+        type: "tuple",
+        internalType: "struct ExecutionBinding",
+        components: [
+          {
+            name: "executionTarget",
+            type: "address",
+            internalType: "address",
+          },
+          {
+            name: "payloadHash",
+            type: "bytes32",
+            internalType: "bytes32",
           },
         ],
       },
@@ -384,6 +402,11 @@ export const CAT_VALIDATOR_V2_ABI = [
   },
   {
     type: "error",
+    name: "PayloadNotCommitted",
+    inputs: [],
+  },
+  {
+    type: "error",
     name: "Reentrancy",
     inputs: [],
   },
@@ -395,6 +418,11 @@ export const CAT_VALIDATOR_V2_ABI = [
   {
     type: "error",
     name: "TStoreNotSupported",
+    inputs: [],
+  },
+  {
+    type: "error",
+    name: "TargetNotCommitted",
     inputs: [],
   },
   {

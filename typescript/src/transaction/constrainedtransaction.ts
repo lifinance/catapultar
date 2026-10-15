@@ -5,6 +5,7 @@ import {
   type Allowance,
   type AllowanceSpend,
   type Call,
+  type ExecutionBinding,
   type ExecutionConstraint,
   type Factory,
   type Outcome,
@@ -22,6 +23,8 @@ import {
   assertValidationInputs,
   constraintDigest,
   constraintV2Digest,
+  refundBinding,
+  UNBOUND_EXECUTION,
 } from "../protocol/constraint";
 
 /** Options for {@link ConstrainedAssetTransaction.asExecuteCall}. */
@@ -153,9 +156,10 @@ export class ConstrainedAssetTransaction {
    * Commit a validation program to the constraint, switching it to
    * `CATValidatorV2`: digests use EIP-712 domain version "2" and commit both
    * hashes, and entry calls use the v2 `entry`. Every call that touches the
-   * validator then requires an explicit `validator` address. The refund
-   * constraint deliberately commits zero hashes so a failing program can never
-   * block a refund.
+   * validator then requires an explicit `validator` address. The execute
+   * constraint commits an unbound fill ({@link UNBOUND_EXECUTION}). The refund
+   * constraint commits zero hashes, so a failing program can never block a
+   * refund, and binds its target to the refund address ({@link refundBinding}).
    */
   setValidationCommitment(commitment: ValidationCommitment): this {
     this.validationCommitment = commitment;
@@ -216,10 +220,10 @@ export class ConstrainedAssetTransaction {
     }
     // Set the signature that allows the validator to pull funds. The approval is
     // identical for the main constraint and the optional refund; only `outcomes`
-    // and, on v2, the committed hashes differ between them.
+    // and, on v2, the binding and the committed hashes differ between them.
     const pushConstraintApproval = (
       outcomes: Outcome[],
-      commitment: ValidationCommitment | undefined,
+      v2?: { binding: ExecutionBinding; commitment: ValidationCommitment },
     ) => {
       const executionConstraint: ExecutionConstraint = {
         allowances: this.allowances,
@@ -228,8 +232,12 @@ export class ConstrainedAssetTransaction {
         nonce: this.constraintNonce,
       };
       const domain = { chainId: this.chainId, verifyingContract: validator };
-      const digest = commitment
-        ? constraintV2Digest(domain, { ...executionConstraint, ...commitment })
+      const digest = v2
+        ? constraintV2Digest(domain, {
+            ...executionConstraint,
+            ...v2.binding,
+            ...v2.commitment,
+          })
         : constraintDigest(domain, executionConstraint);
       // `to: zeroAddress` is the ERC-7821 self-call convention — the executor
       // (Solady's `_get`) substitutes `address(this)`, so this approves the
@@ -245,19 +253,26 @@ export class ConstrainedAssetTransaction {
       });
     };
 
-    pushConstraintApproval(this.outcomes, this.validationCommitment);
+    pushConstraintApproval(
+      this.outcomes,
+      this.validationCommitment && {
+        binding: UNBOUND_EXECUTION,
+        commitment: this.validationCommitment,
+      },
+    );
 
-    // If a refund target has been provided, then we add a 1:1 refund.
     if (refund) {
-      const refundOutcomes: Outcome[] = this.allowances.map((allowance) => ({
-        destination: refund,
-        amount: allowance.amount,
-        token: allowance.token,
-      }));
-      pushConstraintApproval(
-        refundOutcomes,
-        this.validationCommitment && NO_VALIDATION,
-      );
+      if (this.validationCommitment) {
+        // v2: the refund binds its target to `refund`, so the allowances move
+        // straight there and no outcome is needed (see `asRefundCall`).
+        pushConstraintApproval([], {
+          binding: refundBinding(refund),
+          commitment: NO_VALIDATION,
+        });
+      } else {
+        // v1: a 1:1 refund through the validator.
+        pushConstraintApproval(this.refundOutcomes(refund));
+      }
     }
 
     const tx = new BaseTransaction();
@@ -267,13 +282,23 @@ export class ConstrainedAssetTransaction {
     return tx;
   }
 
+  /** The v1 refund outcomes: each allowance, 1:1, to `refund` through the validator. */
+  private refundOutcomes(refund: `0x${string}`): Outcome[] {
+    return this.allowances.map((a) => ({
+      token: a.token,
+      amount: a.amount,
+      destination: refund,
+    }));
+  }
+
   /**
    * Encode a validator `entry` call — the shared shape behind
    * {@link asExecuteCall} and {@link asRefundCall}. Only the execution
    * target/payload, spends, and outcomes differ between them. With a
-   * `validation` the call is the 9-argument `CATValidatorV2.entry`, which
-   * derives the committed hashes from the program and params itself;
-   * otherwise it is the 7-argument `CATValidator.entry`.
+   * `validation` the call is the 10-argument `CATValidatorV2.entry`, which
+   * takes the signed binding and derives the committed hashes from the
+   * program and params itself; otherwise it is the 7-argument
+   * `CATValidator.entry`.
    */
   private buildEntryCall(opt: {
     validator: `0x${string}`;
@@ -283,6 +308,7 @@ export class ConstrainedAssetTransaction {
     spends: AllowanceSpend[];
     outcomes: Outcome[];
     validation?: {
+      binding: ExecutionBinding;
       validationProgram: readonly ValidationCommand[];
       validationParams: readonly `0x${string}`[];
     };
@@ -302,6 +328,7 @@ export class ConstrainedAssetTransaction {
               this.constraintNonce,
               opt.spends,
               opt.outcomes,
+              validation.binding,
               validation.validationProgram,
               validation.validationParams,
               "0x",
@@ -365,16 +392,25 @@ export class ConstrainedAssetTransaction {
       account: opt.address,
       spends: allowanceSpends,
       outcomes: this.outcomes,
-      validation: commitment && { validationProgram, validationParams },
+      validation: commitment && {
+        binding: UNBOUND_EXECUTION,
+        validationProgram,
+        validationParams,
+      },
     });
   }
 
   /**
-   * Build the validator entry call that refunds the full allowances 1:1 back to
-   * `opt.refund` (each allowance becomes an equal outcome to the refund target).
-   * Use this to unwind an embedded constraint without running any execution.
-   * On a v2 constraint the refund commits zero hashes and no program, matching
-   * the refund constraint embedded by {@link asCatapultarAllowanceTransaction}.
+   * Build the validator entry call that refunds the full allowances back to
+   * `opt.refund`. Use this to unwind an embedded constraint without running any
+   * execution. It matches the refund constraint embedded by
+   * {@link asCatapultarAllowanceTransaction}:
+   *
+   * - v1: the call targets the validator, and each allowance becomes an equal
+   *   outcome to `opt.refund`, which the validator forwards.
+   * - v2: the call targets `opt.refund` with an empty payload, under the signed
+   *   {@link refundBinding}, so the allowances move straight from the account
+   *   to `opt.refund`. It commits no outcomes, zero hashes and no program.
    */
   asRefundCall(opt: CatRefundOptions) {
     const validator = this.resolveValidator(opt.validator);
@@ -384,11 +420,23 @@ export class ConstrainedAssetTransaction {
       allocated: a.amount,
       spend: a.amount,
     }));
-    const refundOutcomes: Outcome[] = this.allowances.map((a) => ({
-      token: a.token,
-      amount: a.amount,
-      destination: opt.refund,
-    }));
+
+    if (this.validationCommitment) {
+      const binding = refundBinding(opt.refund);
+      return this.buildEntryCall({
+        validator,
+        target: binding.executionTarget,
+        payload: "0x",
+        account: opt.address,
+        spends: allowanceSpends,
+        outcomes: [],
+        validation: {
+          binding,
+          validationProgram: [],
+          validationParams: [],
+        },
+      });
+    }
 
     // Set target to the validator. The validator will forward funds to the user at the end of the call.
     return this.buildEntryCall({
@@ -397,11 +445,7 @@ export class ConstrainedAssetTransaction {
       payload: "0x",
       account: opt.address,
       spends: allowanceSpends,
-      outcomes: refundOutcomes,
-      validation: this.validationCommitment && {
-        validationProgram: [],
-        validationParams: [],
-      },
+      outcomes: this.refundOutcomes(opt.refund),
     });
   }
 

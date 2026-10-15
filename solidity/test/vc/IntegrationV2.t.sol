@@ -12,6 +12,7 @@ import { CatapultarFactory } from "../../src/CatapultarFactory.sol";
 import { KeyedOwnable } from "../../src/libs/KeyedOwnable.sol";
 import { LibCalls } from "../../src/libs/LibCalls.sol";
 import { AllowanceSpend, Outcome } from "../../src/libs/LibExecutionConstraint.sol";
+import { ExecutionBinding } from "../../src/libs/LibExecutionConstraintV2.sol";
 import { VMCommand } from "../../src/libs/LibValidationVM.sol";
 import { ProgramBuilder } from "./ProgramBuilder.sol";
 import { VcTestBase } from "./VcTestBase.sol";
@@ -399,14 +400,24 @@ contract IntegrationV2Test is VcTestBase {
         deal(USDC, e.account, ESCROW_USDC);
     }
 
-    /// @dev Calls the 9-argument `entry` as the executor with an empty signature.
+    /// @dev Calls the V2 `entry` as the executor with an empty signature. The
+    /// escrow signed an execute constraint, so the binding is unbound (zero, zero).
     function _entry(
         Settlement memory s,
         Escrow memory e
     ) internal {
         vm.prank(executor);
         validator.entry(
-            address(swap), s.fillPayload, e.account, s.nonce, s.allowances, s.outcomes, s.program, s.params, hex""
+            address(swap),
+            s.fillPayload,
+            e.account,
+            s.nonce,
+            s.allowances,
+            s.outcomes,
+            ExecutionBinding({ executionTarget: address(0), payloadHash: bytes32(0) }),
+            s.program,
+            s.params,
+            hex""
         );
     }
 

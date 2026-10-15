@@ -6,14 +6,23 @@ import { Test } from "forge-std/src/Test.sol";
 import { Allowance, AllowanceSpend, LibExecutionConstraint, Outcome } from "../../src/libs/LibExecutionConstraint.sol";
 import { LibExecutionConstraintV2 } from "../../src/libs/LibExecutionConstraintV2.sol";
 
-/// @dev The frozen v2 type string: `bytes32 validationProgramHash,bytes32 paramsHash`
-/// appended at the END of the ExecutionConstraint(...) field list, sub-type strings
-/// unchanged after it. Written out literally here so a drift in the library constant
-/// fails against an independent copy.
+/// @dev The frozen v2 type string: after v1's `nonce`, the fill binding
+/// `address executionTarget,bytes32 payloadHash` (in CATValidatorV1_1's position),
+/// then the program commitment `bytes32 validationProgramHash,bytes32 paramsHash`;
+/// sub-type strings unchanged after it. Written out literally here so a drift in
+/// the library constant fails against an independent copy.
 string constant EXECUTION_CONSTRAINT_V2_TYPE =
-    "ExecutionConstraint(Allowance[] allowances,Outcome[] outcomes,address executor,uint256 nonce,bytes32 validationProgramHash,bytes32 paramsHash)Allowance(address token,uint256 amount)Outcome(address token,uint256 amount,address destination)";
+    "ExecutionConstraint(Allowance[] allowances,Outcome[] outcomes,address executor,uint256 nonce,address executionTarget,bytes32 payloadHash,bytes32 validationProgramHash,bytes32 paramsHash)Allowance(address token,uint256 amount)Outcome(address token,uint256 amount,address destination)";
 
 contract LibExecutionConstraintV2Test is Test {
+    /// @dev The committed fields after `nonce`, grouped to keep the fuzz entry points shallow.
+    struct Commitment {
+        address executionTarget;
+        bytes32 payloadHash;
+        bytes32 validationProgramHash;
+        bytes32 paramsHash;
+    }
+
     function allowanceSpendToAllowance(
         AllowanceSpend[] memory allowanceSpends
     ) internal pure returns (Allowance[] memory allowances) {
@@ -28,8 +37,7 @@ contract LibExecutionConstraintV2Test is Test {
         Outcome[] memory outcomes,
         address executor,
         uint256 nonce,
-        bytes32 validationProgramHash,
-        bytes32 paramsHash
+        Commitment memory c
     ) internal pure returns (bytes32) {
         bytes32[] memory allowanceHashes = new bytes32[](allowances.length);
         for (uint256 i; i < allowances.length; ++i) {
@@ -61,8 +69,10 @@ contract LibExecutionConstraintV2Test is Test {
                 keccak256(abi.encodePacked(outputHashes)),
                 executor,
                 nonce,
-                validationProgramHash,
-                paramsHash
+                c.executionTarget,
+                c.payloadHash,
+                c.validationProgramHash,
+                c.paramsHash
             )
         );
     }
@@ -80,28 +90,35 @@ contract LibExecutionConstraintV2Test is Test {
         Outcome[] calldata outcomes,
         address executor,
         uint256 nonce,
-        bytes32 validationProgramHash,
-        bytes32 paramsHash
+        Commitment calldata c
     ) external pure {
         bytes32 libraryTypeHash = LibExecutionConstraintV2.typehash(
-            allowances, outcomes, executor, nonce, validationProgramHash, paramsHash
+            allowances,
+            outcomes,
+            executor,
+            nonce,
+            c.executionTarget,
+            c.payloadHash,
+            c.validationProgramHash,
+            c.paramsHash
         );
-        bytes32 expectedTypeHash = typehashReferenceV2(
-            allowanceSpendToAllowance(allowances), outcomes, executor, nonce, validationProgramHash, paramsHash
-        );
+        bytes32 expectedTypeHash =
+            typehashReferenceV2(allowanceSpendToAllowance(allowances), outcomes, executor, nonce, c);
 
         assertEq(libraryTypeHash, expectedTypeHash);
     }
 
     /// @dev v1 and v2 struct hashes must never collide, even for the degenerate
-    /// zero-hash constraint (belt to the domain-version-bump braces).
+    /// all-zero constraint (belt to the domain-version-bump braces).
     function test_typehashV2_zeroHashesStillDifferFromV1Shape(
         AllowanceSpend[] calldata allowances,
         Outcome[] calldata outcomes,
         address executor,
         uint256 nonce
     ) external pure {
-        bytes32 v2 = LibExecutionConstraintV2.typehash(allowances, outcomes, executor, nonce, bytes32(0), bytes32(0));
+        bytes32 v2 = LibExecutionConstraintV2.typehash(
+            allowances, outcomes, executor, nonce, address(0), bytes32(0), bytes32(0), bytes32(0)
+        );
         bytes32 v1 = LibExecutionConstraint.typehash(allowances, outcomes, executor, nonce);
         assertNotEq(v2, v1);
     }

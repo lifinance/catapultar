@@ -11,6 +11,7 @@ import {
 import {
   ExecutionConstraintTyped,
   ExecutionConstraintV2Typed,
+  type ExecutionBinding,
   type ExecutionConstraint,
   type ExecutionConstraintV2,
   type ValidationCommand,
@@ -152,6 +153,32 @@ export function constraintV2Digest(
   constraint: ExecutionConstraintV2,
 ): `0x${string}` {
   return hashTypedData(constraintV2TypedData(domain, constraint));
+}
+
+/**
+ * The binding of a `CATValidatorV2` execute constraint: zero target and zero
+ * payload hash, so the executor may fill with any target and payload. The
+ * outcome floor stays the fill's only bound.
+ */
+export const UNBOUND_EXECUTION: ExecutionBinding = {
+  executionTarget: zeroAddress,
+  payloadHash: zeroHash,
+};
+
+/**
+ * The binding of a `CATValidatorV2` refund constraint: the refund wallet as the
+ * committed target and `keccak256("0x")` as the committed payload hash. The
+ * refund `entry` must then pass `execTarget = refund` and an empty payload, so
+ * the allowances move straight from the escrow to `refund` and the validator
+ * makes no call. Throws on the zero address: a zero target is unconstrained,
+ * which would let the executor redirect the refund.
+ */
+export function refundBinding(refund: `0x${string}`): ExecutionBinding {
+  if (refund.toLowerCase() === zeroAddress)
+    throw new ValidationError(
+      "A CATValidatorV2 refund must bind a nonzero refund address: a zero executionTarget is unconstrained, so the executor could redirect the refund.",
+    );
+  return { executionTarget: refund, payloadHash: keccak256("0x") };
 }
 
 /** ABI shape of a validation program: the `runVM` command array `(uint8 op, bytes32 data)[]`. */

@@ -128,6 +128,8 @@ export {
   constraintV2Digest,
   hashValidationProgram,
   hashValidationParams,
+  refundBinding,
+  UNBOUND_EXECUTION,
 } from "./protocol/constraint";
 
 // EIP-712 type tables (shared with the contracts).
@@ -155,6 +157,7 @@ export type {
   AllowanceSpend,
   Outcome,
   ExecutionConstraint,
+  ExecutionBinding,
   ExecutionConstraintV2,
   ValidationCommand,
   ValidationCommitment,

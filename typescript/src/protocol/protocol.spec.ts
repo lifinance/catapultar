@@ -33,7 +33,9 @@ import {
   hashValidationParams,
   hashValidationProgram,
   OUTCOME_TO_SIGNER,
+  refundBinding,
   SPEND_FULL_BALANCE,
+  UNBOUND_EXECUTION,
 } from "./constraint";
 import {
   ExecutionConstraintTyped,
@@ -256,7 +258,7 @@ describe("protocol/constraint v2", () => {
   // The type string of `LibExecutionConstraintV2`, written out literally so the
   // viem type table is checked against an independent copy of the Solidity one.
   const EXECUTION_CONSTRAINT_V2_TYPE =
-    "ExecutionConstraint(Allowance[] allowances,Outcome[] outcomes,address executor,uint256 nonce,bytes32 validationProgramHash,bytes32 paramsHash)Allowance(address token,uint256 amount)Outcome(address token,uint256 amount,address destination)";
+    "ExecutionConstraint(Allowance[] allowances,Outcome[] outcomes,address executor,uint256 nonce,address executionTarget,bytes32 payloadHash,bytes32 validationProgramHash,bytes32 paramsHash)Allowance(address token,uint256 amount)Outcome(address token,uint256 amount,address destination)";
 
   const WETH = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2" as const;
   const USDC = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48" as const;
@@ -268,6 +270,9 @@ describe("protocol/constraint v2", () => {
     "0xd71a5feb2589caa974cee8d91b3420319fed8975bf2c5cccdf3a42ce10eb3c55" as const;
   const PARAMS_HASH =
     "0x6f119f4892c1928b59c0cb3f60046c7bfcac7b23db280b459b933bcbc9ac35fc" as const;
+  // keccak256 of the empty payload: the payload hash a refund commits.
+  const EMPTY_PAYLOAD_HASH =
+    "0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470" as const;
   const domain = {
     chainId: 1,
     verifyingContract: "0x00000000000000000000000000000000ca7A0002",
@@ -328,6 +333,8 @@ describe("protocol/constraint v2", () => {
           { type: "bytes32" },
           { type: "address" },
           { type: "uint256" },
+          { type: "address" },
+          { type: "bytes32" },
           { type: "bytes32" },
           { type: "bytes32" },
         ],
@@ -337,6 +344,8 @@ describe("protocol/constraint v2", () => {
           outcomesHash,
           c.executor,
           c.nonce,
+          c.executionTarget,
+          c.payloadHash,
           c.validationProgramHash,
           c.paramsHash,
         ],
@@ -344,48 +353,71 @@ describe("protocol/constraint v2", () => {
     );
   }
 
-  // Pinned struct hashes and digests of the shared hash-parity vectors (domain
-  // "CAT Validator" version "2", chain 1, validator 0x…ca7A0002).
+  // Pinned struct hashes and digests (domain "CAT Validator" version "2",
+  // chain 1, validator 0x…ca7A0002), computed independently with `cast`
+  // (`cast abi-encode` of the fields, `cast keccak`).
   const vectors = [
     {
-      name: "zero hashes",
+      name: "zero hashes, unbound",
       nonce: 1n,
+      executionTarget: zeroAddress,
+      payloadHash: zeroHash,
       validationProgramHash: zeroHash,
       paramsHash: zeroHash,
       structHash:
-        "0x8ad43b9eace85ce4ab9da203e0f0b71ed5b1dee54da8c6b6b86a4ce9eb810ae2",
+        "0x6d962a3aec04cd619e0435e74cc623848dd97ad1e48a17580f82ce873de96492",
       digest:
-        "0x5d971d0218079cfe42273fc27f22a2d227b965a1ae457b89f3c6d878b86d0ae9",
+        "0xe1a85a2fc04e30ac92319a3baf6e17496d1690afbf88bf291a7fef92f1bfc855",
     },
     {
       name: "program committed",
       nonce: 1n,
+      executionTarget: zeroAddress,
+      payloadHash: zeroHash,
       validationProgramHash: PROGRAM_HASH,
       paramsHash: zeroHash,
       structHash:
-        "0x656c3a96699b5e689814183305826793b81e87691cc45c7a31c81cd03b9bf9ea",
+        "0xe6014192f98d2ccf3ab1bd0c91b2a9a055005c46f6fb2f422d20a4281851a60e",
       digest:
-        "0x7eb56e992428dd16af794cf84e51f12b416a7be60c0c6a1493eb8f493bd7cdf2",
+        "0x67ab570453927ff41ed7cb93f0b85ebb08e23104a2dcfbcdb1b5d05d29e6ba40",
     },
     {
       name: "program and params committed",
       nonce: 1n,
+      executionTarget: zeroAddress,
+      payloadHash: zeroHash,
       validationProgramHash: PROGRAM_HASH,
       paramsHash: PARAMS_HASH,
       structHash:
-        "0x0058850b10d018f3e294caeef84093c70363f0eac00e44da161bfdfa55fe58e9",
+        "0xfa895192a29f687047bef5258c331e8d2e621575184c453e7843c79059730fca",
       digest:
-        "0x7d4c914e187930b8426ba20a2b2d4bd7a3d883111efd559b9c173986e5e3c492",
+        "0xdaa64be7b48fea92a49c9c902f5afb843df23947be8b18474a7d0dd60437ac83",
     },
     {
       name: "perpetual nonce",
       nonce: 0n,
+      executionTarget: zeroAddress,
+      payloadHash: zeroHash,
       validationProgramHash: PROGRAM_HASH,
       paramsHash: PARAMS_HASH,
       structHash:
-        "0x64c06a5c077a048b072c23af9a59990a7ae44ab96018303c35572a59ef2cda61",
+        "0xda2d06c7101f87d2cefcdfa3062992e84ad7765fda98d2d257e53d4a53194d67",
       digest:
-        "0xbb50196d59d4056745bd48ce439a5a03ab4005655abbc5a540399b384c9e8715",
+        "0xc47ecb3d7bc7690bd79dfe390016c3cc11642cc61c52b2bfe194458f77082625",
+    },
+    {
+      // Differs from "zero hashes, unbound" only in the binding: the empty
+      // payload hash is a commitment, not the zero sentinel.
+      name: "refund binding (target DEST, empty payload)",
+      nonce: 1n,
+      executionTarget: DEST,
+      payloadHash: EMPTY_PAYLOAD_HASH,
+      validationProgramHash: zeroHash,
+      paramsHash: zeroHash,
+      structHash:
+        "0xebd1f02c71acc6aa58f0e04ac8833fc3452c9a32b69c57e7c9f218c02cdcd720",
+      digest:
+        "0x67ab64b5dd241b1210341e308c496958c8494644afefc7b8d2f4423551640ef0",
     },
   ] as const;
 
@@ -394,6 +426,8 @@ describe("protocol/constraint v2", () => {
       const constraint: ExecutionConstraintV2 = {
         ...base,
         nonce: vector.nonce,
+        executionTarget: vector.executionTarget,
+        payloadHash: vector.payloadHash,
         validationProgramHash: vector.validationProgramHash,
         paramsHash: vector.paramsHash,
       };
@@ -408,11 +442,24 @@ describe("protocol/constraint v2", () => {
     });
   }
 
+  it("binds the refund to keccak256 of the empty payload, never the zero sentinel", () => {
+    expect(refundBinding(DEST)).toEqual({
+      executionTarget: DEST,
+      payloadHash: EMPTY_PAYLOAD_HASH,
+    });
+    expect(UNBOUND_EXECUTION).toEqual({
+      executionTarget: zeroAddress,
+      payloadHash: zeroHash,
+    });
+    expect(() => refundBinding(zeroAddress)).toThrow(ValidationError);
+  });
+
   it("signs under domain version 2, so zero hashes never collide with v1", () => {
     expect(constraintV2Domain(domain).version).toBe("2");
     expect(constraintDomain(domain).version).toBe("1");
     const v2 = constraintV2Digest(domain, {
       ...base,
+      ...UNBOUND_EXECUTION,
       validationProgramHash: zeroHash,
       paramsHash: zeroHash,
     });

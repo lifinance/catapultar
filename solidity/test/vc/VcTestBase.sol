@@ -86,7 +86,8 @@ abstract contract VcTestBase is Test {
     /* ─────────────────────────── V2 constraint digest
     ─────────────────────────── */
 
-    /// @notice The V2 constraint digest under `validator`'s domain, encoded without
+    /// @notice The V2 digest of an execute constraint (unbound: zero `executionTarget`
+    /// and `payloadHash`) under `validator`'s domain, encoded without
     /// `LibExecutionConstraintV2`, so a drift in the library fails the settlement.
     function constraintDigest(
         bytes32 domainSeparator,
@@ -122,13 +123,15 @@ abstract contract VcTestBase is Test {
             abi.encode(
                 keccak256(
                     bytes(
-                        "ExecutionConstraint(Allowance[] allowances,Outcome[] outcomes,address executor,uint256 nonce,bytes32 validationProgramHash,bytes32 paramsHash)Allowance(address token,uint256 amount)Outcome(address token,uint256 amount,address destination)"
+                        "ExecutionConstraint(Allowance[] allowances,Outcome[] outcomes,address executor,uint256 nonce,address executionTarget,bytes32 payloadHash,bytes32 validationProgramHash,bytes32 paramsHash)Allowance(address token,uint256 amount)Outcome(address token,uint256 amount,address destination)"
                     )
                 ),
                 keccak256(abi.encodePacked(allowanceHashes)),
                 keccak256(abi.encodePacked(outcomeHashes)),
                 executor,
                 nonce,
+                address(0),
+                bytes32(0),
                 validationProgramHash,
                 paramsHash
             )

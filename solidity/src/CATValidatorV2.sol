@@ -6,7 +6,7 @@ import { Tstorish } from "tstorish/src/Tstorish.sol";
 
 import { CATValidator } from "./CATValidator.sol";
 import { AllowanceSpend, Outcome } from "./libs/LibExecutionConstraint.sol";
-import { LibExecutionConstraintV2 } from "./libs/LibExecutionConstraintV2.sol";
+import { ExecutionBinding, LibExecutionConstraintV2 } from "./libs/LibExecutionConstraintV2.sol";
 import { LibValidationVM, VMCommand, VMState } from "./libs/LibValidationVM.sol";
 
 /**
@@ -60,6 +60,12 @@ contract CATValidatorV2 is CATValidator, Tstorish {
     error InvalidVirtualMachine();
     /// @dev The inherited v1 `entry` has no V2 digest to check against.
     error V1EntryDisabled();
+    /// @dev The constraint commits an `executionTarget` and the call's `execTarget`
+    /// differs from it.
+    error TargetNotCommitted();
+    /// @dev The constraint commits a `payloadHash` and `keccak256(execPayload)`
+    /// differs from it.
+    error PayloadNotCommitted();
 
     /// @notice The VirtualMachine that executes committed programs.
     address public immutable VIRTUAL_MACHINE;
@@ -106,6 +112,11 @@ contract CATValidatorV2 is CATValidator, Tstorish {
      * current balance (v1 semantics). The fill must deliver each outcome token to this
      * contract. When `validationProgram` is non-empty, this contract settles as v1
      * while recording the spends and payments, and then runs the program.
+     * @param binding The committed `executionTarget` and `payloadHash`. Each field is
+     * zero when unconstrained, and is checked against `execTarget` and
+     * `keccak256(execPayload)` before any allowance moves. A refund constraint commits
+     * its refund wallet and `keccak256("")`, so its allowances can only move to that
+     * wallet and no call is made.
      * @param validationProgram The `runVM` command array. Empty commits
      * `validationProgramHash = 0` and settles exactly as v1.
      * @param validationParams Committed parameter words. Must be empty when the
@@ -118,10 +129,13 @@ contract CATValidatorV2 is CATValidator, Tstorish {
         uint256 nonce,
         AllowanceSpend[] calldata allowances,
         Outcome[] calldata outcomes,
+        ExecutionBinding calldata binding,
         VMCommand[] calldata validationProgram,
         bytes32[] calldata validationParams,
         bytes calldata signature
     ) external nonReentrant {
+        _checkBinding(binding, execTarget, execPayload);
+
         bytes32 validationProgramHash = _programHashOf(validationProgram);
         bytes32 paramsHash = _paramsHashOf(validationParams, validationProgramHash);
         bool verified = validationProgramHash != bytes32(0);
@@ -129,7 +143,7 @@ contract CATValidatorV2 is CATValidator, Tstorish {
 
         if (nonce != 0) _checkNonce(account, nonce);
 
-        _validateApprovalV2(account, nonce, allowances, outcomes, validationProgramHash, paramsHash, signature);
+        _validateApprovalV2(account, nonce, allowances, outcomes, binding, validationProgramHash, paramsHash, signature);
 
         uint256[] memory spent;
         if (verified) spent = _replaySpends(account, allowances);
@@ -143,6 +157,19 @@ contract CATValidatorV2 is CATValidator, Tstorish {
         _validatePayment(account, outcomes);
 
         if (verified) _runValidation(account, validationProgram, validationParams, spent, _takePaid(outcomes.length));
+    }
+
+    /// @dev Reverts unless the call matches each non-zero field of the committed
+    /// binding. Runs before any allowance moves.
+    function _checkBinding(
+        ExecutionBinding calldata binding,
+        address execTarget,
+        bytes calldata execPayload
+    ) internal pure {
+        address executionTarget = binding.executionTarget;
+        if (executionTarget != address(0) && executionTarget != execTarget) revert TargetNotCommitted();
+        bytes32 payloadHash = binding.payloadHash;
+        if (payloadHash != bytes32(0) && payloadHash != keccak256(execPayload)) revert PayloadNotCommitted();
     }
 
     /// @dev `bytes32(0)` for an empty program, else `keccak256` of the ABI-encoded
@@ -174,12 +201,20 @@ contract CATValidatorV2 is CATValidator, Tstorish {
         uint256 nonce,
         AllowanceSpend[] calldata allowances,
         Outcome[] calldata outcomes,
+        ExecutionBinding calldata binding,
         bytes32 validationProgramHash,
         bytes32 paramsHash,
         bytes calldata signature
     ) internal view {
         bytes32 typehash = LibExecutionConstraintV2.typehash(
-            allowances, outcomes, msg.sender, nonce, validationProgramHash, paramsHash
+            allowances,
+            outcomes,
+            msg.sender,
+            nonce,
+            binding.executionTarget,
+            binding.payloadHash,
+            validationProgramHash,
+            paramsHash
         );
         bytes32 digest = _hashTypedData(typehash);
 

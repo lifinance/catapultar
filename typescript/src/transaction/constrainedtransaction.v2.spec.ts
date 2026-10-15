@@ -10,6 +10,7 @@ import {
   getAddress,
   http,
   toFunctionSelector,
+  zeroAddress,
   zeroHash,
   type Hex,
 } from "viem";
@@ -31,6 +32,8 @@ import {
   constraintV2Domain,
   hashValidationParams,
   hashValidationProgram,
+  refundBinding,
+  UNBOUND_EXECUTION,
 } from "../protocol/constraint";
 import { ValidationError } from "../errors";
 import type { ValidationCommand } from "../types/types";
@@ -94,21 +97,21 @@ describe("ConstrainedAssetTransaction v2", () => {
       (i) => i.type === "function" && i.name === "entry",
     );
 
-    it("entry has the 9-argument v2 selector", () => {
+    it("entry has the 10-argument v2 selector", () => {
       const entry = entries.find(
-        (i) => i.type === "function" && i.inputs.length === 9,
+        (i) => i.type === "function" && i.inputs.length === 10,
       )!;
       expect(toFunctionSelector(entry)).toBe(
         toFunctionSelector(
-          "entry(address,bytes,address,uint256,(address,uint256,uint256)[],(address,uint256,address)[],(uint8,bytes32)[],bytes32[],bytes)",
+          "entry(address,bytes,address,uint256,(address,uint256,uint256)[],(address,uint256,address)[],(address,bytes32),(uint8,bytes32)[],bytes32[],bytes)",
         ),
       );
-      expect(toFunctionSelector(entry)).toBe("0x62551d8f");
+      expect(toFunctionSelector(entry)).toBe("0x9b998f63");
     });
 
     it("keeps the inherited 7-argument entry, which shares v1's selector", () => {
       expect(entries.map((i) => toFunctionSelector(i)).sort()).toEqual([
-        "0x62551d8f",
+        "0x9b998f63",
         "0xe5ce4787",
       ]);
       const v1Entry = CAT_VALIDATOR_ABI.find(
@@ -130,9 +133,11 @@ describe("ConstrainedAssetTransaction v2", () => {
         "InvalidVirtualMachine",
         "NonceAlreadySpent",
         "OnlyDirectCalls",
+        "PayloadNotCommitted",
         "Reentrancy",
         "TStoreAlreadyActivated",
         "TStoreNotSupported",
+        "TargetNotCommitted",
         "TloadTestContractDeploymentFailed",
         "V1EntryDisabled",
         "ValidationFailed",
@@ -214,7 +219,7 @@ describe("ConstrainedAssetTransaction v2", () => {
   describe("with a validation commitment", () => {
     const v2Tx = () => wethTx().setValidationCommitment(COMMITMENT);
 
-    it("encodes the 9-argument v2 entry, which decodes back to the inputs", () => {
+    it("encodes the 10-argument v2 entry, which decodes back to the inputs", () => {
       const exec = v2Tx().asExecuteCall({
         ...execute,
         validationProgram: PROGRAM,
@@ -222,7 +227,7 @@ describe("ConstrainedAssetTransaction v2", () => {
       });
       expect(exec.to).toBe(VALIDATOR);
       expect(exec.value).toBe(0n);
-      expect(exec.data.slice(0, 10)).toBe("0x62551d8f");
+      expect(exec.data.slice(0, 10)).toBe("0x9b998f63");
       const { functionName, args } = decodeFunctionData({
         abi: CAT_VALIDATOR_V2_ABI,
         data: exec.data,
@@ -241,6 +246,7 @@ describe("ConstrainedAssetTransaction v2", () => {
           },
         ],
         [{ token: WETH, amount: 1000000000000000000n, destination: DEST }],
+        UNBOUND_EXECUTION,
         PROGRAM,
         PARAMS,
         "0x",
@@ -265,7 +271,7 @@ describe("ConstrainedAssetTransaction v2", () => {
       expect(v2Digests[0]).not.toBe(v1Digests[0]);
     });
 
-    it("embeds the v2 digest, and a zero-commitment v2 refund digest", () => {
+    it("embeds an unbound v2 execute digest and a bound zero-commitment refund digest", () => {
       const tx = v2Tx().asCatapultarAllowanceTransaction({
         refund: DEST,
         validator: VALIDATOR,
@@ -282,20 +288,22 @@ describe("ConstrainedAssetTransaction v2", () => {
           outcomes: [
             { token: WETH, amount: 1000000000000000000n, destination: DEST },
           ],
+          executionTarget: zeroAddress,
+          payloadHash: zeroHash,
           ...COMMITMENT,
         }),
         constraintV2Digest(domain, {
           ...constraint,
-          outcomes: [
-            { token: WETH, amount: 2000000000000000000n, destination: DEST },
-          ],
+          outcomes: [],
+          executionTarget: DEST,
+          payloadHash: keccak256("0x"),
           validationProgramHash: zeroHash,
           paramsHash: zeroHash,
         }),
       ]);
     });
 
-    it("refunds through the validator with a zero commitment", () => {
+    it("refunds straight to the bound refund address with an empty payload", () => {
       const refund = v2Tx().asRefundCall({
         address: ACCOUNT,
         refund: DEST,
@@ -307,7 +315,7 @@ describe("ConstrainedAssetTransaction v2", () => {
         data: refund.data,
       });
       expect(args).toEqual([
-        VALIDATOR,
+        DEST,
         "0x",
         ACCOUNT,
         1n,
@@ -318,11 +326,33 @@ describe("ConstrainedAssetTransaction v2", () => {
             spend: 2000000000000000000n,
           },
         ],
-        [{ token: WETH, amount: 2000000000000000000n, destination: DEST }],
+        [],
+        {
+          executionTarget: DEST,
+          payloadHash:
+            "0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470",
+        },
         [],
         [],
         "0x",
       ]);
+    });
+
+    it("rejects a zero refund address, which would leave the refund unbound", () => {
+      expect(() => refundBinding(zeroAddress)).toThrow(ValidationError);
+      expect(() =>
+        v2Tx().asCatapultarAllowanceTransaction({
+          refund: zeroAddress,
+          validator: VALIDATOR,
+        }),
+      ).toThrow(ValidationError);
+      expect(() =>
+        v2Tx().asRefundCall({
+          address: ACCOUNT,
+          refund: zeroAddress,
+          validator: VALIDATOR,
+        }),
+      ).toThrow(ValidationError);
     });
 
     it("selects v2 on presence: a zero-hash commitment is still v2", () => {
@@ -336,7 +366,7 @@ describe("ConstrainedAssetTransaction v2", () => {
         abi: CAT_VALIDATOR_V2_ABI,
         data: exec.data,
       });
-      expect(args.slice(6)).toEqual([[], [], "0x"]);
+      expect(args.slice(6)).toEqual([UNBOUND_EXECUTION, [], [], "0x"]);
     });
 
     it("requires an explicit validator", () => {
@@ -614,9 +644,9 @@ describe("ConstrainedAssetTransaction v2", () => {
           abi: CAT_VALIDATOR_V2_ABI,
           data: executeCall.data,
         });
-        if (decoded.args?.length !== 9)
-          throw new Error("expected the 9-argument entry");
-        const [target, payload, address, nonce, spends, outcomes] =
+        if (decoded.args?.length !== 10)
+          throw new Error("expected the 10-argument entry");
+        const [target, payload, address, nonce, spends, outcomes, binding] =
           decoded.args;
         // An empty program commits a zero params hash, so the params check
         // runs before the signature check.
@@ -633,6 +663,7 @@ describe("ConstrainedAssetTransaction v2", () => {
               nonce,
               spends,
               outcomes,
+              binding,
               [],
               [PARAMS[0]!],
               "0x",
@@ -646,7 +677,7 @@ describe("ConstrainedAssetTransaction v2", () => {
     it.skipIf(!hasArtifact)(
       "reverts V1EntryDisabled on the inherited 7-argument entry",
       async () => {
-        // viem resolves `entry` to the 9-argument overload of the v2 ABI, so
+        // viem resolves `entry` to the 10-argument overload of the v2 ABI, so
         // encode through the v1 entry and decode with the v2 errors.
         const v2Errors = CAT_VALIDATOR_V2_ABI.filter(
           (i): i is Extract<typeof i, { type: "error" }> => i.type === "error",
@@ -681,7 +712,7 @@ describe("ConstrainedAssetTransaction v2", () => {
     );
 
     it.skipIf(!hasArtifact)(
-      "refunds through the validator when the program rejects",
+      "refunds straight to the bound refund address when the program rejects",
       async () => {
         const recipient = random(20);
         const { catx, account, executeCall, amount1 } =
@@ -699,8 +730,8 @@ describe("ConstrainedAssetTransaction v2", () => {
             abi: CAT_VALIDATOR_V2_ABI,
             data: executeCall.data,
           });
-          if (decoded.args?.length !== 9)
-            throw new Error("expected the 9-argument entry");
+          if (decoded.args?.length !== 10)
+            throw new Error("expected the 10-argument entry");
           await expect(
             publicClient.simulateContract({
               account: wallet.address,
@@ -711,13 +742,30 @@ describe("ConstrainedAssetTransaction v2", () => {
             }),
           ).rejects.toThrow(/ValidationFailed/);
 
-          await send(
-            catx.asRefundCall({
-              address: account.address,
-              refund: recipient,
-              validator,
+          // The refund is bound to `recipient`: redirecting it reverts.
+          const refundCall = catx.asRefundCall({
+            address: account.address,
+            refund: recipient,
+            validator,
+          });
+          const refundArgs = decodeFunctionData({
+            abi: CAT_VALIDATOR_V2_ABI,
+            data: refundCall.data,
+          }).args;
+          if (refundArgs?.length !== 10)
+            throw new Error("expected the 10-argument entry");
+          const [, ...afterTarget] = refundArgs;
+          await expect(
+            publicClient.simulateContract({
+              account: wallet.address,
+              address: validator,
+              abi: CAT_VALIDATOR_V2_ABI,
+              functionName: "entry",
+              args: [wallet.address, ...afterTarget],
             }),
-          );
+          ).rejects.toThrow(/TargetNotCommitted/);
+
+          await send(refundCall);
         } finally {
           await testClient.setCode({
             address: virtualMachine,
