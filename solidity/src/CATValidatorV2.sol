@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 pragma solidity ^0.8.25;
 
+import { SafeTransferLib } from "solady/src/utils/SafeTransferLib.sol";
 import { SignatureCheckerLib } from "solady/src/utils/SignatureCheckerLib.sol";
 import { Tstorish } from "tstorish/src/Tstorish.sol";
 
@@ -33,9 +34,12 @@ import { LibValidationVM, VMCommand, VMState } from "./libs/LibValidationVM.sol"
  * outcome (`paid`). `paid` is recorded by the `_transfer` hook at the moment v1
  * forwards each outcome, in transient storage (Tstorish: TSTORE where the chain
  * supports it, SSTORE otherwise). It is the gross amount this contract sent;
- * a fee-on-transfer token credits the destination with less. `spent` replays
- * the v1 allowance order: a literal spend as written, a `SPEND_BALANCE_OF_MAGIC`
- * spend as the escrow balance that remains at that point of the order.
+ * a fee-on-transfer token credits the destination with less. `spent` is
+ * recorded by `_handleAllowancesRecorded`, a copy of v1's allowance loop that
+ * this contract runs only when a program is committed: a literal spend as
+ * written, a `SPEND_BALANCE_OF_MAGIC` spend as the escrow balance read when the
+ * loop reaches that allowance, after the earlier pulls have executed. An empty
+ * program runs v1's own loop.
  *
  * The program runs under `staticcall`, so it can only read and revert. Any
  * failure of the program call, including out of gas, reverts
@@ -146,9 +150,8 @@ contract CATValidatorV2 is CATValidator, Tstorish {
         _validateApprovalV2(account, nonce, allowances, outcomes, binding, validationProgramHash, paramsHash, signature);
 
         uint256[] memory spent;
-        if (verified) spent = _replaySpends(account, allowances);
-
-        _handleAllowances(execTarget, account, allowances);
+        if (verified) spent = _handleAllowancesRecorded(execTarget, account, allowances);
+        else _handleAllowances(execTarget, account, allowances);
 
         if (execPayload.length != 0) _call(execTarget, execPayload);
 
@@ -221,30 +224,41 @@ contract CATValidatorV2 is CATValidator, Tstorish {
         if (!SignatureCheckerLib.isValidSignatureNowCalldata(account, digest, signature)) revert BadSignature();
     }
 
+    /// @dev Copy of v1's `_safeBalanceOf`, which is private to v1. Calls
+    /// `token.balanceOf(account)` and reverts `BalanceOfFailed` if the call fails
+    /// or returns fewer than 32 bytes, instead of silently returning zero.
+    function _strictBalanceOf(
+        address token,
+        address account
+    ) private view returns (uint256 bal) {
+        bool implemented;
+        (implemented, bal) = SafeTransferLib.checkBalanceOf(token, account);
+        if (!implemented) revert BalanceOfFailed(token);
+    }
+
     /**
-     * @dev The spend `_handleAllowances` resolves per allowance, computed before it
-     * runs. A literal spend is taken as written. A `SPEND_BALANCE_OF_MAGIC` spend
-     * is the escrow's balance when v1 reaches that allowance: the balance read
-     * here, less the spends of earlier allowances of the same token.
+     * @dev v1's allowance loop (`CATValidator._handleAllowances`) with each
+     * resolved spend recorded: the amount passed to `transferFrom`, read fresh
+     * from the escrow for a `SPEND_BALANCE_OF_MAGIC` spend after the earlier
+     * pulls have executed. Keep the loop body in lockstep with v1; the parity
+     * test in `test/CATValidatorV2.AllowanceParity.t.sol` checks that the two
+     * loops make the same transfers and revert with the same data.
      */
-    function _replaySpends(
-        address account,
+    function _handleAllowancesRecorded(
+        address destination,
+        address source,
         AllowanceSpend[] calldata allowances
-    ) internal view returns (uint256[] memory spent) {
-        uint256 numAllowances = allowances.length;
-        spent = new uint256[](numAllowances);
-        for (uint256 i; i < numAllowances; ++i) {
+    ) internal returns (uint256[] memory spent) {
+        spent = new uint256[](allowances.length);
+        for (uint256 i = 0; i < allowances.length; ++i) {
             AllowanceSpend calldata allowance = allowances[i];
-            if (allowance.spend != SPEND_BALANCE_OF_MAGIC) {
-                spent[i] = allowance.spend;
-                continue;
-            }
-            uint256 remaining = _balanceOf(allowance.token, account);
-            for (uint256 j; j < i; ++j) {
-                if (allowances[j].token != allowance.token) continue;
-                remaining = spent[j] < remaining ? remaining - spent[j] : 0;
-            }
-            spent[i] = remaining;
+
+            uint256 spend =
+                allowance.spend == SPEND_BALANCE_OF_MAGIC ? _strictBalanceOf(allowance.token, source) : allowance.spend;
+            if (allowance.allocated < spend) revert AllocationTooSmall(allowance.allocated, spend);
+
+            spent[i] = spend;
+            SafeTransferLib.safeTransferFrom(allowance.token, source, destination, spend);
         }
     }
 
