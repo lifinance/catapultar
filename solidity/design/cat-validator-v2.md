@@ -315,3 +315,4 @@ No V2 bundles exist in production, so no escrow needs migrating.
 - Yggdrasil `origin/main` 58deeee63: `derive.ts`, `provider.ts`, `settle.ts`, `ir0_to_isa.rs`; PR #2006.
 - intent-factory `catv2-pre-audit`: backend prepare/execute/submit-refund, solver compose and same-chain paths, `descriptor.ts`, migration 0030, NCBF PRD D21; PRs #212, #223, #350 (closed V′), #354 (COM-1647), #422, #435.
 - catapultar `main` bc486a4 and PR #42; audit reports in `solidity/audits/`; scratch experiments for bytecode neutrality, stack budget and the 1-wei test.
+- Internal review of this branch at `8d1aed7`: `solidity/design/cat-validator-v2-internal-review.md` (Finding 3 fixed in `b0a9c2e`; PoCs in `test/audit/`).
