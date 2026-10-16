@@ -195,6 +195,70 @@ export const ExecutionConstraintTyped = {
   ],
 } as const;
 
+// Typehashed ExecutionConstraint (CATValidatorV2)
+
+/**
+ * One command of a validation program: an LI.FI VirtualMachine `runVM` command
+ * (`VMCommand` in `LibValidationVM`). `op` is a `uint8` opcode, `data` its
+ * 32-byte argument word.
+ */
+export type ValidationCommand = {
+  op: number;
+  data: `0x${string}`;
+};
+
+/**
+ * The commitment that binds a constraint to an LI.FI VirtualMachine validation
+ * program: `validationProgramHash` is `keccak256` of the ABI-encoded command
+ * array, `paramsHash` is `keccak256` of the concatenated 32-byte param words.
+ * Zero hashes mean "no program" (and "no params"), which `CATValidatorV2`
+ * settles exactly like v1.
+ */
+export type ValidationCommitment = {
+  validationProgramHash: `0x${string}`;
+  paramsHash: `0x${string}`;
+};
+
+/**
+ * The committed fill of a `CATValidatorV2` constraint: `entry` reverts
+ * `TargetNotCommitted()` unless `execTarget == executionTarget`, and
+ * `PayloadNotCommitted()` unless `keccak256(execPayload) == payloadHash`. A zero
+ * field is unconstrained. An execute constraint signs both as zero; a refund
+ * constraint signs its refund wallet and `keccak256("0x")`, so its allowances
+ * can only move to that wallet (see `refundBinding`).
+ */
+export type ExecutionBinding = {
+  executionTarget: `0x${string}`;
+  payloadHash: `0x${string}`;
+};
+
+/**
+ * The `CATValidatorV2` constraint: an {@link ExecutionConstraint} that also
+ * commits an {@link ExecutionBinding} and a {@link ValidationCommitment}.
+ * Signed under EIP-712 domain version "2", so it can never collide with a v1
+ * digest.
+ */
+export type ExecutionConstraintV2 = ExecutionConstraint &
+  ExecutionBinding &
+  ValidationCommitment;
+
+/**
+ * EIP-712 type table for {@link ExecutionConstraintV2} (mirrors
+ * `LibExecutionConstraintV2`): v1's fields, then the binding in
+ * `CATValidatorV1_1`'s position, then the program commitment.
+ */
+export const ExecutionConstraintV2Typed = {
+  ExecutionConstraint: [
+    ...ExecutionConstraintTyped.ExecutionConstraint,
+    { name: "executionTarget", type: "address" },
+    { name: "payloadHash", type: "bytes32" },
+    { name: "validationProgramHash", type: "bytes32" },
+    { name: "paramsHash", type: "bytes32" },
+  ],
+  Allowance: ExecutionConstraintTyped.Allowance,
+  Outcome: ExecutionConstraintTyped.Outcome,
+} as const;
+
 //-- Factory pattern types --//
 
 /**

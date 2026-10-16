@@ -161,6 +161,15 @@ describe("ConstrainedAssetTransaction", () => {
           spends: [amount1],
         });
 
+        // Other spec files fill through token2 on the same anvil instance, so
+        // its token1 balance is measured as a delta.
+        const token2Before = await publicClient.readContract({
+          address: token1,
+          abi: MOCKERC20_abi,
+          functionName: "balanceOf",
+          args: [token2],
+        });
+
         // We now need to execute 3 transaction. If we had a Catapultar account we could do this in a single one but for simplicity, we will just do them one by one.
 
         const nonce = await publicClient.getTransactionCount({
@@ -187,12 +196,12 @@ describe("ConstrainedAssetTransaction", () => {
         // 1. Token2 (recipient of the funds) recived amount1 token1.
         // 2. oftenTargetAddress received amount2 token2.
         expect(
-          await publicClient.readContract({
+          (await publicClient.readContract({
             address: token1,
             abi: MOCKERC20_abi,
             functionName: "balanceOf",
             args: [token2],
-          }),
+          })) - token2Before,
         ).toBe(amount1);
         expect(
           await publicClient.readContract({

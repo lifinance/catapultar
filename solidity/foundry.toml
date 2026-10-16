@@ -8,6 +8,9 @@ optimizer = true
 optimizer_runs = 100_000_000
 bytecode_hash = 'none'
 
+# The hash-parity fixture under test/vc/fixtures is read by HashParity.t.sol.
+fs_permissions = [{ access = "read", path = "test/vc/fixtures" }]
+
 [profile.tron]
 src = "src"
 out = "out"

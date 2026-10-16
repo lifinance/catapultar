@@ -1,4 +1,14 @@
-import { hashTypedData, zeroAddress } from "viem";
+import {
+  concat,
+  encodeAbiParameters,
+  hashStruct,
+  hashTypedData,
+  keccak256,
+  pad,
+  toBytes,
+  zeroAddress,
+  zeroHash,
+} from "viem";
 import {
   enumToOwnerType,
   keyArrayToOwner,
@@ -18,14 +28,23 @@ import {
 import {
   constraintDigest,
   constraintDomain,
+  constraintV2Digest,
+  constraintV2Domain,
+  hashValidationParams,
+  hashValidationProgram,
   OUTCOME_TO_SIGNER,
+  refundBinding,
   SPEND_FULL_BALANCE,
+  UNBOUND_EXECUTION,
 } from "./constraint";
 import {
   ExecutionConstraintTyped,
+  ExecutionConstraintV2Typed,
   ExecutionMode,
   type ExecutionConstraint,
+  type ExecutionConstraintV2,
 } from "../types/types";
+import { ValidationError } from "../errors";
 import { defaultFactory } from "../config";
 
 describe("protocol/owner", () => {
@@ -232,6 +251,239 @@ describe("protocol/constraint", () => {
       message: constraint,
     });
     expect(fromEncoder).toBe(handBuilt);
+  });
+});
+
+describe("protocol/constraint v2", () => {
+  // The type string of `LibExecutionConstraintV2`, written out literally so the
+  // viem type table is checked against an independent copy of the Solidity one.
+  const EXECUTION_CONSTRAINT_V2_TYPE =
+    "ExecutionConstraint(Allowance[] allowances,Outcome[] outcomes,address executor,uint256 nonce,address executionTarget,bytes32 payloadHash,bytes32 validationProgramHash,bytes32 paramsHash)Allowance(address token,uint256 amount)Outcome(address token,uint256 amount,address destination)";
+
+  const WETH = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2" as const;
+  const USDC = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48" as const;
+  const DEST = "0x1111111111111111111111111111111111111111" as const;
+  // Opaque commitment values for the digest vectors below. PROGRAM_HASH is the
+  // uc1 hash of the hash-parity fixture under the earlier tight-packed program
+  // rule; the digest treats it as any other bytes32.
+  const PROGRAM_HASH =
+    "0xd71a5feb2589caa974cee8d91b3420319fed8975bf2c5cccdf3a42ce10eb3c55" as const;
+  const PARAMS_HASH =
+    "0x6f119f4892c1928b59c0cb3f60046c7bfcac7b23db280b459b933bcbc9ac35fc" as const;
+  // keccak256 of the empty payload: the payload hash a refund commits.
+  const EMPTY_PAYLOAD_HASH =
+    "0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470" as const;
+  const domain = {
+    chainId: 1,
+    verifyingContract: "0x00000000000000000000000000000000ca7A0002",
+  } as const;
+  const base: ExecutionConstraint = {
+    allowances: [{ token: WETH, amount: 2000000000000000000n }],
+    outcomes: [
+      { token: WETH, amount: 1000000000000000000n, destination: DEST },
+      { token: USDC, amount: 1000000000n, destination: DEST },
+    ],
+    executor: "0x00000000000000000000000000000000ca7A0003",
+    nonce: 1n,
+  };
+
+  // Reference struct hash built the way `LibExecutionConstraintV2.t.sol`'s
+  // `typehashReferenceV2` does: abi.encode of the type hash and every field.
+  function referenceStructHash(c: ExecutionConstraintV2): `0x${string}` {
+    const allowanceType = keccak256(
+      toBytes("Allowance(address token,uint256 amount)"),
+    );
+    const outcomeType = keccak256(
+      toBytes("Outcome(address token,uint256 amount,address destination)"),
+    );
+    const allowancesHash = keccak256(
+      concat(
+        c.allowances.map((a) =>
+          keccak256(
+            encodeAbiParameters(
+              [{ type: "bytes32" }, { type: "address" }, { type: "uint256" }],
+              [allowanceType, a.token, a.amount],
+            ),
+          ),
+        ),
+      ),
+    );
+    const outcomesHash = keccak256(
+      concat(
+        c.outcomes.map((o) =>
+          keccak256(
+            encodeAbiParameters(
+              [
+                { type: "bytes32" },
+                { type: "address" },
+                { type: "uint256" },
+                { type: "address" },
+              ],
+              [outcomeType, o.token, o.amount, o.destination],
+            ),
+          ),
+        ),
+      ),
+    );
+    return keccak256(
+      encodeAbiParameters(
+        [
+          { type: "bytes32" },
+          { type: "bytes32" },
+          { type: "bytes32" },
+          { type: "address" },
+          { type: "uint256" },
+          { type: "address" },
+          { type: "bytes32" },
+          { type: "bytes32" },
+          { type: "bytes32" },
+        ],
+        [
+          keccak256(toBytes(EXECUTION_CONSTRAINT_V2_TYPE)),
+          allowancesHash,
+          outcomesHash,
+          c.executor,
+          c.nonce,
+          c.executionTarget,
+          c.payloadHash,
+          c.validationProgramHash,
+          c.paramsHash,
+        ],
+      ),
+    );
+  }
+
+  // Pinned struct hashes and digests (domain "CAT Validator" version "2",
+  // chain 1, validator 0x…ca7A0002), computed independently with `cast`
+  // (`cast abi-encode` of the fields, `cast keccak`).
+  const vectors = [
+    {
+      name: "zero hashes, unbound",
+      nonce: 1n,
+      executionTarget: zeroAddress,
+      payloadHash: zeroHash,
+      validationProgramHash: zeroHash,
+      paramsHash: zeroHash,
+      structHash:
+        "0x6d962a3aec04cd619e0435e74cc623848dd97ad1e48a17580f82ce873de96492",
+      digest:
+        "0xe1a85a2fc04e30ac92319a3baf6e17496d1690afbf88bf291a7fef92f1bfc855",
+    },
+    {
+      name: "program committed",
+      nonce: 1n,
+      executionTarget: zeroAddress,
+      payloadHash: zeroHash,
+      validationProgramHash: PROGRAM_HASH,
+      paramsHash: zeroHash,
+      structHash:
+        "0xe6014192f98d2ccf3ab1bd0c91b2a9a055005c46f6fb2f422d20a4281851a60e",
+      digest:
+        "0x67ab570453927ff41ed7cb93f0b85ebb08e23104a2dcfbcdb1b5d05d29e6ba40",
+    },
+    {
+      name: "program and params committed",
+      nonce: 1n,
+      executionTarget: zeroAddress,
+      payloadHash: zeroHash,
+      validationProgramHash: PROGRAM_HASH,
+      paramsHash: PARAMS_HASH,
+      structHash:
+        "0xfa895192a29f687047bef5258c331e8d2e621575184c453e7843c79059730fca",
+      digest:
+        "0xdaa64be7b48fea92a49c9c902f5afb843df23947be8b18474a7d0dd60437ac83",
+    },
+    {
+      name: "perpetual nonce",
+      nonce: 0n,
+      executionTarget: zeroAddress,
+      payloadHash: zeroHash,
+      validationProgramHash: PROGRAM_HASH,
+      paramsHash: PARAMS_HASH,
+      structHash:
+        "0xda2d06c7101f87d2cefcdfa3062992e84ad7765fda98d2d257e53d4a53194d67",
+      digest:
+        "0xc47ecb3d7bc7690bd79dfe390016c3cc11642cc61c52b2bfe194458f77082625",
+    },
+    {
+      // Differs from "zero hashes, unbound" only in the binding: the empty
+      // payload hash is a commitment, not the zero sentinel.
+      name: "refund binding (target DEST, empty payload)",
+      nonce: 1n,
+      executionTarget: DEST,
+      payloadHash: EMPTY_PAYLOAD_HASH,
+      validationProgramHash: zeroHash,
+      paramsHash: zeroHash,
+      structHash:
+        "0xebd1f02c71acc6aa58f0e04ac8833fc3452c9a32b69c57e7c9f218c02cdcd720",
+      digest:
+        "0x67ab64b5dd241b1210341e308c496958c8494644afefc7b8d2f4423551640ef0",
+    },
+  ] as const;
+
+  for (const vector of vectors) {
+    it(`matches the pinned struct hash and digest: ${vector.name}`, () => {
+      const constraint: ExecutionConstraintV2 = {
+        ...base,
+        nonce: vector.nonce,
+        executionTarget: vector.executionTarget,
+        payloadHash: vector.payloadHash,
+        validationProgramHash: vector.validationProgramHash,
+        paramsHash: vector.paramsHash,
+      };
+      const structHash = hashStruct({
+        types: ExecutionConstraintV2Typed,
+        primaryType: "ExecutionConstraint",
+        data: constraint,
+      });
+      expect(structHash).toBe(vector.structHash);
+      expect(referenceStructHash(constraint)).toBe(vector.structHash);
+      expect(constraintV2Digest(domain, constraint)).toBe(vector.digest);
+    });
+  }
+
+  it("binds the refund to keccak256 of the empty payload, never the zero sentinel", () => {
+    expect(refundBinding(DEST)).toEqual({
+      executionTarget: DEST,
+      payloadHash: EMPTY_PAYLOAD_HASH,
+    });
+    expect(UNBOUND_EXECUTION).toEqual({
+      executionTarget: zeroAddress,
+      payloadHash: zeroHash,
+    });
+    expect(() => refundBinding(zeroAddress)).toThrow(ValidationError);
+  });
+
+  it("signs under domain version 2, so zero hashes never collide with v1", () => {
+    expect(constraintV2Domain(domain).version).toBe("2");
+    expect(constraintDomain(domain).version).toBe("1");
+    const v2 = constraintV2Digest(domain, {
+      ...base,
+      ...UNBOUND_EXECUTION,
+      validationProgramHash: zeroHash,
+      paramsHash: zeroHash,
+    });
+    expect(v2).not.toBe(constraintDigest(domain, base));
+  });
+
+  it("hashes programs and params like CATValidatorV2", () => {
+    // The same vector `CATValidatorV2.t.sol` pins, computed outside both
+    // codebases: cast keccak $(cast abi-encode "f((uint8,bytes32)[])" "[(8,…0104),(0,…beef)]").
+    const program = [
+      { op: 8, data: pad("0x0104") },
+      { op: 0, data: pad("0xbeef") },
+    ];
+    const params = [`0x${"11".repeat(32)}`, `0x${"22".repeat(32)}`] as const;
+    expect(hashValidationProgram([])).toBe(zeroHash);
+    expect(hashValidationProgram(program)).toBe(
+      "0x6c12f1a4273f6fa591a0943ebadbd27d46496a9090c3ee169da9e3df911845d5",
+    );
+    expect(() =>
+      hashValidationProgram([{ op: 256, data: zeroHash }]),
+    ).toThrow();
+    expect(hashValidationParams([])).toBe(zeroHash);
+    expect(hashValidationParams([...params])).toBe(keccak256(concat(params)));
+    expect(() => hashValidationParams(["0x1234"])).toThrow(ValidationError);
   });
 });
 
