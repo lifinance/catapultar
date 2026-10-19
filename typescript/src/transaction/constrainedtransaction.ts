@@ -1,4 +1,12 @@
-import { encodeFunctionData, erc20Abi, zeroAddress, zeroHash } from "viem";
+import {
+  encodeFunctionData,
+  erc20Abi,
+  isAddressEqual,
+  keccak256,
+  maxUint256,
+  zeroAddress,
+  zeroHash,
+} from "viem";
 import {
   DigestApproval,
   ExecutionMode,
@@ -24,6 +32,7 @@ import {
   constraintDigest,
   constraintV2Digest,
   refundBinding,
+  SPEND_FULL_BALANCE,
   UNBOUND_EXECUTION,
 } from "../protocol/constraint";
 
@@ -72,6 +81,21 @@ const NO_VALIDATION: ValidationCommitment = {
 };
 
 /**
+ * A binding the SDK signs must commit both fields: zero is the unconstrained
+ * sentinel for either, and a half-bound constraint still lets the executor
+ * choose the other half.
+ */
+function assertBoundFill(binding: ExecutionBinding): void {
+  if (
+    isAddressEqual(binding.executionTarget, zeroAddress) ||
+    BigInt(binding.payloadHash) === 0n
+  )
+    throw new ValidationError(
+      "An execution binding must set both executionTarget and payloadHash: zero is the unconstrained sentinel for either field.",
+    );
+}
+
+/**
  * Builder for a Constrained Asset Transaction (CAT).
  *
  * A CAT lets a designated `executor` spend an account's assets (the
@@ -116,6 +140,12 @@ export class ConstrainedAssetTransaction {
   validationCommitment?: ValidationCommitment;
 
   /**
+   * The committed fill of the execute constraint (`CATValidatorV2` only).
+   * Unset means {@link UNBOUND_EXECUTION}. Set via {@link setExecutionBinding}.
+   */
+  executionBinding?: ExecutionBinding;
+
+  /**
    * @param opt.executor The address permitted to execute the constraint.
    * @param opt.chainId Chain the constraint is bound to.
    */
@@ -157,13 +187,47 @@ export class ConstrainedAssetTransaction {
    * `CATValidatorV2`: digests use EIP-712 domain version "2" and commit both
    * hashes, and entry calls use the v2 `entry`. Every call that touches the
    * validator then requires an explicit `validator` address. The execute
-   * constraint commits an unbound fill ({@link UNBOUND_EXECUTION}). The refund
-   * constraint commits zero hashes, so a failing program can never block a
-   * refund, and binds its target to the refund address ({@link refundBinding}).
+   * constraint commits an unbound fill ({@link UNBOUND_EXECUTION}) unless
+   * {@link setExecutionBinding} binds it. The refund constraint commits zero
+   * hashes, so a failing program can never block a refund, and binds its
+   * target to the refund address ({@link refundBinding}).
    */
   setValidationCommitment(commitment: ValidationCommitment): this {
     this.validationCommitment = commitment;
     return this;
+  }
+
+  /**
+   * Bind the execute constraint to one exact fill. `CATValidatorV2.entry` then
+   * reverts `TargetNotCommitted()` for any other `execTarget` and
+   * `PayloadNotCommitted()` unless `keccak256(execPayload) == payloadHash`,
+   * before any allowance moves. The binding is signed into the v2 digest, so
+   * it also moves the account address. Both fields must be non-zero: zero is
+   * the unconstrained sentinel for either field, and a half-bound constraint
+   * still lets the executor choose the other half. Requires a validation
+   * commitment, since only the v2 digest carries a binding. The refund
+   * constraint keeps its own {@link refundBinding}.
+   */
+  setExecutionBinding(binding: ExecutionBinding): this {
+    assertBoundFill(binding);
+    this.executionBinding = binding;
+    return this;
+  }
+
+  /**
+   * The execute constraint's binding: the bound fill, or the unbound sentinels.
+   * Checked here, not only in the setter, since the field is public. A binding
+   * without a validation commitment throws rather than being dropped from the
+   * v1 digest, which has no binding field.
+   */
+  private executeBinding(): ExecutionBinding {
+    if (!this.executionBinding) return UNBOUND_EXECUTION;
+    if (!this.validationCommitment)
+      throw new ValidationError(
+        "An execution binding requires a validation commitment: only the CATValidatorV2 digest signs a binding. Call setValidationCommitment first, or drop the binding.",
+      );
+    assertBoundFill(this.executionBinding);
+    return this.executionBinding;
   }
 
   /**
@@ -202,8 +266,15 @@ export class ConstrainedAssetTransaction {
       nonce = 1n,
     } = opt ?? {};
     const validator = this.resolveValidator(opt?.validator);
+    const binding = this.executeBinding();
 
     const calls: Call[] = [];
+    // The v2 refund sweeps whatever balance the account holds, even more than
+    // the signed amount (see `asRefundCall`), so a v2 bundle with a refund
+    // approves without limit. Otherwise the approval is the signed amount:
+    // the v1 refund delivers exactly the signed amounts.
+    const approval =
+      refund && this.validationCommitment ? maxUint256 : undefined;
     if (addApprove) {
       // Allow the validator to pull funds. To actually pull funds, the validator requires a signature.
       for (const allowance of this.allowances) {
@@ -212,21 +283,23 @@ export class ConstrainedAssetTransaction {
           data: encodeFunctionData({
             abi: erc20Abi,
             functionName: "approve",
-            args: [validator, allowance.amount],
+            args: [validator, approval ?? allowance.amount],
           }),
           value: 0n,
         });
       }
     }
     // Set the signature that allows the validator to pull funds. The approval is
-    // identical for the main constraint and the optional refund; only `outcomes`
-    // and, on v2, the binding and the committed hashes differ between them.
+    // identical for the main constraint and the optional refund; only the
+    // allowance amounts, `outcomes` and, on v2, the binding and the committed
+    // hashes differ between them.
     const pushConstraintApproval = (
+      allowances: Allowance[],
       outcomes: Outcome[],
       v2?: { binding: ExecutionBinding; commitment: ValidationCommitment },
     ) => {
       const executionConstraint: ExecutionConstraint = {
-        allowances: this.allowances,
+        allowances,
         outcomes,
         executor,
         nonce: this.constraintNonce,
@@ -254,24 +327,32 @@ export class ConstrainedAssetTransaction {
     };
 
     pushConstraintApproval(
+      this.allowances,
       this.outcomes,
       this.validationCommitment && {
-        binding: UNBOUND_EXECUTION,
+        binding,
         commitment: this.validationCommitment,
       },
     );
 
     if (refund) {
       if (this.validationCommitment) {
-        // v2: the refund binds its target to `refund`, so the allowances move
-        // straight there and no outcome is needed (see `asRefundCall`).
-        pushConstraintApproval([], {
+        // v2: the sweep form. Every allowance is signed at `maxUint256`, since
+        // the validator checks `allocated >= spend` with the spend resolved to
+        // the account's live balance, and the binding pins the target to
+        // `refund`, so the allowances move straight there and no outcome is
+        // needed (see `asRefundCall`).
+        const refundAllowances: Allowance[] = this.allowances.map((a) => ({
+          token: a.token,
+          amount: maxUint256,
+        }));
+        pushConstraintApproval(refundAllowances, [], {
           binding: refundBinding(refund),
           commitment: NO_VALIDATION,
         });
       } else {
         // v1: a 1:1 refund through the validator.
-        pushConstraintApproval(this.refundOutcomes(refund));
+        pushConstraintApproval(this.allowances, this.refundOutcomes(refund));
       }
     }
 
@@ -282,7 +363,12 @@ export class ConstrainedAssetTransaction {
     return tx;
   }
 
-  /** The v1 refund outcomes: each allowance, 1:1, to `refund` through the validator. */
+  /**
+   * The v1 refund outcomes: each allowance, 1:1, to `refund` through the
+   * validator. The amount is the floor the validator enforces, which is what
+   * keeps the signed executor from diverting the refund: the v1 digest signs
+   * no target, so the outcome is the only commitment to `refund`.
+   */
   private refundOutcomes(refund: `0x${string}`): Outcome[] {
     return this.allowances.map((a) => ({
       token: a.token,
@@ -353,7 +439,10 @@ export class ConstrainedAssetTransaction {
   /**
    * The call for execution the validation on the account. With a validation
    * commitment, `validationProgram` and `validationParams` must hash to it;
-   * otherwise they must be omitted.
+   * otherwise they must be omitted. With an execution binding
+   * ({@link setExecutionBinding}), `executionTarget` and
+   * `keccak256(executionPayload)` must equal it; otherwise the call could only
+   * revert `TargetNotCommitted()` or `PayloadNotCommitted()`.
    */
   asExecuteCall(opt: CatExecuteOptions): Call {
     const {
@@ -363,6 +452,7 @@ export class ConstrainedAssetTransaction {
       validationParams = [],
     } = opt;
     const validator = this.resolveValidator(opt.validator);
+    const binding = this.executeBinding();
 
     if (opt.spends.length !== this.allowances.length)
       throw new ValidationError(
@@ -385,6 +475,21 @@ export class ConstrainedAssetTransaction {
         "validationProgram and validationParams require a validation commitment; call setValidationCommitment first.",
       );
 
+    // Fail closed client-side, as for the validation inputs: the validator
+    // checks the call against each non-zero binding field before any
+    // allowance moves, so a mismatch encodes a call that can only revert.
+    if (this.executionBinding) {
+      if (!isAddressEqual(executionTarget, binding.executionTarget))
+        throw new ValidationError(
+          `executionTarget ${executionTarget} is not the bound ${binding.executionTarget}; the validator would revert TargetNotCommitted.`,
+        );
+      const payloadHash = keccak256(executionPayload);
+      if (BigInt(payloadHash) !== BigInt(binding.payloadHash))
+        throw new ValidationError(
+          `keccak256(executionPayload) ${payloadHash} is not the bound payloadHash ${binding.payloadHash}; the validator would revert PayloadNotCommitted.`,
+        );
+    }
+
     return this.buildEntryCall({
       validator,
       target: executionTarget,
@@ -393,7 +498,7 @@ export class ConstrainedAssetTransaction {
       spends: allowanceSpends,
       outcomes: this.outcomes,
       validation: commitment && {
-        binding: UNBOUND_EXECUTION,
+        binding,
         validationProgram,
         validationParams,
       },
@@ -401,25 +506,35 @@ export class ConstrainedAssetTransaction {
   }
 
   /**
-   * Build the validator entry call that refunds the full allowances back to
-   * `opt.refund`. Use this to unwind an embedded constraint without running any
-   * execution. It matches the refund constraint embedded by
+   * Build the validator entry call that refunds the allowances to
+   * `opt.refund`. Use this to unwind an embedded constraint without running
+   * any execution. It matches the refund constraint embedded by
    * {@link asCatapultarAllowanceTransaction}:
    *
-   * - v1: the call targets the validator, and each allowance becomes an equal
-   *   outcome to `opt.refund`, which the validator forwards.
-   * - v2: the call targets `opt.refund` with an empty payload, under the signed
+   * - v2: a sweep of the account's whole balance of every allowance token.
+   *   Each spend is {@link SPEND_FULL_BALANCE}, which the validator resolves
+   *   to the account's live balance, against an `allocated` of `maxUint256`
+   *   (the amount the refund allowances are signed at), so it works whether
+   *   the account holds less or more than the signed amount. The call targets
+   *   `opt.refund` with an empty payload, under the signed
    *   {@link refundBinding}, so the allowances move straight from the account
-   *   to `opt.refund`. It commits no outcomes, zero hashes and no program.
+   *   to `opt.refund`; the validator reverts `TargetNotCommitted()` for any
+   *   other target before an allowance moves. It commits no outcomes, zero
+   *   hashes and no program.
+   * - v1: the signed amounts, exactly. The call targets the validator with
+   *   `allocated = spend = amount` per allowance and a 1:1 outcome to
+   *   `opt.refund`, which the validator forwards and enforces as a floor. It
+   *   reverts once the account holds less than the signed amount, and leaves
+   *   any excess behind. The floor is what pins the destination: the v1
+   *   digest signs no target, so a sweep (zero floor, full balance) would let
+   *   the executor send the balance anywhere. A balance sweep needs
+   *   `CATValidatorV2`.
    */
   asRefundCall(opt: CatRefundOptions) {
     const validator = this.resolveValidator(opt.validator);
-
-    const allowanceSpends: AllowanceSpend[] = this.allowances.map((a) => ({
-      token: a.token,
-      allocated: a.amount,
-      spend: a.amount,
-    }));
+    // The refund has its own binding, but a builder whose execute binding can
+    // never be signed is misconfigured; fail on every flow it produces.
+    this.executeBinding();
 
     if (this.validationCommitment) {
       const binding = refundBinding(opt.refund);
@@ -428,7 +543,11 @@ export class ConstrainedAssetTransaction {
         target: binding.executionTarget,
         payload: "0x",
         account: opt.address,
-        spends: allowanceSpends,
+        spends: this.allowances.map((a) => ({
+          token: a.token,
+          allocated: maxUint256,
+          spend: SPEND_FULL_BALANCE,
+        })),
         outcomes: [],
         validation: {
           binding,
@@ -444,7 +563,11 @@ export class ConstrainedAssetTransaction {
       target: validator,
       payload: "0x",
       account: opt.address,
-      spends: allowanceSpends,
+      spends: this.allowances.map((a) => ({
+        token: a.token,
+        allocated: a.amount,
+        spend: a.amount,
+      })),
       outcomes: this.refundOutcomes(opt.refund),
     });
   }

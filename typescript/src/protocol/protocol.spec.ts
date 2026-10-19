@@ -273,6 +273,10 @@ describe("protocol/constraint v2", () => {
   // keccak256 of the empty payload: the payload hash a refund commits.
   const EMPTY_PAYLOAD_HASH =
     "0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470" as const;
+  // An execute binding: a fill target and the keccak256 of its payload.
+  const BOUND_TARGET = "0x00000000000000000000000000000000cA7A0004" as const;
+  const BOUND_PAYLOAD_HASH =
+    "0x688f92a80f1a4c0690dac4a85bb16969910bc88f22069813029559887ef6d35d" as const;
   const domain = {
     chainId: 1,
     verifyingContract: "0x00000000000000000000000000000000ca7A0002",
@@ -418,6 +422,20 @@ describe("protocol/constraint v2", () => {
         "0xebd1f02c71acc6aa58f0e04ac8833fc3452c9a32b69c57e7c9f218c02cdcd720",
       digest:
         "0x67ab64b5dd241b1210341e308c496958c8494644afefc7b8d2f4423551640ef0",
+    },
+    {
+      // Differs from "program and params committed" only in the binding: the
+      // execute constraint commits one exact fill.
+      name: "execute binding (target, payload hash)",
+      nonce: 1n,
+      executionTarget: BOUND_TARGET,
+      payloadHash: BOUND_PAYLOAD_HASH,
+      validationProgramHash: PROGRAM_HASH,
+      paramsHash: PARAMS_HASH,
+      structHash:
+        "0xf44aff9ddb519cd9698735af263fced5120da28a67d8b42c1b022e0449df8b0c",
+      digest:
+        "0xc84818432fd77464920c4aadd93a16fecb9c1fd00daa83ee6500e271a8e5d047",
     },
   ] as const;
 
