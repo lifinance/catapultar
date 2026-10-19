@@ -12,12 +12,19 @@ import { KeyedOwnable } from "../src/libs/KeyedOwnable.sol";
 contract deploy is multichain {
     error NotExpectedAddress(address expected, address deployedTo);
     error CanonicalVmMissing(address virtualMachine);
+    error ChainLacksCancun();
 
     /// @dev The v1.2 LI.FI VirtualMachine, at one CREATE2 address on every chain it
     /// supports. CATValidatorV2 staticcalls it to run committed validation programs,
     /// so it must exist on the target chain. The address is the only constructor
     /// argument and folds into the CREATE2 init code: changing it moves the validator.
     address internal constant CANONICAL_VM = 0xA9f22b951d5A9CBBD0eC8d2741EA44BFDD2D11fd;
+
+    /// @dev Init code that executes Cancun's TSTORE and MCOPY, then returns the 32-byte
+    /// word 1 as runtime code: PUSH0 PUSH0 TSTORE, PUSH0 PUSH0 PUSH0 MCOPY,
+    /// PUSH1 1 PUSH0 MSTORE, PUSH1 32 PUSH0 RETURN. A VM without Cancun halts on the
+    /// first unknown opcode and the creation fails.
+    bytes internal constant CANCUN_PROBE = hex"5f5f5d5f5f5f5e60015f5260205ff3";
 
     function run(
         string[] calldata chains
@@ -72,6 +79,7 @@ contract deploy is multichain {
     }
 
     function deployCATValidatorV2() internal returns (CATValidatorV2 validatorV2) {
+        requireCancun();
         if (CANONICAL_VM.code.length == 0) revert CanonicalVmMissing(CANONICAL_VM);
 
         address payable expectedAddress = payable(getExpectedCreate2Address(
@@ -84,6 +92,20 @@ contract deploy is multichain {
             }
         }
         return CATValidatorV2(expectedAddress);
+    }
+
+    /// @dev CATValidatorV2 executes TSTORE through Tstorish and the compiler emits MCOPY,
+    /// so the target chain must run a Cancun-compatible VM. forge simulates the script
+    /// under the configured `evm_version`, not the target chain's rules, so a local
+    /// creation would always pass. The probe instead runs as an `eth_call` creation on
+    /// the target chain's node, which returns the runtime code only if both opcodes
+    /// executed.
+    function requireCancun() internal {
+        string memory params = string.concat('[{"data":"', vm.toString(CANCUN_PROBE), '"},"latest"]');
+        try vm.rpc("eth_call", params) returns (bytes memory runtimeCode) {
+            if (keccak256(runtimeCode) == keccak256(abi.encode(uint256(1)))) return;
+        } catch { }
+        revert ChainLacksCancun();
     }
 
     function deployIntentExecutor() internal returns (IntentExecutor intentExecutor) {
