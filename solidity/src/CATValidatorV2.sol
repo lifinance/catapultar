@@ -32,14 +32,42 @@ import { LibValidationVM, VMCommand, VMState } from "./libs/LibValidationVM.sol"
  * The program sees, as registers, the committed params, the escrow address,
  * the spend v1 resolved per allowance (`spent`) and the amount v1 forwarded per
  * outcome (`paid`). `paid` is recorded by the `_transfer` hook at the moment v1
- * forwards each outcome, in transient storage (Tstorish: TSTORE where the chain
- * supports it, SSTORE otherwise). It is the gross amount this contract sent;
- * a fee-on-transfer token credits the destination with less. `spent` is
- * recorded by `_handleAllowancesRecorded`, a copy of v1's allowance loop that
- * this contract runs only when a program is committed: a literal spend as
+ * forwards each outcome, in transient storage through Tstorish. It is the gross
+ * amount this contract sent: its complete balance of the outcome token,
+ * including any balance it held before the fill. A third party raises that
+ * balance by sending tokens to this contract, so only lower-bound (`>=`) checks
+ * over `paid` are safe; an exact or upper-bound check fails once anyone sends
+ * 1 unit. A fee-on-transfer token credits the destination with less. `spent`
+ * is recorded by `_handleAllowancesRecorded`, a copy of v1's allowance loop
+ * that this contract runs only when a program is committed: a literal spend as
  * written, a `SPEND_BALANCE_OF_MAGIC` spend as the escrow balance read when the
  * loop reaches that allowance, after the earlier pulls have executed. An empty
- * program runs v1's own loop.
+ * program runs v1's own loop. `spent[i]` is the amount passed to
+ * `transferFrom`. It equals the escrow's debit only for a token that debits
+ * exactly the transfer amount; a token that charges the sender a fee on top of
+ * the amount debits more.
+ *
+ * `spent` and `paid` prove that value moved through this contract, not that an
+ * application action ran. If an allowance token is also an outcome token and
+ * the constraint signs a `0`/`0` binding, the executor can route the pulled
+ * allowance straight back to this contract and satisfy the floor and the flow
+ * registers without any work. Binding both `executionTarget` and `payloadHash`
+ * commits the action.
+ *
+ * v1 pushes each outcome to its destination in one transfer of this contract's
+ * complete balance. Settlement therefore requires that a native destination
+ * accepts the value, that the token is not paused and does not blocklist this
+ * contract or the destination, and that the token allows a single transfer of
+ * the complete balance without charging a sender-side fee on top of the amount.
+ * A third party can push this contract's balance of a per-transfer-capped token
+ * over the cap by sending tokens to it. A failed push reverts the settlement:
+ * the escrow keeps its funds, the nonce stays unspent, and the refund
+ * constraint remains the recovery route. Destinations and token callbacks run
+ * during the pushes and the program runs after the last push, so the program
+ * observes external state as those callbacks left it.
+ *
+ * Nonces are spent in this contract's storage. Spending nonce `n` here leaves
+ * `n` unspent on v1 and on every other validator.
  *
  * The program runs under `staticcall`, so it can only read and revert. Any
  * failure of the program call, including out of gas, reverts
@@ -47,6 +75,10 @@ import { LibValidationVM, VMCommand, VMState } from "./libs/LibValidationVM.sol"
  * its own revert data and can therefore produce bytes that decode as any of
  * this contract's errors; off-chain classification must not rely on a selector
  * alone.
+ *
+ * This contract, like the current v1 build, requires a Cancun-compatible VM.
+ * Tstorish falls back to SSTORE where TSTORE is missing, but the compiler emits
+ * `MCOPY` regardless, so the fallback does not extend chain support.
  *
  * The EIP-712 domain version is "2". The inherited 7-argument `entry` reverts:
  * a V2 escrow signs V2 digests only.

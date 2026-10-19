@@ -29,8 +29,8 @@ import { AllowanceSpend, LibExecutionConstraint, Outcome } from "./libs/LibExecu
  * This contract uses a call proxy for arbitrary call execution. This makes it safe to set approvals to the contract.
  * This contract does not have a fixed callback function. The call proxy address is ::CALL_PROXY().
  *
- * Each approval can only be accessed once, invalidating other approvals by nonce. Except nonce 0 which can be used for
- * long lived approvals like DCAs.
+ * Each approval can only be accessed once, invalidating other approvals by nonce within this validator contract. Except
+ * nonce 0 which can be used for long lived approvals like DCAs.
  */
 contract CATValidator is EIP712, ReentrancyGuard {
     error InvalidTokenAmount(uint256 expected, uint256 received);
