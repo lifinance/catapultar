@@ -325,6 +325,29 @@ Since `CATValidator` relies on standing approvals, it is unsafe to execute arbit
 
 The signed `Outcome`s are validated after the external call: the executor must deliver each `Outcome.token` to `CATValidator` during execution, and the transaction reverts if the validator's balance of a token is less than `Outcome.amount`. The full held balance — including any surplus — is then forwarded to `Outcome.destination` (or the signer if the destination is `address(0)`). Note that fee-on-transfer tokens are charged on both legs: the balance check sees the amount net of the inbound fee, and the outbound forwarding incurs a further fee, so the destination may receive less than `Outcome.amount`.
 
+Each outcome is pushed to its destination inside the settlement transaction, so the destination must accept the payment at that moment: a native destination must be payable, and the token must not be paused or blocklist the validator or the destination. An outcome token must also allow a single transfer of the validator's complete balance and must not charge the sender a fee on top of the transferred amount. A token with a per-transfer cap does not meet this: anyone can send that token to the validator until its balance exceeds the cap, and every settlement in that token then reverts. A failed push reverts the whole settlement, so the escrow keeps its funds, the nonce stays unspent, and the signer's refund constraint remains the recovery route.
+
+### CATValidatorV2: committed validation program
+
+`CATValidatorV2` subclasses `CATValidator` and adds one step after the outcome payment: it runs a validation program, signed into the constraint, on the LI.FI VirtualMachine. The program is the VirtualMachine's `runVM` command array, `VMCommand[]` (`uint8 op`, `bytes32 data`). The constraint commits `keccak256(abi.encode(commands))` (`validationProgramHash`) and `keccak256` of the concatenated 32-byte parameter words (`paramsHash`). Both hashes are derived on-chain from the `validationProgram` and `validationParams` calldata, so the 10-argument `entry` takes the program and params, never the hashes. An empty program commits `bytes32(0)` and settles exactly as v1 without calling the VirtualMachine.
+
+The constraint also commits an `executionTarget` and a `payloadHash`, passed to `entry` as the `ExecutionBinding` struct. Before any transfer, `entry` reverts `TargetNotCommitted` if a nonzero `executionTarget` differs from `execTarget`, and `PayloadNotCommitted` if a nonzero `payloadHash` differs from `keccak256(execPayload)`. Zero means unconstrained: an execute constraint signs `0`/`0` by default, so the executor chooses the fill. A producer that commits one exact fill signs its target and `keccak256(payload)` instead (the TypeScript SDK's `setExecutionBinding`). A refund constraint signs the refund wallet and `keccak256("")`, so an executor can only move its allowances to that wallet.
+
+The program sees a register file of `params ++ [account] ++ spent ++ paid` (123 registers, scratch zeroed).
+
+- `spent[i]` is the amount v1 passed to `transferFrom` for allowance `i`. It equals the escrow's debit only for tokens that debit exactly the transfer amount. A token that charges the sender a fee on top debits more, so a rate check over `spent[i]` understates what the escrow paid.
+- `paid[j]` is the gross amount v1 forwarded for outcome `j`, recorded at the moment of each transfer in transient storage through Tstorish. v1 forwards the validator's complete balance, so `paid[j]` includes any balance the validator held before the fill, and a third party can raise that balance by sending tokens to the validator. Compare `paid[j]` only against lower bounds (`>=`). An exact (`==`) or upper-bound (`<=`) check reverts after anyone sends 1 unit; the revert undoes the forwarding and leaves the unit on the validator, so every retry fails the same way.
+
+The program runs after the last outcome push, so it reads external state as destination and token callbacks left it. The program runs under `staticcall` and any failure reverts `ValidationFailed(bytes)`, so the escrow keeps its funds and can refund. The EIP-712 domain version is "2"; the inherited 7-argument `entry` reverts `V1EntryDisabled`. `design/cat-validator-v2.md` records the design and the accepted decisions.
+
+`spent` and `paid` prove that value moved through the validator, not that an application action ran. If an allowance token is also an outcome token and the constraint signs a `0`/`0` binding, the executor can route the pulled allowance straight back to the validator: the floor holds, the registers show the expected flow, the nonce is spent, and no action ran. A bound `executionTarget` alone does not prevent this when the target executes arbitrary calls, and a bound `payloadHash` alone lets the executor send the payload to a contract with different semantics. Sign both to commit the action.
+
+Nonces live in each validator's own storage. Settling nonce `n` on `CATValidatorV2` leaves `n` unspent on `CATValidator`, so a settlement on one validator does not invalidate an approval signed for the other.
+
+`CATValidatorV2` and the current `CATValidator` build require a Cancun-compatible VM. Tstorish falls back to `SSTORE` where `TSTORE` is missing, but the compiler emits `MCOPY` regardless, so the fallback does not extend chain support. `foundry.toml` pins `evm_version = "cancun"`, and `script/deploy.s.sol` reverts `ChainLacksCancun` before deploying `CATValidatorV2` when the target chain's node fails a `TSTORE`/`MCOPY` probe.
+
+`CATValidator` itself only gained `virtual` on `entry`, `_domainNameAndVersion` and `_call`. `script/check-v1-bytecode.sh` proves that its creation bytecode, and therefore its CREATE2 address and audit status, is unchanged against `snapshots/v1-bytecode.json`; CI runs the check on every push.
+
 ## Development
 
 ### Build
@@ -339,10 +362,25 @@ $ forge build
 $ forge test
 ```
 
-### Coverage
+`test/vc/IntegrationV2.t.sol` runs the committed-program path against the canonical VirtualMachine on an Ethereum mainnet fork. Set `VC_MAINNET_RPC_URL` to run it; without the variable the test skips.
 
 ```shell
-$ forge coverage --no-match-coverage "(script|test)" [--report lcov]
+$ VC_MAINNET_RPC_URL=https://... forge test --match-path 'test/vc/*'
+```
+
+### Audited bytecode check
+
+```shell
+$ ./script/check-v1-bytecode.sh            # compare CATValidator and CATValidatorTron with the pin
+$ ./script/check-v1-bytecode.sh --update   # deliberate v1 change or toolchain bump only
+```
+
+### Coverage
+
+`CATValidatorV2` needs the IR pipeline, so coverage runs with `--ir-minimum`.
+
+```shell
+$ forge coverage --ir-minimum --no-match-coverage "(script|test)" [--report lcov]
 ```
 
 ### Deploy
@@ -351,6 +389,15 @@ To deploy the script, provide RPC urls in `.env` in the format of: `RPC_URL_<nam
 
 ```shell
 $ forge script deploy --sig "run(string[])" "[<chains>]" --multi --verify --broadcast
+```
+
+#### CATValidatorV2 on every Composer chain
+
+`script/deploy-validator-v2.sh` runs `runValidatorV2` on every chain Composer serves, one `forge script` process per chain, all in parallel. Every argument goes to `forge script`; without `--broadcast` forge only simulates. A keystore account gets one password prompt for all chains. Chains without an `RPC_URL_<NAME>` use the develop eRPC, so set `ERPC_SECRET`. Tempo uses the Tempo fork of forge (`FORGE_TEMPO`, default `~/.foundry-tempo/bin/forge`). The header of the script lists every option.
+
+```shell
+$ ERPC_SECRET=... ./script/deploy-validator-v2.sh --account deployer --broadcast
+$ CHAINS="pharos tempo" ERPC_SECRET=... ./script/deploy-validator-v2.sh --account deployer --broadcast
 ```
 
 ## License Notice

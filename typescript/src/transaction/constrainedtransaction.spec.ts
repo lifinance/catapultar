@@ -1,6 +1,7 @@
 import {
   createPublicClient,
   createWalletClient,
+  decodeFunctionData,
   encodeFunctionData,
   http,
   zeroAddress,
@@ -17,6 +18,7 @@ import {
   token2,
 } from "../../test/fixtures";
 import { MOCKERC20_abi } from "../abi/mockerc20";
+import { CAT_VALIDATOR_ABI } from "../abi/CATValidator";
 
 async function waitForTransaction(hash: `0x${string}`) {
   await new Promise((resolve) => setTimeout(resolve, 50));
@@ -161,6 +163,15 @@ describe("ConstrainedAssetTransaction", () => {
           spends: [amount1],
         });
 
+        // Other spec files fill through token2 on the same anvil instance, so
+        // its token1 balance is measured as a delta.
+        const token2Before = await publicClient.readContract({
+          address: token1,
+          abi: MOCKERC20_abi,
+          functionName: "balanceOf",
+          args: [token2],
+        });
+
         // We now need to execute 3 transaction. If we had a Catapultar account we could do this in a single one but for simplicity, we will just do them one by one.
 
         const nonce = await publicClient.getTransactionCount({
@@ -187,12 +198,12 @@ describe("ConstrainedAssetTransaction", () => {
         // 1. Token2 (recipient of the funds) recived amount1 token1.
         // 2. oftenTargetAddress received amount2 token2.
         expect(
-          await publicClient.readContract({
+          (await publicClient.readContract({
             address: token1,
             abi: MOCKERC20_abi,
             functionName: "balanceOf",
             args: [token2],
-          }),
+          })) - token2Before,
         ).toBe(amount1);
         expect(
           await publicClient.readContract({
@@ -277,6 +288,121 @@ describe("ConstrainedAssetTransaction", () => {
           args: [oftenTargetAddress],
         }),
       ).toBe(amount1);
+    });
+
+    /**
+     * Deploy an account embedding a v1 constraint with a refund of
+     * `amount1` of token1 to `refund`, mint `funding` of token1 to it, and
+     * return its refund call.
+     */
+    async function deployRefundableAccount(
+      refund: `0x${string}`,
+      funding: bigint,
+    ) {
+      const amount1 = 10n ** 18n;
+      const catx = new ConstrainedAssetTransaction({
+        executor: wallet.address,
+        chainId: 31337,
+      });
+      catx.addAllowances({ token: token1, amount: amount1 });
+      catx.addOutcomes({
+        token: token2,
+        amount: 10n ** 6n,
+        destination: refund,
+      });
+      const account = catx
+        .asCatapultarAllowanceTransaction({ refund })
+        .asAccount({
+          salt: random(32),
+          owner: { type: "ecdsa", address: refund },
+        });
+      for (const call of [
+        {
+          to: token1,
+          data: encodeFunctionData({
+            abi: MOCKERC20_abi,
+            functionName: "mint",
+            args: [account.address, funding],
+          }),
+        },
+        account.deployCall,
+        account.actionCall,
+      ]) {
+        const hash = await executor.sendTransaction(call);
+        const receipt = await publicClient.waitForTransactionReceipt({ hash });
+        expect(receipt.status).toBe("success");
+      }
+      const refundCall = catx.asRefundCall({
+        address: account.address,
+        refund,
+      });
+      return { account, refundCall };
+    }
+
+    async function balanceOf(owner: `0x${string}`) {
+      return publicClient.readContract({
+        address: token1,
+        abi: MOCKERC20_abi,
+        functionName: "balanceOf",
+        args: [owner],
+      });
+    }
+
+    // The v1 refund delivers the signed amount exactly: the validator
+    // forwards the outcome and enforces it as a floor.
+    it("reverts the refund of an account holding less than the signed allowance", async () => {
+      const refund = random(20);
+      const funding = 10n ** 18n / 2n;
+      const { account, refundCall } = await deployRefundableAccount(
+        refund,
+        funding,
+      );
+      await expect(executor.sendTransaction(refundCall)).rejects.toThrow();
+      expect(await balanceOf(refund)).toBe(0n);
+      expect(await balanceOf(account.address)).toBe(funding);
+    });
+
+    it("refunds the signed amount and leaves the excess on the account", async () => {
+      const refund = random(20);
+      const amount1 = 10n ** 18n;
+      const funding = amount1 * 3n;
+      const { account, refundCall } = await deployRefundableAccount(
+        refund,
+        funding,
+      );
+      await waitForTransaction(await executor.sendTransaction(refundCall));
+      expect(await balanceOf(refund)).toBe(amount1);
+      expect(await balanceOf(account.address)).toBe(funding - amount1);
+    });
+
+    // The v1 digest signs no target, so the signed executor may call the
+    // validator with any target; the 1:1 outcome floor is what keeps the
+    // refund from being diverted.
+    it("reverts an executor's attempt to divert the refund elsewhere", async () => {
+      const refund = random(20);
+      const elsewhere = random(20);
+      const funding = 10n ** 18n;
+      const { account, refundCall } = await deployRefundableAccount(
+        refund,
+        funding,
+      );
+      const decoded = decodeFunctionData({
+        abi: CAT_VALIDATOR_ABI,
+        data: refundCall.data,
+      });
+      if (decoded.functionName !== "entry") throw new Error("expected entry");
+      const [, ...afterTarget] = decoded.args;
+      await expect(
+        executor.writeContract({
+          address: cat_validator,
+          abi: CAT_VALIDATOR_ABI,
+          functionName: "entry",
+          args: [elsewhere, ...afterTarget],
+        }),
+      ).rejects.toThrow();
+      expect(await balanceOf(elsewhere)).toBe(0n);
+      expect(await balanceOf(refund)).toBe(0n);
+      expect(await balanceOf(account.address)).toBe(funding);
     });
   });
 });

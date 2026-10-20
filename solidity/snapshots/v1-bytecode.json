@@ -1,0 +1,5 @@
+{
+  "_comment": "keccak256 of the creation bytecode of the audited v1 validators (default profile, solc 0.8.35, via-IR, bytecode_hash = none). CATValidatorV2 inherits from CATValidator, so any edit to v1 that is not bytecode-neutral fails script/check-v1-bytecode.sh. Regenerate only for a deliberate v1 change or a toolchain bump: ./script/check-v1-bytecode.sh --update",
+  "CATValidator": "0xe3d6838af0753d0fc82e716a56ba2d1b2fc623114c653055caa35f0e4e8fd1b1",
+  "CATValidatorTron": "0x7ea3b701d6754dc55ea025586ff6defaa69898fcd0d4e78ac99d130216c85234"
+}
