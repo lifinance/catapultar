@@ -391,6 +391,15 @@ To deploy the script, provide RPC urls in `.env` in the format of: `RPC_URL_<nam
 $ forge script deploy --sig "run(string[])" "[<chains>]" --multi --verify --broadcast
 ```
 
+#### CATValidatorV2 on every Composer chain
+
+`script/deploy-validator-v2.sh` runs `runValidatorV2` on every chain Composer serves, one `forge script` process per chain, all in parallel. Every argument goes to `forge script`; without `--broadcast` forge only simulates. A keystore account gets one password prompt for all chains. Chains without an `RPC_URL_<NAME>` use the develop eRPC, so set `ERPC_SECRET`. Tempo uses the Tempo fork of forge (`FORGE_TEMPO`, default `~/.foundry-tempo/bin/forge`). The header of the script lists every option.
+
+```shell
+$ ERPC_SECRET=... ./script/deploy-validator-v2.sh --account deployer --broadcast
+$ CHAINS="pharos tempo" ERPC_SECRET=... ./script/deploy-validator-v2.sh --account deployer --broadcast
+```
+
 ## License Notice
 
 This project is licensed under the **[GNU Lesser General Public License v3.0 only (LGPL-3.0-only)](/LICENSE)**.
