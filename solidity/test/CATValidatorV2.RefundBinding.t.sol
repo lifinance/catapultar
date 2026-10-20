@@ -160,45 +160,9 @@ contract CATValidatorV2RefundBindingTest is CATValidatorV2TestBase {
         Outcome[] memory outcomes,
         ExecutionBinding memory binding
     ) internal view returns (bytes memory signature) {
-        bytes32[] memory allowanceHashes = new bytes32[](allowances.length);
-        for (uint256 i; i < allowances.length; ++i) {
-            allowanceHashes[i] = keccak256(
-                abi.encode(
-                    keccak256(bytes("Allowance(address token,uint256 amount)")),
-                    allowances[i].token,
-                    allowances[i].allocated
-                )
-            );
-        }
-        bytes32[] memory outcomeHashes = new bytes32[](outcomes.length);
-        for (uint256 i; i < outcomes.length; ++i) {
-            outcomeHashes[i] = keccak256(
-                abi.encode(
-                    keccak256(bytes("Outcome(address token,uint256 amount,address destination)")),
-                    outcomes[i].token,
-                    outcomes[i].amount,
-                    outcomes[i].destination
-                )
-            );
-        }
-        bytes32 structHash = keccak256(
-            abi.encode(
-                keccak256(
-                    bytes(
-                        "ExecutionConstraint(Allowance[] allowances,Outcome[] outcomes,address executor,uint256 nonce,address executionTarget,bytes32 payloadHash,bytes32 validationProgramHash,bytes32 paramsHash)Allowance(address token,uint256 amount)Outcome(address token,uint256 amount,address destination)"
-                    )
-                ),
-                keccak256(abi.encodePacked(allowanceHashes)),
-                keccak256(abi.encodePacked(outcomeHashes)),
-                executor_,
-                nonce,
-                binding.executionTarget,
-                binding.payloadHash,
-                bytes32(0),
-                bytes32(0)
-            )
+        bytes32 digest = V2ConstraintDigest.digest(
+            target.DOMAIN_SEPARATOR(), allowances, outcomes, executor_, nonce, binding, bytes32(0), bytes32(0)
         );
-        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", target.DOMAIN_SEPARATOR(), structHash));
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(signerKey, digest);
         signature = abi.encodePacked(r, s, v);
     }

@@ -5,6 +5,7 @@ import { Test } from "forge-std/src/Test.sol";
 
 import { AllowanceSpend, Outcome } from "../../src/libs/LibExecutionConstraint.sol";
 import { VMCommand } from "../../src/libs/LibValidationVM.sol";
+import { V2ConstraintDigest } from "../helpers/V2ConstraintDigest.sol";
 
 /**
  * @title Validation-program test base
@@ -98,45 +99,9 @@ abstract contract VcTestBase is Test {
         bytes32 validationProgramHash,
         bytes32 paramsHash
     ) internal pure returns (bytes32) {
-        bytes32[] memory allowanceHashes = new bytes32[](allowances.length);
-        for (uint256 i; i < allowances.length; ++i) {
-            allowanceHashes[i] = keccak256(
-                abi.encode(
-                    keccak256(bytes("Allowance(address token,uint256 amount)")),
-                    allowances[i].token,
-                    allowances[i].allocated
-                )
-            );
-        }
-        bytes32[] memory outcomeHashes = new bytes32[](outcomes.length);
-        for (uint256 i; i < outcomes.length; ++i) {
-            outcomeHashes[i] = keccak256(
-                abi.encode(
-                    keccak256(bytes("Outcome(address token,uint256 amount,address destination)")),
-                    outcomes[i].token,
-                    outcomes[i].amount,
-                    outcomes[i].destination
-                )
-            );
-        }
-        bytes32 structHash = keccak256(
-            abi.encode(
-                keccak256(
-                    bytes(
-                        "ExecutionConstraint(Allowance[] allowances,Outcome[] outcomes,address executor,uint256 nonce,address executionTarget,bytes32 payloadHash,bytes32 validationProgramHash,bytes32 paramsHash)Allowance(address token,uint256 amount)Outcome(address token,uint256 amount,address destination)"
-                    )
-                ),
-                keccak256(abi.encodePacked(allowanceHashes)),
-                keccak256(abi.encodePacked(outcomeHashes)),
-                executor,
-                nonce,
-                address(0),
-                bytes32(0),
-                validationProgramHash,
-                paramsHash
-            )
+        return V2ConstraintDigest.unbound(
+            domainSeparator, allowances, outcomes, executor, nonce, validationProgramHash, paramsHash
         );
-        return keccak256(abi.encodePacked("\x19\x01", domainSeparator, structHash));
     }
 
     /// @notice `keccak256` of the ABI-encoded command array, `bytes32(0)` when empty.

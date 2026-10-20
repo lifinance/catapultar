@@ -9,6 +9,7 @@ import { CATValidatorV2 } from "../../src/CATValidatorV2.sol";
 import { AllowanceSpend, Outcome } from "../../src/libs/LibExecutionConstraint.sol";
 import { ExecutionBinding } from "../../src/libs/LibExecutionConstraintV2.sol";
 import { VMCommand } from "../../src/libs/LibValidationVM.sol";
+import { V2ConstraintDigest } from "../helpers/V2ConstraintDigest.sol";
 
 /// @dev Accepts every program.
 contract AcceptVM {
@@ -52,43 +53,9 @@ contract PassThroughFillPoC is Test {
         Outcome[] memory outs,
         bytes32 programHash
     ) internal view returns (bytes memory) {
-        bytes32[] memory allowanceHashes = new bytes32[](alls.length);
-        for (uint256 i; i < alls.length; ++i) {
-            allowanceHashes[i] = keccak256(
-                abi.encode(
-                    keccak256(bytes("Allowance(address token,uint256 amount)")), alls[i].token, alls[i].allocated
-                )
-            );
-        }
-        bytes32[] memory outcomeHashes = new bytes32[](outs.length);
-        for (uint256 i; i < outs.length; ++i) {
-            outcomeHashes[i] = keccak256(
-                abi.encode(
-                    keccak256(bytes("Outcome(address token,uint256 amount,address destination)")),
-                    outs[i].token,
-                    outs[i].amount,
-                    outs[i].destination
-                )
-            );
-        }
-        bytes32 structHash = keccak256(
-            abi.encode(
-                keccak256(
-                    bytes(
-                        "ExecutionConstraint(Allowance[] allowances,Outcome[] outcomes,address executor,uint256 nonce,address executionTarget,bytes32 payloadHash,bytes32 validationProgramHash,bytes32 paramsHash)Allowance(address token,uint256 amount)Outcome(address token,uint256 amount,address destination)"
-                    )
-                ),
-                keccak256(abi.encodePacked(allowanceHashes)),
-                keccak256(abi.encodePacked(outcomeHashes)),
-                executor,
-                uint256(1),
-                address(0), // unconstrained executionTarget
-                bytes32(0), // unconstrained payloadHash
-                programHash,
-                bytes32(0)
-            )
+        bytes32 digest = V2ConstraintDigest.unbound(
+            validator.DOMAIN_SEPARATOR(), alls, outs, executor, 1, programHash, bytes32(0)
         );
-        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", validator.DOMAIN_SEPARATOR(), structHash));
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(signerKey, digest);
         return abi.encodePacked(r, s, v);
     }

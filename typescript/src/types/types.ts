@@ -223,7 +223,8 @@ export type ValidationCommitment = {
  * The committed fill of a `CATValidatorV2` constraint: `entry` reverts
  * `TargetNotCommitted()` unless `execTarget == executionTarget`, and
  * `PayloadNotCommitted()` unless `keccak256(execPayload) == payloadHash`. A zero
- * field is unconstrained. An execute constraint signs both as zero; a refund
+ * field is unconstrained. An execute constraint signs both as zero by default;
+ * `setExecutionBinding` commits it to one exact fill instead. A refund
  * constraint signs its refund wallet and `keccak256("0x")`, so its allowances
  * can only move to that wallet (see `refundBinding`).
  */

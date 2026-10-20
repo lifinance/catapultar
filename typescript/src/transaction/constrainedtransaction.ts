@@ -96,6 +96,27 @@ function assertBoundFill(binding: ExecutionBinding): void {
 }
 
 /**
+ * Fails closed client-side, as for the validation inputs: the validator checks
+ * the call against each non-zero binding field before any allowance moves, so
+ * a mismatch encodes a call that can only revert.
+ */
+function assertCallMatchesBinding(
+  binding: ExecutionBinding,
+  executionTarget: `0x${string}`,
+  executionPayload: `0x${string}`,
+): void {
+  if (!isAddressEqual(executionTarget, binding.executionTarget))
+    throw new ValidationError(
+      `executionTarget ${executionTarget} is not the bound ${binding.executionTarget}; the validator would revert TargetNotCommitted.`,
+    );
+  const payloadHash = keccak256(executionPayload);
+  if (BigInt(payloadHash) !== BigInt(binding.payloadHash))
+    throw new ValidationError(
+      `keccak256(executionPayload) ${payloadHash} is not the bound payloadHash ${binding.payloadHash}; the validator would revert PayloadNotCommitted.`,
+    );
+}
+
+/**
  * Builder for a Constrained Asset Transaction (CAT).
  *
  * A CAT lets a designated `executor` spend an account's assets (the
@@ -475,20 +496,8 @@ export class ConstrainedAssetTransaction {
         "validationProgram and validationParams require a validation commitment; call setValidationCommitment first.",
       );
 
-    // Fail closed client-side, as for the validation inputs: the validator
-    // checks the call against each non-zero binding field before any
-    // allowance moves, so a mismatch encodes a call that can only revert.
-    if (this.executionBinding) {
-      if (!isAddressEqual(executionTarget, binding.executionTarget))
-        throw new ValidationError(
-          `executionTarget ${executionTarget} is not the bound ${binding.executionTarget}; the validator would revert TargetNotCommitted.`,
-        );
-      const payloadHash = keccak256(executionPayload);
-      if (BigInt(payloadHash) !== BigInt(binding.payloadHash))
-        throw new ValidationError(
-          `keccak256(executionPayload) ${payloadHash} is not the bound payloadHash ${binding.payloadHash}; the validator would revert PayloadNotCommitted.`,
-        );
-    }
+    if (this.executionBinding)
+      assertCallMatchesBinding(binding, executionTarget, executionPayload);
 
     return this.buildEntryCall({
       validator,

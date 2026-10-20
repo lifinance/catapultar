@@ -10,6 +10,7 @@ import { CATValidatorV2 } from "../../src/CATValidatorV2.sol";
 import { AllowanceSpend, Outcome } from "../../src/libs/LibExecutionConstraint.sol";
 import { ExecutionBinding } from "../../src/libs/LibExecutionConstraintV2.sol";
 import { VMCommand } from "../../src/libs/LibValidationVM.sol";
+import { V2ConstraintDigest } from "../helpers/V2ConstraintDigest.sol";
 
 /// @dev Accepts every program.
 contract AcceptVM {
@@ -57,20 +58,6 @@ contract CrossValidatorNonceShadowingPoC is Test {
         alls[0] = AllowanceSpend({ token: address(token), allocated: type(uint256).max, spend: 100 ether });
     }
 
-    function allowanceHashWords(
-        AllowanceSpend[] memory alls
-    ) internal pure returns (bytes32) {
-        bytes32[] memory hashes = new bytes32[](alls.length);
-        for (uint256 i; i < alls.length; ++i) {
-            hashes[i] = keccak256(
-                abi.encode(
-                    keccak256(bytes("Allowance(address token,uint256 amount)")), alls[i].token, alls[i].allocated
-                )
-            );
-        }
-        return keccak256(abi.encodePacked(hashes));
-    }
-
     function signV1(
         AllowanceSpend[] memory alls
     ) internal returns (bytes memory) {
@@ -81,7 +68,7 @@ contract CrossValidatorNonceShadowingPoC is Test {
                         "ExecutionConstraint(Allowance[] allowances,Outcome[] outcomes,address executor,uint256 nonce)Allowance(address token,uint256 amount)Outcome(address token,uint256 amount,address destination)"
                     )
                 ),
-                allowanceHashWords(alls),
+                V2ConstraintDigest.hashAllowances(alls),
                 keccak256(abi.encodePacked(new bytes32[](0))),
                 executor,
                 NONCE
@@ -95,24 +82,9 @@ contract CrossValidatorNonceShadowingPoC is Test {
     function signV2(
         AllowanceSpend[] memory alls
     ) internal returns (bytes memory) {
-        bytes32 structHash = keccak256(
-            abi.encode(
-                keccak256(
-                    bytes(
-                        "ExecutionConstraint(Allowance[] allowances,Outcome[] outcomes,address executor,uint256 nonce,address executionTarget,bytes32 payloadHash,bytes32 validationProgramHash,bytes32 paramsHash)Allowance(address token,uint256 amount)Outcome(address token,uint256 amount,address destination)"
-                    )
-                ),
-                allowanceHashWords(alls),
-                keccak256(abi.encodePacked(new bytes32[](0))),
-                executor,
-                NONCE,
-                address(0),
-                bytes32(0),
-                bytes32(0),
-                bytes32(0)
-            )
+        bytes32 digest = V2ConstraintDigest.unbound(
+            v2.DOMAIN_SEPARATOR(), alls, new Outcome[](0), executor, NONCE, bytes32(0), bytes32(0)
         );
-        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", v2.DOMAIN_SEPARATOR(), structHash));
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(signerKey, digest);
         return abi.encodePacked(r, s, v);
     }
