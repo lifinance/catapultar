@@ -17,8 +17,10 @@ contract DeployHarness is deploy {
 
 /**
  * @notice The deploy script refuses to deploy CATValidatorV2 on a chain without Cancun
- * opcodes. These tests pin the probe init code on the local VM and the eth_call path on
- * a mainnet fork; the fork test skips when `VC_MAINNET_RPC_URL` is unset.
+ * opcodes. These tests pin the probe code on the local VM, both as init code (the
+ * `eth_call` creation) and as runtime code (the state-override call), and the eth_call
+ * paths on live forks. The mainnet fork test skips when `VC_MAINNET_RPC_URL` is unset;
+ * the Pharos fork test skips when `PHAROS_RPC_URL` is unset.
  */
 contract DeployCancunProbeTest is Test {
     DeployHarness harness;
@@ -47,6 +49,22 @@ contract DeployCancunProbeTest is Test {
         assertEq(deployInitCode(initCode), address(0));
     }
 
+    function test_cancunProbe_runtimeReturnsOneOnCancun() public {
+        address probe = makeAddr("probe");
+        vm.etch(probe, harness.cancunProbe());
+        (bool success, bytes memory output) = probe.call("");
+        assertTrue(success);
+        assertEq(output, abi.encode(uint256(1)));
+    }
+
+    function test_cancunProbe_runtimeFailsOnShanghai() public {
+        address probe = makeAddr("probe");
+        vm.etch(probe, harness.cancunProbe());
+        vm.setEvmVersion("shanghai");
+        (bool success,) = probe.call("");
+        assertFalse(success);
+    }
+
     /// @dev Without a fork, `vm.rpc` has no node to call; the probe fails closed.
     function test_requireCancun_revertsWithoutNode() public {
         vm.expectRevert(deploy.ChainLacksCancun.selector);
@@ -57,6 +75,18 @@ contract DeployCancunProbeTest is Test {
         string memory rpcUrl = vm.envOr("VC_MAINNET_RPC_URL", string(""));
         if (bytes(rpcUrl).length == 0) {
             vm.skip(true, "VC_MAINNET_RPC_URL unset");
+            return;
+        }
+        vm.createSelectFork(rpcUrl);
+        new DeployHarness().exposed_requireCancun();
+    }
+
+    /// @dev The Pharos node returns empty output for every `eth_call` creation, so the
+    /// creation probe fails there and only the state-override probe can pass.
+    function test_requireCancun_passesOnPharosFork() public {
+        string memory rpcUrl = vm.envOr("PHAROS_RPC_URL", string(""));
+        if (bytes(rpcUrl).length == 0) {
+            vm.skip(true, "PHAROS_RPC_URL unset");
             return;
         }
         vm.createSelectFork(rpcUrl);

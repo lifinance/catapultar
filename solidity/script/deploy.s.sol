@@ -20,11 +20,15 @@ contract deploy is multichain {
     /// argument and folds into the CREATE2 init code: changing it moves the validator.
     address internal constant CANONICAL_VM = 0xA9f22b951d5A9CBBD0eC8d2741EA44BFDD2D11fd;
 
-    /// @dev Init code that executes Cancun's TSTORE and MCOPY, then returns the 32-byte
-    /// word 1 as runtime code: PUSH0 PUSH0 TSTORE, PUSH0 PUSH0 PUSH0 MCOPY,
-    /// PUSH1 1 PUSH0 MSTORE, PUSH1 32 PUSH0 RETURN. A VM without Cancun halts on the
-    /// first unknown opcode and the creation fails.
+    /// @dev Code that executes Cancun's TSTORE and MCOPY, then returns the 32-byte word 1:
+    /// PUSH0 PUSH0 TSTORE, PUSH0 PUSH0 PUSH0 MCOPY, PUSH1 1 PUSH0 MSTORE, PUSH1 32 PUSH0
+    /// RETURN. Run as init code, it returns word 1 as runtime code; run as runtime code, it
+    /// returns word 1 as output. A VM without Cancun halts on the first unknown opcode.
     bytes internal constant CANCUN_PROBE = hex"5f5f5d5f5f5f5e60015f5260205ff3";
+
+    /// @dev The address that receives CANCUN_PROBE as a state override. Any address works,
+    /// because the override replaces its code for the duration of the call.
+    address internal constant CANCUN_PROBE_ADDRESS = 0x00000000000000000000000000000000000Ca9C0;
 
     function run(
         string[] calldata chains
@@ -97,15 +101,30 @@ contract deploy is multichain {
     /// @dev CATValidatorV2 executes TSTORE through Tstorish and the compiler emits MCOPY,
     /// so the target chain must run a Cancun-compatible VM. forge simulates the script
     /// under the configured `evm_version`, not the target chain's rules, so a local
-    /// creation would always pass. The probe instead runs as an `eth_call` creation on
-    /// the target chain's node, which returns the runtime code only if both opcodes
-    /// executed.
+    /// creation would always pass. The probe instead runs CANCUN_PROBE on the target
+    /// chain's node and passes only if both opcodes executed. The first attempt is an
+    /// `eth_call` creation. Some nodes (Pharos) return empty output for every creation
+    /// call, even a Cancun-free one, so the second attempt calls CANCUN_PROBE_ADDRESS with
+    /// CANCUN_PROBE installed as a state override.
     function requireCancun() internal {
-        string memory params = string.concat('[{"data":"', vm.toString(CANCUN_PROBE), '"},"latest"]');
-        try vm.rpc("eth_call", params) returns (bytes memory runtimeCode) {
-            if (keccak256(runtimeCode) == keccak256(abi.encode(uint256(1)))) return;
-        } catch { }
+        string memory probe = vm.toString(CANCUN_PROBE);
+        if (rpcReturnsOne(string.concat('[{"data":"', probe, '"},"latest"]'))) return;
+
+        string memory target = vm.toString(CANCUN_PROBE_ADDRESS);
+        if (rpcReturnsOne(
+                string.concat('[{"to":"', target, '","data":"0x"},"latest",{"', target, '":{"code":"', probe, '"}}]')
+            )) return;
         revert ChainLacksCancun();
+    }
+
+    function rpcReturnsOne(
+        string memory ethCallParams
+    ) internal returns (bool) {
+        try vm.rpc("eth_call", ethCallParams) returns (bytes memory output) {
+            return keccak256(output) == keccak256(abi.encode(uint256(1)));
+        } catch {
+            return false;
+        }
     }
 
     function deployIntentExecutor() internal returns (IntentExecutor intentExecutor) {
