@@ -40,13 +40,23 @@ jobs:
         id: build
         working-directory: solidity
 
+      - name: Check V1.1 bytecode is unchanged
+        run: ./script/check-v1-1-bytecode.sh
+        id: bytecode-v1-1
+        working-directory: solidity
+
       - name: Run Forge tests
         run: forge test -vvv
         id: test
         working-directory: solidity
 
       - name: Run Forge coverage
-        run: forge coverage --no-match-coverage "(script|test)" --report lcov
+        # --ir-minimum: CATValidatorV1_1 does not compile under the legacy
+        # (non-IR) pipeline coverage otherwise uses, because of stack depth.
+        # The two excluded tests assert the optimized build's creation hash and gas.
+        run: >
+          forge coverage --ir-minimum --no-match-coverage "(script|test)"
+          --no-match-test "(test_reference_is_pinned|test_gas_entry_delta_hf_to_v1_1)" --report lcov
         id: coverage
         working-directory: solidity
 
