@@ -19,6 +19,7 @@ import {
     NonPayableExecutor,
     ReceiptProbe,
     RecordingProbe,
+    SameTxHarness,
     TypehashHelper,
     ZeroRejectingERC20
 } from "./CATValidatorV1_1.t.sol";
@@ -259,31 +260,33 @@ contract CATValidatorV1_1EquivalenceTest is Test {
         assertEq(standalone.spentNonces(address(1), 1), subject.spentNonces(address(1), 1));
     }
 
-    /// @dev Entry ids read inside three consecutive entries match: 1, 2, 3 on both instances.
+    /// @dev Entry ids read inside three consecutive entries of one transaction match: 1, 2, 3 on both instances.
     function test_equivalence_entry_ids_inside_consecutive_entries() external {
         EntryIdProbe[2] memory probes = [new EntryIdProbe(), new EntryIdProbe()];
         address[2] memory instances = [address(standalone), address(subject)];
+        SameTxHarness harness = new SameTxHarness();
         for (uint256 k; k < 2; ++k) {
             bytes memory record = abi.encodeCall(EntryIdProbe.record, (instances[k]));
-            for (uint256 n = 1; n <= 3; ++n) {
-                vm.prank(executor);
-                (bool ok,) = instances[k].call(
-                    abi.encodeCall(
-                        ICATValidatorV1_1.entry,
-                        (
-                            address(probes[k]),
-                            record,
-                            address(acct),
-                            n,
-                            new AllowanceSpend[](0),
-                            new Outcome[](0),
-                            address(0),
-                            bytes32(0),
-                            ""
-                        )
+            bytes[] memory calls = new bytes[](3);
+            for (uint256 n; n < 3; ++n) {
+                calls[n] = abi.encodeCall(
+                    ICATValidatorV1_1.entry,
+                    (
+                        address(probes[k]),
+                        record,
+                        address(acct),
+                        n + 1,
+                        new AllowanceSpend[](0),
+                        new Outcome[](0),
+                        address(0),
+                        bytes32(0),
+                        ""
                     )
                 );
-                assertTrue(ok);
+            }
+            (bool[] memory ok,) = harness.runAll(instances[k], calls);
+            for (uint256 n; n < 3; ++n) {
+                assertTrue(ok[n]);
             }
         }
         for (uint256 n; n < 3; ++n) {

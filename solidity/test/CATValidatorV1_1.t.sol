@@ -328,6 +328,17 @@ contract SameTxHarness {
         require(ok2, "e2");
         pulledAfter = IPulled(validator).pulled(token);
     }
+
+    function runAll(
+        address validator,
+        bytes[] calldata calls
+    ) external returns (bool[] memory ok, bytes[] memory ret) {
+        ok = new bool[](calls.length);
+        ret = new bytes[](calls.length);
+        for (uint256 i; i < calls.length; ++i) {
+            (ok[i], ret[i]) = validator.call(calls[i]);
+        }
+    }
 }
 
 /// @dev Frame gas of one call, independent of `--isolate`.
@@ -1612,12 +1623,17 @@ contract CATValidatorV1_1Test is Test {
         EntryIdProbe idProbe = new EntryIdProbe();
         bytes memory record = abi.encodeCall(EntryIdProbe.record, (address(v11)));
         AllowanceSpend[] memory none = new AllowanceSpend[](0);
-        vm.startPrank(executor);
-        v11.entry(address(idProbe), record, address(this), 1, none, _noOut(), address(0), 0, "");
-        assertEq(v11.entryId(), 0, "between");
-        v11.entry(address(idProbe), record, address(this), 2, none, _noOut(), address(0), 0, "");
-        v11.entry(address(idProbe), record, address(this), 3, none, _noOut(), address(0), 0, "");
-        vm.stopPrank();
+        bytes[] memory calls = new bytes[](4);
+        calls[0] = _entryCall(address(idProbe), record, address(this), 1, none);
+        calls[1] = abi.encodeCall(CATValidatorV1_1.entryId, ());
+        calls[2] = _entryCall(address(idProbe), record, address(this), 2, none);
+        calls[3] = _entryCall(address(idProbe), record, address(this), 3, none);
+
+        (bool[] memory ok, bytes[] memory ret) = new SameTxHarness().runAll(address(v11), calls);
+        for (uint256 i; i < ok.length; ++i) {
+            assertTrue(ok[i]);
+        }
+        assertEq(abi.decode(ret[1], (uint256)), 0, "between");
         assertEq(idProbe.ids(0), 1);
         assertEq(idProbe.ids(1), 2);
         assertEq(idProbe.ids(2), 3);
@@ -1631,18 +1647,18 @@ contract CATValidatorV1_1Test is Test {
         Outcome[] memory unmet = new Outcome[](1);
         unmet[0] = Outcome({ token: address(token), amount: 1, destination: makeAddr("x") });
 
-        vm.startPrank(executor);
-        v11.entry(address(idProbe), record, address(this), 1, none, _noOut(), address(0), 0, "");
-        (bool ok,) = address(v11)
-            .call(
-                abi.encodeCall(
-                    ICATValidatorV1_1.entry,
-                    (address(idProbe), record, address(this), 2, none, unmet, address(0), bytes32(0), "")
-                )
-            );
-        assertFalse(ok, "the unmet outcome reverts the entry");
-        v11.entry(address(idProbe), record, address(this), 3, none, _noOut(), address(0), 0, "");
-        vm.stopPrank();
+        bytes[] memory calls = new bytes[](3);
+        calls[0] = _entryCall(address(idProbe), record, address(this), 1, none);
+        calls[1] = abi.encodeCall(
+            ICATValidatorV1_1.entry,
+            (address(idProbe), record, address(this), 2, none, unmet, address(0), bytes32(0), "")
+        );
+        calls[2] = _entryCall(address(idProbe), record, address(this), 3, none);
+
+        (bool[] memory ok,) = new SameTxHarness().runAll(address(v11), calls);
+        assertTrue(ok[0]);
+        assertFalse(ok[1], "the unmet outcome reverts the entry");
+        assertTrue(ok[2]);
         assertEq(idProbe.count(), 2, "the reverted entry's record rolled back");
         assertEq(idProbe.ids(0), 1);
         assertEq(idProbe.ids(1), 2, "its id was never taken");
