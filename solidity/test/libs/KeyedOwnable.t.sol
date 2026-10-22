@@ -34,8 +34,10 @@ contract P256VerifierEtcher is Test {
             }
         }
 
-        if (active) if (target.code.length == 0) vm.etch(target, bytecode);
-        else if (target.code.length != 0) vm.etch(target, "");
+        if (active) {
+            if (target.code.length == 0) vm.etch(target, bytecode);
+            else if (target.code.length != 0) vm.etch(target, "");
+        }
     }
 
     function _hasNativeRipPrecompile() internal view returns (bool) {
