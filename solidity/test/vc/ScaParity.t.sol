@@ -17,20 +17,20 @@ import { LibExecutionConstraintV1_1 } from "../../src/libs/LibExecutionConstrain
 import { Deliverer, ZeroRejectingERC20 } from "../CATValidatorV1_1.t.sol";
 
 /**
- * @notice C2 sca-parity for CATValidatorV1_1 (NCBF PRD §4.2), schema `c2-sca-parity-v1_1/v1`.
+ * @notice sca-parity vectors for CATValidatorV1_1, schema `sca-parity-v1_1/v1`.
  *
  * `sca-parity.v1_1.vectors.json` pins pure-math vectors with every address input explicit (EIP-712 domain fields,
- * factory, executor implementation, all synthetic), so the TS mirrors (the catapultar SDK and catapultar-utils)
- * reproduce constraint → execute and refund digests → saltWithDigest → escrow address with no environment
- * dependency. The regeneration mode (`VC_REGEN_SCA_FIXTURE=true`) writes the fixture from the code under test; the
- * default mode reads the committed fixture and proves the pinned numbers are reproducible.
+ * factory, executor implementation, all synthetic), so the TypeScript spec reproduces constraint → execute and
+ * refund digests → saltWithDigest → account address with no environment dependency. The regeneration mode
+ * (`VC_REGEN_SCA_FIXTURE=true`) writes the fixture from the code under test; the default mode reads the committed
+ * fixture and proves the pinned numbers are reproducible.
  *
  * Live-instance tests prove the pinned formulas match a deployed CATValidatorV1_1 domain separator and the
- * factory's predictDeployWithDigest, and replay the nonce-0 refund sweep on escrows derived from the fixture.
+ * factory's predictDeployWithDigest, and replay the nonce-0 refund sweep on accounts derived from the fixture.
  */
 contract ScaParityTest is Test {
     /// @dev Synthetic pinned inputs, mirrored in the fixture. Clearly
-    /// non-production values: the C2 vectors are pure math, valid for any
+    /// non-production values: the vectors are pure math, valid for any
     /// deployment environment that supplies its own real addresses.
     address internal constant PIN_EXECUTOR_IMPL = address(uint160(0xCA7A0001));
     address internal constant PIN_EXECUTOR = address(uint160(0xCA7A0003));
@@ -45,7 +45,7 @@ contract ScaParityTest is Test {
     string internal constant SCA_PARITY_V1_1_VECTORS = "test/vc/fixtures/sca-parity/sca-parity.v1_1.vectors.json";
     address internal constant PIN_VERIFYING_CONTRACT_V1_1 = address(uint160(0xCA7A0011));
     address internal constant PIN_REFUND = address(uint160(0xCA7A00BB));
-    address internal constant PIN_LEDGER = address(uint160(0xCA7A0004));
+    address internal constant PIN_RECEIPT_TOKEN = address(uint160(0xCA7A0004));
     address internal constant PIN_COMMIT = address(uint160(uint256(keccak256("vc/sca-parity/v1_1/commit"))));
     uint256 internal constant PIN_RANDOM_NONCE = uint256(keccak256("vc/sca-parity/v1_1/nonce"));
     uint256 internal constant SPEND_BALANCE_OF_MAGIC = 1 << 255;
@@ -66,22 +66,21 @@ contract ScaParityTest is Test {
         Outcome[] outcomes;
     }
 
-    struct FixtureEscrow {
+    struct FixtureAccount {
         CATValidatorV1_1 validator;
-        address payable escrow;
+        address payable account;
         address executor;
         ConstraintV1_1 execute;
         ConstraintV1_1 refund;
     }
 
-    /* ─────────────────────────── fixture parity
-    ─────────────────────────── */
+    // ---- fixture parity ----
 
-    function test_fixtureParityV1_1() external {
+    function test_fixture_parity_v1_1() external {
         if (vm.envOr("VC_REGEN_SCA_FIXTURE", false)) _regenerateFixtureV1_1();
 
         string memory json = vm.readFile(SCA_PARITY_V1_1_VECTORS);
-        assertEq(vm.parseJsonString(json, ".schema"), "c2-sca-parity-v1_1/v1", "schema mismatch");
+        assertEq(vm.parseJsonString(json, ".schema"), "sca-parity-v1_1/v1", "schema mismatch");
         assertEq(vm.parseJsonString(json, ".domain.version"), "1.1", "domain version");
         assertNotEq(
             vm.parseJsonAddress(json, ".refundAddress"),
@@ -91,13 +90,13 @@ contract ScaParityTest is Test {
 
         uint256 count = jsonArrayLength(json, ".vectors");
         assertGt(count, 0, "fixture has no vectors");
-        address[] memory escrows = new address[](count);
+        address[] memory accounts = new address[](count);
         for (uint256 i; i < count; ++i) {
-            escrows[i] = _assertVectorV1_1(json, string.concat(".vectors[", vm.toString(i), "]"));
+            accounts[i] = _assertVectorV1_1(json, string.concat(".vectors[", vm.toString(i), "]"));
         }
         for (uint256 i; i < count; ++i) {
             for (uint256 j = i + 1; j < count; ++j) {
-                assertNotEq(escrows[i], escrows[j], "distinct shapes must pin distinct escrows");
+                assertNotEq(accounts[i], accounts[j], "distinct shapes must pin distinct accounts");
             }
         }
     }
@@ -117,11 +116,11 @@ contract ScaParityTest is Test {
         );
     }
 
-    /// @dev Recomputes one v1.1 vector from its inputs and checks the §4.2 execute and refund fields.
+    /// @dev Recomputes one v1.1 vector from its inputs and checks the execute and refund fields.
     function _assertVectorV1_1(
         string memory json,
         string memory p
-    ) internal view returns (address escrow) {
+    ) internal view returns (address account) {
         string memory name = vm.parseJsonString(json, string.concat(p, ".name"));
         address executor = vm.parseJsonAddress(json, ".executor");
         ConstraintV1_1 memory execute = _parseConstraintV1_1(json, string.concat(p, ".execute"));
@@ -180,19 +179,18 @@ contract ScaParityTest is Test {
             vm.parseJsonBytes32(json, string.concat(e, ".saltWithDigest")),
             string.concat(name, ": saltWithDigest")
         );
-        escrow = LibClone.predictDeterministicAddress_PUSH0(
+        account = LibClone.predictDeterministicAddress_PUSH0(
             vm.parseJsonAddress(json, ".clone.executorImpl"),
             saltWithDigest,
             vm.parseJsonAddress(json, ".clone.factory")
         );
-        assertEq(escrow, vm.parseJsonAddress(json, string.concat(e, ".escrow")), string.concat(name, ": escrow"));
+        assertEq(account, vm.parseJsonAddress(json, string.concat(e, ".account")), string.concat(name, ": account"));
     }
 
-    /* ─────────────────────────── live instances
-    ─────────────────────────── */
+    // ---- live instances ----
 
     /// @dev The v1.1 fixture's domain name and version, through the pinned formula, on any chain.
-    function test_fuzz_liveDomainSeparatorV1_1MatchesPinnedFormula(
+    function test_fuzz_live_domain_separator_v1_1_matches_pinned_formula(
         uint256 chainId
     ) external {
         chainId = bound(chainId, 1, type(uint64).max);
@@ -212,7 +210,7 @@ contract ScaParityTest is Test {
 
     /// @dev The fixture's saltWithDigest + PUSH0-clone prediction formula
     /// matches what the factory actually deploys, for both digest flavors.
-    function test_livePredictDeployWithDigestMatchesDeployment() external {
+    function test_live_predictDeployWithDigest_matches_deployment() external {
         CatapultarFactory factory = new CatapultarFactory();
         address owner = makeAddr("owner");
         bytes32[] memory keys = new bytes32[](1);
@@ -232,12 +230,11 @@ contract ScaParityTest is Test {
         assertNotEq(deployedCall, deployedSig, "flavor must be part of the address commitment");
     }
 
-    /* ─────────────────────────── v1.1 refund sweep replay
-    ─────────────────────────── */
+    // ---- v1.1 refund sweep replay ----
 
-    /// @dev I13: after execute, nonce 0 sweeps residue and each late deposit to the committed refund address, never
+    /// @dev After execute, nonce 0 sweeps residue and each late deposit to the committed refund address, never
     /// elsewhere, and an empty sweep moves nothing.
-    function test_fuzz_refundSweepReplaysToCommittedAddressOnly(
+    function test_fuzz_refund_sweep_replays_to_committed_address_only(
         uint256 residue0,
         uint256 residue1,
         uint256 late0,
@@ -249,16 +246,16 @@ contract ScaParityTest is Test {
         address[] memory tokens = new address[](2);
         tokens[0] = address(new MockERC20("A", "A", 18));
         tokens[1] = address(new MockERC20("B", "B", 6));
-        FixtureEscrow memory f = _deployFixtureEscrow("two-allowances", tokens);
+        FixtureAccount memory f = _deployFixtureAccount("two-allowances", tokens);
         address refund = f.refund.executionTarget;
         address sink = f.execute.outcomes[0].destination;
         vm.assume(attacker != refund);
 
         for (uint256 i; i < 2; ++i) {
-            MockERC20(tokens[i]).mint(f.escrow, f.execute.allowances[i].allocated + residue[i]);
+            MockERC20(tokens[i]).mint(f.account, f.execute.allowances[i].allocated + residue[i]);
         }
         _executeDelivering(f, tokens);
-        assertTrue(f.validator.spentNonces(f.escrow, f.execute.nonce));
+        assertTrue(f.validator.spentNonces(f.account, f.execute.nonce));
 
         vm.expectRevert(CATValidatorV1_1.TargetNotCommitted.selector);
         _sweepTo(f, attacker);
@@ -267,7 +264,7 @@ contract ScaParityTest is Test {
         _assertOnlyRefundHolds(f, tokens, sink, residue);
 
         for (uint256 i; i < 2; ++i) {
-            MockERC20(tokens[i]).mint(f.escrow, late[i]);
+            MockERC20(tokens[i]).mint(f.account, late[i]);
             residue[i] += late[i];
         }
         _sweep(f);
@@ -275,12 +272,12 @@ contract ScaParityTest is Test {
 
         _sweep(f);
         _assertOnlyRefundHolds(f, tokens, sink, residue);
-        assertFalse(f.validator.spentNonces(f.escrow, 0));
+        assertFalse(f.validator.spentNonces(f.account, 0));
     }
 
-    /// @dev The attested shape refunded before any fill, then a late deposit: the replay on an empty escrow reverts
-    /// on a token that rejects zero-value transfers, because the sweep transfers even a zero balance.
-    function test_fuzz_emptyRefundSweepRevertsOnZeroRejectingToken(
+    /// @dev The receipt-outcome shape refunded before any execute, then a late deposit: the replay on an empty account
+    /// reverts on a token that rejects zero-value transfers, because the sweep transfers even a zero balance.
+    function test_fuzz_revert_empty_refund_sweep_on_zero_rejecting_token(
         uint256 deposit,
         uint256 late
     ) external {
@@ -289,25 +286,25 @@ contract ScaParityTest is Test {
         ZeroRejectingERC20 token = new ZeroRejectingERC20();
         address[] memory tokens = new address[](1);
         tokens[0] = address(token);
-        FixtureEscrow memory f = _deployFixtureEscrow("ledger-outcome", tokens);
+        FixtureAccount memory f = _deployFixtureAccount("receipt-outcome", tokens);
         address refund = f.refund.executionTarget;
 
-        token.mint(f.escrow, deposit);
+        token.mint(f.account, deposit);
         _sweep(f);
         assertEq(token.balanceOf(refund), deposit);
 
-        token.mint(f.escrow, late);
+        token.mint(f.account, late);
         _sweep(f);
         assertEq(token.balanceOf(refund), deposit + late);
-        assertEq(token.balanceOf(f.escrow), 0);
-        assertFalse(f.validator.spentNonces(f.escrow, f.execute.nonce));
+        assertEq(token.balanceOf(f.account), 0);
+        assertFalse(f.validator.spentNonces(f.account, f.execute.nonce));
 
         vm.expectRevert(SafeTransferLib.TransferFromFailed.selector);
         _sweep(f);
     }
 
     /// @dev Before any transfer, the refund signature covers neither the sentinels, a payload nor another caller.
-    function test_fuzz_refundSweepRejectsSubstitutionsBeforeAnyTransfer(
+    function test_fuzz_revert_refund_sweep_substitutions_before_any_transfer(
         uint256 deposit0,
         uint256 deposit1,
         address attacker,
@@ -318,49 +315,49 @@ contract ScaParityTest is Test {
         address[] memory tokens = new address[](2);
         tokens[0] = address(new MockERC20("A", "A", 18));
         tokens[1] = address(new MockERC20("B", "B", 6));
-        FixtureEscrow memory f = _deployFixtureEscrow("two-allowances", tokens);
+        FixtureAccount memory f = _deployFixtureAccount("two-allowances", tokens);
         address refund = f.refund.executionTarget;
         vm.assume(attacker != f.executor);
         for (uint256 i; i < 2; ++i) {
-            MockERC20(tokens[i]).mint(f.escrow, deposit[i]);
+            MockERC20(tokens[i]).mint(f.account, deposit[i]);
         }
 
         vm.expectRevert(CATValidatorV1_1.ZeroDestination.selector);
         _refundEntry(f, f.executor, attacker, payload, address(0), 0);
-        _assertEscrowHoldsAll(f, tokens, deposit);
+        _assertAccountHoldsAll(f, tokens, deposit);
 
         vm.expectRevert(CATValidatorV1_1.PayloadNotCommitted.selector);
         _refundEntry(f, f.executor, refund, payload, refund, f.refund.payloadHash);
-        _assertEscrowHoldsAll(f, tokens, deposit);
+        _assertAccountHoldsAll(f, tokens, deposit);
 
         vm.expectRevert(CATValidator.BadSignature.selector);
         _refundEntry(f, attacker, refund, "", refund, f.refund.payloadHash);
-        _assertEscrowHoldsAll(f, tokens, deposit);
+        _assertAccountHoldsAll(f, tokens, deposit);
     }
 
     /// forge-config: default.isolate = true
-    function test_gas_snapshot_escrow_refund_sweep() external {
+    function test_gas_snapshot_account_refund_sweep() external {
         address[] memory tokens = new address[](2);
         tokens[0] = address(new MockERC20("A", "A", 18));
         tokens[1] = address(new MockERC20("B", "B", 6));
-        FixtureEscrow memory f = _deployFixtureEscrow("two-allowances", tokens);
+        FixtureAccount memory f = _deployFixtureAccount("two-allowances", tokens);
         for (uint256 i; i < 2; ++i) {
-            MockERC20(tokens[i]).mint(f.escrow, f.execute.allowances[i].allocated);
+            MockERC20(tokens[i]).mint(f.account, f.execute.allowances[i].allocated);
         }
         _sweep(f);
-        vm.snapshotGasLastCall("escrowRefundSweep");
+        vm.snapshotGasLastCall("accountRefundSweep");
         for (uint256 i; i < 2; ++i) {
             assertEq(MockERC20(tokens[i]).balanceOf(f.refund.executionTarget), f.execute.allowances[i].allocated);
         }
     }
 
-    /// @dev Deploys CATValidatorV1_1 and the escrow of fixture vector `name` with its allowance tokens replaced, in
-    /// order, by `tokens`. Digests and address come from the pinned formulas; the escrow approves the validator and
-    /// holds both digests as a minted bundle does.
-    function _deployFixtureEscrow(
+    /// @dev Deploys CATValidatorV1_1 and the account of fixture vector `name` with its allowance tokens replaced, in
+    /// order, by `tokens`. Digests and address come from the pinned formulas; the account approves the validator and
+    /// holds both digests.
+    function _deployFixtureAccount(
         string memory name,
         address[] memory tokens
-    ) internal returns (FixtureEscrow memory f) {
+    ) internal returns (FixtureAccount memory f) {
         string memory json = vm.readFile(SCA_PARITY_V1_1_VECTORS);
         string memory p = _vectorPath(json, name);
         f.executor = vm.parseJsonAddress(json, ".executor");
@@ -392,23 +389,23 @@ contract ScaParityTest is Test {
         address owner = address(bytes20(salt));
         bytes32[] memory keys = new bytes32[](1);
         keys[0] = bytes32(uint256(uint160(owner)));
-        f.escrow = factory.deployWithDigest(
+        f.account = factory.deployWithDigest(
             KeyedOwnable.PublicKeyType.ECDSAOrSmartContract, keys, salt, executeDigest, flavorNonce == 2
         );
         assertEq(
-            f.escrow,
+            f.account,
             LibClone.predictDeterministicAddress_PUSH0(
                 factory.EXECUTOR(),
                 EfficientHashLib.hash(_factorySalt(salt), executeDigest, bytes32(flavorNonce)),
                 address(factory)
             ),
-            "pinned escrow formula != deployment"
+            "pinned account formula != deployment"
         );
 
         vm.prank(owner);
-        Catapultar(f.escrow).setSignature(refundDigest, Catapultar.DigestApproval.Signature);
+        Catapultar(f.account).setSignature(refundDigest, Catapultar.DigestApproval.Signature);
         for (uint256 i; i < tokens.length; ++i) {
-            vm.prank(f.escrow);
+            vm.prank(f.account);
             MockERC20(tokens[i]).approve(address(f.validator), type(uint256).max);
             f.execute.allowances[i].spend = f.execute.allowances[i].allocated;
             f.refund.allowances[i].spend = SPEND_BALANCE_OF_MAGIC;
@@ -418,7 +415,7 @@ contract ScaParityTest is Test {
     /// @dev The execute entry with a target that delivers every pulled token to the validator, which forwards it to the
     /// outcome destination.
     function _executeDelivering(
-        FixtureEscrow memory f,
+        FixtureAccount memory f,
         address[] memory tokens
     ) internal {
         uint256[] memory amounts = new uint256[](tokens.length);
@@ -432,7 +429,7 @@ contract ScaParityTest is Test {
             .entry(
                 address(deliverer),
                 deliver,
-                f.escrow,
+                f.account,
                 f.execute.nonce,
                 f.execute.allowances,
                 f.execute.outcomes,
@@ -443,20 +440,20 @@ contract ScaParityTest is Test {
     }
 
     function _sweep(
-        FixtureEscrow memory f
+        FixtureAccount memory f
     ) internal {
         _sweepTo(f, f.refund.executionTarget);
     }
 
     function _sweepTo(
-        FixtureEscrow memory f,
+        FixtureAccount memory f,
         address execTarget
     ) internal {
         _refundEntry(f, f.executor, execTarget, "", f.refund.executionTarget, f.refund.payloadHash);
     }
 
     function _refundEntry(
-        FixtureEscrow memory f,
+        FixtureAccount memory f,
         address caller,
         address execTarget,
         bytes memory execPayload,
@@ -468,7 +465,7 @@ contract ScaParityTest is Test {
             .entry(
                 execTarget,
                 execPayload,
-                f.escrow,
+                f.account,
                 f.refund.nonce,
                 f.refund.allowances,
                 f.refund.outcomes,
@@ -478,21 +475,21 @@ contract ScaParityTest is Test {
             );
     }
 
-    function _assertEscrowHoldsAll(
-        FixtureEscrow memory f,
+    function _assertAccountHoldsAll(
+        FixtureAccount memory f,
         address[] memory tokens,
         uint256[2] memory deposit
     ) internal view {
         assertEq(tokens.length, 2, "two-token helper");
         for (uint256 i; i < tokens.length; ++i) {
-            assertEq(MockERC20(tokens[i]).balanceOf(f.escrow), deposit[i], "escrow");
+            assertEq(MockERC20(tokens[i]).balanceOf(f.account), deposit[i], "account");
             assertEq(MockERC20(tokens[i]).totalSupply(), deposit[i], "held elsewhere");
         }
     }
 
     /// @dev `sink` keeps what execute delivered; the refund address holds everything else ever minted.
     function _assertOnlyRefundHolds(
-        FixtureEscrow memory f,
+        FixtureAccount memory f,
         address[] memory tokens,
         address sink,
         uint256[2] memory refunded
@@ -514,15 +511,15 @@ contract ScaParityTest is Test {
         AllowanceSpend[] memory two = new AllowanceSpend[](2);
         two[0] = AllowanceSpend({ token: WETH, allocated: 2 ether, spend: 0 });
         two[1] = AllowanceSpend({ token: USDC, allocated: 1000e6, spend: 0 });
-        Outcome[] memory ledger = new Outcome[](1);
-        ledger[0] = Outcome({ token: PIN_LEDGER, amount: 1, destination: PIN_COMMIT });
-        (, Outcome[] memory uc1) = _sharedConstraintParts();
+        Outcome[] memory receipt = new Outcome[](1);
+        receipt[0] = Outcome({ token: PIN_RECEIPT_TOKEN, amount: 1, destination: PIN_COMMIT });
+        (, Outcome[] memory deliveries) = _sharedConstraintParts();
 
-        string[3] memory names = ["empty-outcomes", "ledger-outcome", "two-allowances"];
+        string[3] memory names = ["empty-outcomes", "receipt-outcome", "two-allowances"];
         ConstraintV1_1[3] memory executes = [
             ConstraintV1_1(1, address(0), 0, usdc, new Outcome[](0)),
-            ConstraintV1_1(PIN_RANDOM_NONCE, address(0), 0, usdc, ledger),
-            ConstraintV1_1(1, address(0), 0, two, uc1)
+            ConstraintV1_1(PIN_RANDOM_NONCE, address(0), 0, usdc, receipt),
+            ConstraintV1_1(1, address(0), 0, two, deliveries)
         ];
         uint256[3] memory flavorNonces = [uint256(1), 2, 2];
 
@@ -563,14 +560,14 @@ contract ScaParityTest is Test {
                 vm.toString(keccak256(abi.encodePacked("\x19\x01", domainSeparator, refundStructHash))),
                 "\",\n        \"saltWithDigest\": \"",
                 vm.toString(saltWithDigest),
-                "\",\n        \"escrow\": \"",
+                "\",\n        \"account\": \"",
                 vm.toString(LibClone.predictDeterministicAddress_PUSH0(PIN_EXECUTOR_IMPL, saltWithDigest, PIN_FACTORY)),
                 "\"\n      }\n    }"
             );
         }
 
         string memory json = string.concat(
-            "{\n  \"schema\": \"c2-sca-parity-v1_1/v1\",",
+            "{\n  \"schema\": \"sca-parity-v1_1/v1\",",
             "\n  \"domain\": {\n    \"name\": \"CAT Validator\",\n    \"version\": \"1.1\",\n    \"chainId\": ",
             vm.toString(PIN_CHAIN_ID),
             ",\n    \"verifyingContract\": \"",
@@ -631,10 +628,9 @@ contract ScaParityTest is Test {
         json = string.concat(json, c.outcomes.length == 0 ? "]" : "\n        ]", "\n      }");
     }
 
-    /* ─────────────────────────── shared pieces
-    ──────────────────────────── */
+    // ---- shared pieces ----
 
-    /// @dev The uc1-shaped constraint parts the `two-allowances` vector reuses: one WETH allowance, WETH + USDC
+    /// @dev The constraint parts the `two-allowances` vector reuses: one WETH allowance, WETH + USDC
     /// minimum deliveries to the delivery address.
     function _sharedConstraintParts()
         internal
@@ -733,7 +729,7 @@ contract ScaParityTest is Test {
         }
     }
 
-    /// @dev PRD §4.2 refund digest: nonce 0, `executionTarget = refund`, `payloadHash = keccak256("")`, and per
+    /// @dev The refund constraint: nonce 0, `executionTarget = refund`, `payloadHash = keccak256("")`, and per
     /// allowance token a `type(uint256).max` allowance with a zero-floor outcome to `refund`.
     function _refundConstraint(
         AllowanceSpend[] memory allowances,

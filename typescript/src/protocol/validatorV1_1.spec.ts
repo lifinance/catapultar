@@ -67,7 +67,7 @@ function messageOf(c: FixtureConstraint) {
 
 describe("sca-parity v1.1 fixture", () => {
   it("is the v1.1 vector set", () => {
-    expect(fixture.schema).toBe("c2-sca-parity-v1_1/v1");
+    expect(fixture.schema).toBe("sca-parity-v1_1/v1");
     expect(fixture.domain.name).toBe("CAT Validator");
     expect(fixture.domain.version).toBe("1.1");
   });
@@ -117,7 +117,7 @@ describe("sca-parity v1.1 fixture", () => {
         }
       });
 
-      it("the execute digest reproduces the escrow through the factory salt", () => {
+      it("the execute digest reproduces the account through the factory salt", () => {
         const ownerKey: Hex = `0x${vector.salt.slice(2, 42).padStart(64, "0")}`;
         const salted = factorySaltWithDigest(
           factorySalt(vector.salt as Hex, 0, [ownerKey]),
@@ -131,7 +131,7 @@ describe("sca-parity v1.1 fixture", () => {
             salt: salted,
             factory: fixture.clone.factory as Hex,
           }),
-        ).toBe(vector.expected.escrow as Hex);
+        ).toBe(vector.expected.account as Hex);
       });
     });
   }

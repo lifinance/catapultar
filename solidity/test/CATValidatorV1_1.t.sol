@@ -77,7 +77,7 @@ contract RecordingProbe {
         return seen.length;
     }
 
-    function at(
+    function seenAt(
         uint256 i
     ) external view returns (uint256) {
         return seen[i];
@@ -101,7 +101,7 @@ contract AnyAccount {
     }
 }
 
-/// @dev Reads `pulled` from a token-transfer hook, the window a ledger must never attest from.
+/// @dev Reads `pulled` from a token-transfer hook, a window in which `pulled` must read zero.
 contract ReceiptProbe {
     address public validator;
     address public token;
@@ -127,7 +127,7 @@ contract ReceiptProbe {
         return seen.length;
     }
 
-    function at(
+    function seenAt(
         uint256 i
     ) external view returns (uint256) {
         return seen[i];
@@ -375,7 +375,7 @@ contract CATValidatorV1_1Mock is CATValidatorV1_1 {
     }
 }
 
-/// @dev Reports the validator's `pulled(token)` as its balance, so an outcome check observes the ledger.
+/// @dev Reports the validator's `pulled(token)` as its balance, so an outcome check observes `pulled`.
 contract PulledReaderToken {
     address public validator;
     address public token;
@@ -410,7 +410,7 @@ contract EntryIdProbe {
     }
 }
 
-/// @dev Execution target that delivers `amount` of `token` to `to`: the outcome delivery of hold-and-forward.
+/// @dev Execution target that delivers `amount` of `token` to `to`: the outcome delivery the validator holds.
 contract Deliverer {
     function deliver(
         address token,
@@ -443,7 +443,7 @@ contract LongReverter {
 }
 
 contract CATValidatorV1_1Test is Test {
-    CATValidator hf;
+    CATValidator base;
     CATValidatorV1_1 v11;
     CATValidatorV1_1Standalone v11Standalone;
     MockERC20 token;
@@ -457,7 +457,7 @@ contract CATValidatorV1_1Test is Test {
     uint256 constant SPEND_MAGIC = 1 << 255;
 
     function setUp() external {
-        hf = new CATValidator();
+        base = new CATValidator();
         v11 = new CATValidatorV1_1();
         v11Standalone = new CATValidatorV1_1Standalone();
         token = new MockERC20("USDC", "USDC", 6);
@@ -628,18 +628,19 @@ contract CATValidatorV1_1Test is Test {
         }
     }
 
-    function _deployEscrow(
+    function _deployAccount(
         address ownerAddr,
         bytes32 digest
-    ) internal returns (address payable escrow) {
+    ) internal returns (address payable account) {
         bytes32[] memory ownerArr = new bytes32[](1);
         ownerArr[0] = bytes32(uint256(uint160(ownerAddr)));
         bytes32 salt = bytes32(uint256(uint160(ownerAddr)) << 96);
         address predicted = factory.predictDeployWithDigest(
             KeyedOwnable.PublicKeyType.ECDSAOrSmartContract, ownerArr, salt, digest, true
         );
-        escrow = factory.deployWithDigest(KeyedOwnable.PublicKeyType.ECDSAOrSmartContract, ownerArr, salt, digest, true);
-        assertEq(escrow, predicted, "predicted == deployed escrow");
+        account =
+            factory.deployWithDigest(KeyedOwnable.PublicKeyType.ECDSAOrSmartContract, ownerArr, salt, digest, true);
+        assertEq(account, predicted, "predicted == deployed account");
     }
 
     // ---- identity ----
@@ -661,9 +662,9 @@ contract CATValidatorV1_1Test is Test {
         assertEq(ICATValidatorV1_1.entryId.selector, bytes4(0xd323e74d));
     }
 
-    /// @dev The inherited 7-argument entry follows upstream v1's flow: it pulls like the base, bumps no id, and its
-    ///      v1 digest cannot pass a v1.1 escrow's commitment.
-    function test_entry_v1OverloadKeepsUpstreamFlow() external {
+    /// @dev The inherited 7-argument entry follows the base's flow: it pulls like the base, bumps no id, and its
+    ///      v1 digest cannot pass a v1.1 account's commitment.
+    function test_entry_v1_overload_keeps_base_flow() external {
         _fund(address(v11));
         EntryIdProbe idProbe = new EntryIdProbe();
         vm.prank(executor);
@@ -683,13 +684,13 @@ contract CATValidatorV1_1Test is Test {
 
         (address ownerAddr,) = makeAddrAndKey("v1OverloadDepositor");
         AllowanceSpend[] memory a = _spend(address(token), DEPOSIT, DEPOSIT);
-        address payable escrow = _deployEscrow(ownerAddr, _v11Digest(a, _noOut(), 1, address(0), 0));
-        token.mint(escrow, DEPOSIT);
-        vm.prank(escrow);
+        address payable account = _deployAccount(ownerAddr, _v11Digest(a, _noOut(), 1, address(0), 0));
+        token.mint(account, DEPOSIT);
+        vm.prank(account);
         token.approve(address(v11), type(uint256).max);
         vm.prank(executor);
         vm.expectRevert(CATValidator.BadSignature.selector);
-        v11.entry(address(probe), "", escrow, 1, a, _noOut(), "");
+        v11.entry(address(probe), "", account, 1, a, _noOut(), "");
     }
 
     function test_domain_name_and_version() external view {
@@ -805,14 +806,14 @@ contract CATValidatorV1_1Test is Test {
         assertEq(fresh.pulled(address(0)), 0);
     }
 
-    function test_constructor_reverts_without_tstore() external {
+    function test_revert_constructor_without_tstore() external {
         vm.setEvmVersion("shanghai");
         assertGt(address(new CATValidator()).code.length, 0, "the base deploys on shanghai");
         vm.expectRevert();
         new CATValidatorV1_1();
     }
 
-    // ---- pulled (I6) ----
+    // ---- pulled ----
 
     function test_pulled_zero_outside_entry() external view {
         assertEq(v11.pulled(address(token)), 0);
@@ -835,7 +836,7 @@ contract CATValidatorV1_1Test is Test {
             0,
             ""
         );
-        assertEq(probe.at(0), spend, "pulled during entry");
+        assertEq(probe.seenAt(0), spend, "pulled during entry");
         assertEq(v11.pulled(address(token)), 0, "pulled after entry");
         assertEq(token.balanceOf(address(probe)), spend);
     }
@@ -857,11 +858,11 @@ contract CATValidatorV1_1Test is Test {
             0,
             ""
         );
-        assertEq(probe.at(0), balance);
+        assertEq(probe.seenAt(0), balance);
         assertEq(v11.pulled(address(token)), 0);
     }
 
-    function test_entry_spendZero_pullsNothing() external {
+    function test_entry_spend_zero_pulls_nothing() external {
         _fund(address(v11));
         vm.prank(executor);
         v11.entry(
@@ -875,7 +876,7 @@ contract CATValidatorV1_1Test is Test {
             0,
             ""
         );
-        assertEq(probe.at(0), 0, "pulled during entry");
+        assertEq(probe.seenAt(0), 0, "pulled during entry");
         assertEq(token.balanceOf(address(this)), DEPOSIT, "signer balance unchanged");
         assertEq(token.balanceOf(address(probe)), 0);
     }
@@ -933,9 +934,9 @@ contract CATValidatorV1_1Test is Test {
             0,
             ""
         );
-        assertEq(probe.at(0), sA);
-        assertEq(probe.at(1), sB);
-        assertEq(probe.at(2), 0, "token outside the allowances");
+        assertEq(probe.seenAt(0), sA);
+        assertEq(probe.seenAt(1), sB);
+        assertEq(probe.seenAt(2), 0, "token outside the allowances");
         assertEq(v11.pulled(address(token)), 0);
         assertEq(v11.pulled(address(tokenB)), 0);
     }
@@ -959,7 +960,7 @@ contract CATValidatorV1_1Test is Test {
             0,
             ""
         );
-        assertEq(probe.at(0), spend, "pulled is the spend");
+        assertEq(probe.seenAt(0), spend, "pulled is the spend");
         assertEq(fot.balanceOf(address(probe)), uint256(spend) - spend / 100, "target received less");
         assertEq(v11.pulled(address(fot)), 0);
     }
@@ -992,12 +993,12 @@ contract CATValidatorV1_1Test is Test {
         assertEq(harness.revertData(), abi.encodeWithSelector(CATValidator.InvalidTokenAmount.selector, 1, 0));
         assertEq(harness.pulledBetween(), 0, "reverted entry leaves nothing");
         assertEq(pa.count(), 0, "reverted probe record rolled back");
-        assertEq(pb.at(0), s2, "next entry sees only its own pull");
+        assertEq(pb.seenAt(0), s2, "next entry sees only its own pull");
         assertEq(harness.pulledAfter(), 0);
         assertFalse(v11.spentNonces(address(acct), 1));
     }
 
-    function test_nested_entry_reverts_Reentrancy() external {
+    function test_revert_nested_entry_reentrancy() external {
         _fund(address(v11));
         ReentryProbe rp = new ReentryProbe();
         address sink = makeAddr("sink");
@@ -1050,8 +1051,8 @@ contract CATValidatorV1_1Test is Test {
             _entryCall(address(pa), payload, address(acct), 1, _spend(address(token), s1, s1)),
             _entryCall(address(pb), payload, address(acct), 2, _spend(address(token), s2, s2))
         );
-        assertEq(pa.at(0), s1, "entry 1 sees its own pull");
-        assertEq(pb.at(0), s2, "entry 2 sees its own pull");
+        assertEq(pa.seenAt(0), s1, "entry 1 sees its own pull");
+        assertEq(pb.seenAt(0), s2, "entry 2 sees its own pull");
         assertEq(harness.pulledBetween(), 0, "cleared between entries");
         assertEq(harness.pulledAfter(), 0, "cleared after last entry");
     }
@@ -1082,9 +1083,9 @@ contract CATValidatorV1_1Test is Test {
             ""
         );
         assertEq(hook.count(), 2, "hook fired once per transfer");
-        assertEq(hook.at(0), 0);
-        assertEq(hook.at(1), 0);
-        assertEq(probe.at(0), uint256(s0) + s1, "payload sees the aggregated total");
+        assertEq(hook.seenAt(0), 0);
+        assertEq(hook.seenAt(1), 0);
+        assertEq(probe.seenAt(0), uint256(s0) + s1, "payload sees the aggregated total");
         assertEq(cb.balanceOf(address(probe)), uint256(s0) + s1);
         assertEq(v11.pulled(address(cb)), 0, "cleared after entry");
     }
@@ -1113,12 +1114,12 @@ contract CATValidatorV1_1Test is Test {
             ""
         );
         assertEq(hook.count(), 1);
-        assertEq(hook.at(0), 0);
-        assertEq(probe.at(0), spend);
+        assertEq(hook.seenAt(0), 0);
+        assertEq(probe.seenAt(0), spend);
         assertEq(v11.pulled(address(cb)), 0);
     }
 
-    // ---- refund commitment (I8) ----
+    // ---- refund commitment ----
 
     function test_refund_commitment_rejects_before_any_transfer() external {
         AnyAccount acct = new AnyAccount();
@@ -1152,14 +1153,14 @@ contract CATValidatorV1_1Test is Test {
         v11.entry(makeAddr("attacker"), "", address(this), 0, a, o, refund, emptyHash, "");
         vm.expectRevert(CATValidatorV1_1.PayloadNotCommitted.selector);
         v11.entry(refund, hex"01", address(this), 0, a, o, refund, emptyHash, "");
-        assertEq(token.balanceOf(address(this)), DEPOSIT, "escrow untouched");
+        assertEq(token.balanceOf(address(this)), DEPOSIT, "signer untouched");
 
         v11.entry(refund, "", address(this), 0, a, o, refund, emptyHash, "");
         vm.stopPrank();
         assertEq(token.balanceOf(refund), DEPOSIT);
     }
 
-    function test_fuzz_refund_target_mismatch_reverts(
+    function test_fuzz_revert_refund_target_mismatch(
         address execTarget
     ) external {
         address refund = makeAddr("refund");
@@ -1182,7 +1183,7 @@ contract CATValidatorV1_1Test is Test {
         );
     }
 
-    function test_fuzz_refund_payload_mismatch_reverts(
+    function test_fuzz_revert_refund_payload_mismatch(
         bytes calldata payload
     ) external {
         vm.assume(payload.length != 0);
@@ -1244,9 +1245,9 @@ contract CATValidatorV1_1Test is Test {
         assertEq(token.balanceOf(signer), 0);
     }
 
-    // ---- v1 mechanics on the copy ----
+    // ---- inherited v1 mechanics ----
 
-    function test_fuzz_allocation_too_small(
+    function test_fuzz_revert_allocation_too_small(
         uint256 allocated,
         uint256 spend
     ) external {
@@ -1261,7 +1262,7 @@ contract CATValidatorV1_1Test is Test {
         );
     }
 
-    function test_fuzz_allocation_too_small_balance_sweep(
+    function test_fuzz_revert_allocation_too_small_balance_sweep(
         uint256 allocated,
         uint256 balance
     ) external {
@@ -1285,7 +1286,7 @@ contract CATValidatorV1_1Test is Test {
         );
     }
 
-    function test_fuzz_outcome_floor_reverts_InvalidTokenAmount(
+    function test_fuzz_revert_outcome_below_floor(
         uint256 delivered,
         uint256 floor
     ) external {
@@ -1327,43 +1328,43 @@ contract CATValidatorV1_1Test is Test {
         assertEq(token.balanceOf(dest), floor);
     }
 
-    // ---- real escrow derivation ----
+    // ---- real account derivation ----
 
-    function test_real_escrow_derivation_and_entry() external {
+    function test_real_account_derivation_and_entry() external {
         (address ownerAddr,) = makeAddrAndKey("depositor");
         AllowanceSpend[] memory a = _spend(address(token), DEPOSIT, DEPOSIT);
         Outcome[] memory o = _noOut();
-        address payable escrow = _deployEscrow(ownerAddr, _v11Digest(a, o, 1, address(0), 0));
+        address payable account = _deployAccount(ownerAddr, _v11Digest(a, o, 1, address(0), 0));
 
-        token.mint(escrow, DEPOSIT);
-        vm.prank(escrow);
+        token.mint(account, DEPOSIT);
+        vm.prank(account);
         token.approve(address(v11), type(uint256).max);
 
         address sink = makeAddr("sink");
         vm.prank(executor);
-        v11.entry(sink, "", escrow, 1, a, o, address(0), 0, "");
+        v11.entry(sink, "", account, 1, a, o, address(0), 0, "");
         assertEq(token.balanceOf(sink), DEPOSIT);
-        assertEq(token.balanceOf(escrow), 0);
+        assertEq(token.balanceOf(account), 0);
     }
 
-    function test_wrong_digest_escrow_rejects_entry() external {
+    function test_revert_entry_on_account_of_another_digest() external {
         (address ownerAddr,) = makeAddrAndKey("depositor2");
         AllowanceSpend[] memory a = _spend(address(token), DEPOSIT, DEPOSIT);
         Outcome[] memory o = _noOut();
         bytes32 committed = _digest(
             _domainSep("1.1", address(v11)), thh.v11(a, o, makeAddr("otherExecutor"), 1, address(0), bytes32(0))
         );
-        address payable escrow = _deployEscrow(ownerAddr, committed);
-        token.mint(escrow, DEPOSIT);
-        vm.prank(escrow);
+        address payable account = _deployAccount(ownerAddr, committed);
+        token.mint(account, DEPOSIT);
+        vm.prank(account);
         token.approve(address(v11), type(uint256).max);
 
         vm.prank(executor);
         vm.expectRevert(CATValidator.BadSignature.selector);
-        v11.entry(makeAddr("sink"), "", escrow, 1, a, o, address(0), 0, "");
+        v11.entry(makeAddr("sink"), "", account, 1, a, o, address(0), 0, "");
     }
 
-    function test_escrow_address_differs_from_base_for_identical_terms() external {
+    function test_account_address_differs_from_base_for_identical_terms() external {
         (address ownerAddr,) = makeAddrAndKey("commitProbe");
         bytes32[] memory ownerArr = new bytes32[](1);
         ownerArr[0] = bytes32(uint256(uint160(ownerAddr)));
@@ -1374,20 +1375,20 @@ contract CATValidatorV1_1Test is Test {
         bytes32 structV11 = thh.v11(a, o, executor, 1, address(0), 0);
         bytes32 structV1 = thh.v1(a, o, executor, 1);
         assertTrue(structV11 != structV1, "type string changes struct hash");
-        assertEq(_domainSep("1", address(hf)), hf.DOMAIN_SEPARATOR());
+        assertEq(_domainSep("1", address(base)), base.DOMAIN_SEPARATOR());
 
-        bytes32 digestV1 = _digest(_domainSep("1", address(hf)), structV1);
+        bytes32 digestV1 = _digest(_domainSep("1", address(base)), structV1);
         bytes32 digestV11 = _digest(_domainSep("1.1", address(v11)), structV11);
-        address escrowV1 = factory.predictDeployWithDigest(
+        address accountV1 = factory.predictDeployWithDigest(
             KeyedOwnable.PublicKeyType.ECDSAOrSmartContract, ownerArr, salt, digestV1, true
         );
-        address escrowV11 = factory.predictDeployWithDigest(
+        address accountV11 = factory.predictDeployWithDigest(
             KeyedOwnable.PublicKeyType.ECDSAOrSmartContract, ownerArr, salt, digestV11, true
         );
-        assertTrue(escrowV1 != escrowV11);
+        assertTrue(accountV1 != accountV11);
     }
 
-    // ---- nonce-0 refund sweep (I13, D27) ----
+    // ---- nonce-0 refund sweep ----
 
     function test_refund_nonce0_sweeps_residue_and_late_deposits_after_execute() external {
         (address ownerAddr,) = makeAddrAndKey("refundDepositor");
@@ -1400,45 +1401,45 @@ contract CATValidatorV1_1Test is Test {
         AllowanceSpend[] memory refA = _spend(address(token), type(uint256).max, SPEND_MAGIC);
         Outcome[] memory refO = _refundOut(address(token), refund);
 
-        address payable escrow = _deployEscrow(ownerAddr, _v11Digest(execA, execO, 1, address(0), 0));
+        address payable account = _deployAccount(ownerAddr, _v11Digest(execA, execO, 1, address(0), 0));
         bytes32 refundDigest = _v11Digest(refA, refO, 0, refund, emptyHash);
         vm.prank(ownerAddr);
-        Catapultar(escrow).setSignature(refundDigest, Catapultar.DigestApproval.Signature);
-        vm.prank(escrow);
+        Catapultar(account).setSignature(refundDigest, Catapultar.DigestApproval.Signature);
+        vm.prank(account);
         token.approve(address(v11), type(uint256).max);
 
-        token.mint(escrow, DEPOSIT + residue);
+        token.mint(account, DEPOSIT + residue);
         address sink = makeAddr("execSink");
         vm.startPrank(executor);
-        v11.entry(sink, "", escrow, 1, execA, execO, address(0), 0, "");
+        v11.entry(sink, "", account, 1, execA, execO, address(0), 0, "");
         assertEq(token.balanceOf(sink), DEPOSIT);
-        assertTrue(v11.spentNonces(escrow, 1));
+        assertTrue(v11.spentNonces(account, 1));
 
         vm.expectRevert(CATValidator.NonceAlreadySpent.selector);
-        v11.entry(sink, "", escrow, 1, execA, execO, address(0), 0, "");
+        v11.entry(sink, "", account, 1, execA, execO, address(0), 0, "");
 
         vm.expectRevert(CATValidatorV1_1.TargetNotCommitted.selector);
-        v11.entry(makeAddr("attacker"), "", escrow, 0, refA, refO, refund, emptyHash, "");
+        v11.entry(makeAddr("attacker"), "", account, 0, refA, refO, refund, emptyHash, "");
 
-        v11.entry(refund, "", escrow, 0, refA, refO, refund, emptyHash, "");
+        v11.entry(refund, "", account, 0, refA, refO, refund, emptyHash, "");
         assertEq(token.balanceOf(refund), residue, "residue swept after execute");
 
-        token.mint(escrow, 123e6);
-        v11.entry(refund, "", escrow, 0, refA, refO, refund, emptyHash, "");
+        token.mint(account, 123e6);
+        v11.entry(refund, "", account, 0, refA, refO, refund, emptyHash, "");
         assertEq(token.balanceOf(refund), residue + 123e6, "late deposit 1");
 
-        token.mint(escrow, 77e6);
-        v11.entry(refund, "", escrow, 0, refA, refO, refund, emptyHash, "");
+        token.mint(account, 77e6);
+        v11.entry(refund, "", account, 0, refA, refO, refund, emptyHash, "");
         assertEq(token.balanceOf(refund), residue + 200e6, "late deposit 2");
 
-        v11.entry(refund, "", escrow, 0, refA, refO, refund, emptyHash, "");
+        v11.entry(refund, "", account, 0, refA, refO, refund, emptyHash, "");
         vm.stopPrank();
-        assertEq(token.balanceOf(refund), residue + 200e6, "empty-escrow sweep is a no-op");
-        assertEq(token.balanceOf(escrow), 0);
-        assertFalse(v11.spentNonces(escrow, 0));
+        assertEq(token.balanceOf(refund), residue + 200e6, "empty-account sweep is a no-op");
+        assertEq(token.balanceOf(account), 0);
+        assertFalse(v11.spentNonces(account, 0));
     }
 
-    function test_refund_nonce0_empty_sweep_reverts_on_zero_rejecting_token() external {
+    function test_revert_refund_nonce0_empty_sweep_on_zero_rejecting_token() external {
         ZeroRejectingERC20 zt = new ZeroRejectingERC20();
         AnyAccount acct = new AnyAccount();
         acct.approveToken(address(zt), address(v11));
@@ -1457,7 +1458,7 @@ contract CATValidatorV1_1Test is Test {
         vm.stopPrank();
     }
 
-    /// @dev HS-06. D35 makes the refund wallet the escrow owner, so its key recovers what the sweep cannot pay.
+    /// @dev When the refund wallet also owns the account, its key recovers what the sweep cannot pay.
     function test_refund_nonce0_blacklisted_refund_wallet_sweep_reverts_owner_recovers() external {
         BlacklistERC20 usdc = new BlacklistERC20();
         (address refund, uint256 refundKey) = makeAddrAndKey("blacklistedRefund");
@@ -1467,19 +1468,19 @@ contract CATValidatorV1_1Test is Test {
         AllowanceSpend[] memory execA = _spend(address(usdc), DEPOSIT, DEPOSIT);
         AllowanceSpend[] memory refA = _spend(address(usdc), type(uint256).max, SPEND_MAGIC);
         Outcome[] memory refO = _refundOut(address(usdc), refund);
-        address payable escrow = _deployEscrow(refund, _v11Digest(execA, _noOut(), 1, address(0), 0));
+        address payable account = _deployAccount(refund, _v11Digest(execA, _noOut(), 1, address(0), 0));
         bytes32 refundDigest = _v11Digest(refA, refO, 0, refund, emptyHash);
         vm.prank(refund);
-        Catapultar(escrow).setSignature(refundDigest, Catapultar.DigestApproval.Signature);
-        vm.prank(escrow);
+        Catapultar(account).setSignature(refundDigest, Catapultar.DigestApproval.Signature);
+        vm.prank(account);
         usdc.approve(address(v11), type(uint256).max);
-        usdc.mint(escrow, DEPOSIT);
+        usdc.mint(account, DEPOSIT);
         usdc.blacklist(refund);
 
         vm.prank(executor);
         vm.expectRevert(SafeTransferLib.TransferFromFailed.selector);
-        v11.entry(refund, "", escrow, 0, refA, refO, refund, emptyHash, "");
-        assertEq(usdc.balanceOf(escrow), DEPOSIT, "failed sweep moved funds");
+        v11.entry(refund, "", account, 0, refA, refO, refund, emptyHash, "");
+        assertEq(usdc.balanceOf(account), DEPOSIT, "failed sweep moved funds");
         assertEq(usdc.balanceOf(refund), 0);
 
         ERC7821.Call[] memory calls = new ERC7821.Call[](1);
@@ -1488,58 +1489,58 @@ contract CATValidatorV1_1Test is Test {
         });
         bytes32 mode = bytes10(0x01000000000078210001);
         uint256 nonce = 1;
-        bytes32 digest = _digest(Catapultar(escrow).DOMAIN_SEPARATOR(), thh.batch(nonce, mode, calls));
+        bytes32 digest = _digest(Catapultar(account).DOMAIN_SEPARATOR(), thh.batch(nonce, mode, calls));
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(refundKey, digest);
-        Catapultar(escrow).execute(mode, abi.encode(calls, abi.encodePacked(nonce, r, s, v)));
+        Catapultar(account).execute(mode, abi.encode(calls, abi.encodePacked(nonce, r, s, v)));
 
-        assertEq(usdc.balanceOf(escrow), 0, "escrow emptied");
+        assertEq(usdc.balanceOf(account), 0, "account emptied");
         assertEq(usdc.balanceOf(recovery), DEPOSIT, "owner recovered the deposit");
     }
 
-    function _zeroRefundEscrow()
+    function _zeroRefundAccount()
         internal
-        returns (address payable escrow, AllowanceSpend[] memory refA, Outcome[] memory refO)
+        returns (address payable account, AllowanceSpend[] memory refA, Outcome[] memory refO)
     {
         (address ownerAddr,) = makeAddrAndKey("zeroRefundDepositor");
         refA = _spend(address(token), type(uint256).max, SPEND_MAGIC);
         refO = _refundOut(address(token), address(0));
-        escrow =
-            _deployEscrow(ownerAddr, _v11Digest(_spend(address(token), DEPOSIT, DEPOSIT), _noOut(), 1, address(0), 0));
+        account =
+            _deployAccount(ownerAddr, _v11Digest(_spend(address(token), DEPOSIT, DEPOSIT), _noOut(), 1, address(0), 0));
         bytes32 refundDigest = _v11Digest(refA, refO, 0, address(0), keccak256(""));
         vm.prank(ownerAddr);
-        Catapultar(escrow).setSignature(refundDigest, Catapultar.DigestApproval.Signature);
-        vm.prank(escrow);
+        Catapultar(account).setSignature(refundDigest, Catapultar.DigestApproval.Signature);
+        vm.prank(account);
         token.approve(address(v11), type(uint256).max);
     }
 
     /// @dev A reusable nonce-0 refund digest committing no execution target (a zero refund address) would let the
     /// executor sweep to any target, again for every later deposit; the entry refuses it.
     function test_zero_refund_address_fails_closed() external {
-        (address payable escrow, AllowanceSpend[] memory refA, Outcome[] memory refO) = _zeroRefundEscrow();
+        (address payable account, AllowanceSpend[] memory refA, Outcome[] memory refO) = _zeroRefundAccount();
         address attacker = makeAddr("attacker");
-        token.mint(escrow, DEPOSIT);
+        token.mint(account, DEPOSIT);
         vm.prank(executor);
         vm.expectRevert(CATValidatorV1_1.ZeroDestination.selector);
-        v11.entry(attacker, "", escrow, 0, refA, refO, address(0), keccak256(""), "");
+        v11.entry(attacker, "", account, 0, refA, refO, address(0), keccak256(""), "");
         assertEq(token.balanceOf(attacker), 0);
-        assertEq(token.balanceOf(escrow), DEPOSIT);
-        assertFalse(v11.spentNonces(escrow, 0));
+        assertEq(token.balanceOf(account), DEPOSIT);
+        assertFalse(v11.spentNonces(account, 0));
     }
 
-    function testFuzz_zero_refund_address_fails_closed_for_any_target(
+    function test_fuzz_zero_refund_address_fails_closed_for_any_target(
         address target,
         uint128 balance
     ) external {
-        (address payable escrow, AllowanceSpend[] memory refA, Outcome[] memory refO) = _zeroRefundEscrow();
-        token.mint(escrow, balance);
+        (address payable account, AllowanceSpend[] memory refA, Outcome[] memory refO) = _zeroRefundAccount();
+        token.mint(account, balance);
         vm.prank(executor);
         vm.expectRevert(CATValidatorV1_1.ZeroDestination.selector);
-        v11.entry(target, "", escrow, 0, refA, refO, address(0), keccak256(""), "");
+        v11.entry(target, "", account, 0, refA, refO, address(0), keccak256(""), "");
     }
 
     // ---- revert bubbling ----
 
-    function test_entry_bubblesLongRevertDataVerbatim() external {
+    function test_entry_bubbles_long_revert_data_verbatim() external {
         LongReverter target = new LongReverter();
         uint256[6] memory words;
         for (uint256 i; i < words.length; ++i) {
@@ -1601,11 +1602,11 @@ contract CATValidatorV1_1Test is Test {
 
     function test_base_force_fed_wei_bricks_non_payable_executor() external {
         NonPayableExecutor exec = new NonPayableExecutor();
-        _fund(address(hf));
-        vm.deal(address(hf), 1);
+        _fund(address(base));
+        vm.deal(address(base), 1);
         vm.prank(executor);
         vm.expectRevert(bytes(""));
-        hf.entry(
+        base.entry(
             address(exec),
             abi.encodeCall(NonPayableExecutor.executeAndSweep, (address(token), makeAddr("bridgeSink"))),
             address(this),
@@ -1616,7 +1617,7 @@ contract CATValidatorV1_1Test is Test {
         );
     }
 
-    // ---- hold-and-forward ----
+    // ---- entry id ----
 
     function test_entryId_zero_outside_and_monotonic_inside() external {
         assertEq(v11.entryId(), 0, "before");
@@ -1664,6 +1665,8 @@ contract CATValidatorV1_1Test is Test {
         assertEq(idProbe.ids(1), 2, "its id was never taken");
     }
 
+    // ---- held outcomes ----
+
     function test_outcomes_are_held_then_forwarded_in_full() external {
         Deliverer deliverer = new Deliverer();
         MockERC20 out = new MockERC20("OUT", "OUT", 6);
@@ -1680,7 +1683,7 @@ contract CATValidatorV1_1Test is Test {
         assertEq(out.balanceOf(address(v11)), 0, "nothing stays held");
     }
 
-    function test_outcome_under_delivery_reverts() external {
+    function test_revert_outcome_under_delivery() external {
         Deliverer deliverer = new Deliverer();
         MockERC20 out = new MockERC20("OUT", "OUT", 6);
         out.mint(address(deliverer), 99e6);
@@ -1712,7 +1715,9 @@ contract CATValidatorV1_1Test is Test {
         assertEq(zt.balanceOf(refund), 0);
     }
 
-    function test_signature_under_domain_1_is_rejected() external {
+    // ---- domain ----
+
+    function test_revert_signature_under_domain_1() external {
         (address signer, uint256 key) = makeAddrAndKey("domainSigner");
         AllowanceSpend[] memory a = _spend(address(token), DEPOSIT, DEPOSIT);
         token.mint(signer, DEPOSIT);
@@ -1752,32 +1757,34 @@ contract CATValidatorV1_1Test is Test {
 
     // ---- gas ----
 
-    uint256 constant HF_GAS_DELTA = 2005;
+    uint256 constant BASE_GAS_DELTA = 2005;
 
-    function test_gas_entry_delta_hf_to_v1_1() external {
-        MockERC20 tHf = new MockERC20("H", "H", 6);
+    function test_gas_entry_delta_base_to_v1_1() external {
+        MockERC20 tBase = new MockERC20("H", "H", 6);
         MockERC20 t11 = new MockERC20("B", "B", 6);
-        tHf.mint(address(this), DEPOSIT);
-        tHf.approve(address(hf), type(uint256).max);
+        tBase.mint(address(this), DEPOSIT);
+        tBase.approve(address(base), type(uint256).max);
         t11.mint(address(this), DEPOSIT);
         t11.approve(address(v11), type(uint256).max);
-        AllowanceSpend[] memory aHf = _spend(address(tHf), DEPOSIT, DEPOSIT);
+        AllowanceSpend[] memory aBase = _spend(address(tBase), DEPOSIT, DEPOSIT);
         AllowanceSpend[] memory a11 = _spend(address(t11), DEPOSIT, DEPOSIT);
         Outcome[] memory o = _noOut();
         GasMeter meter = new GasMeter();
 
-        uint256 gasHf = meter.measure(
-            address(hf), abi.encodeCall(CATValidator.entry, (address(probe), "", address(this), 1, aHf, o, ""))
+        uint256 gasBase = meter.measure(
+            address(base), abi.encodeCall(CATValidator.entry, (address(probe), "", address(this), 1, aBase, o, ""))
         );
         bytes memory cdV11 = abi.encodeCall(
             ICATValidatorV1_1.entry, (address(probe), "", address(this), 1, a11, o, address(0), bytes32(0), "")
         );
         uint256 gasV11 = meter.measure(address(v11), cdV11);
 
-        emit log_named_uint("hf entry gas", gasHf);
+        emit log_named_uint("base entry gas", gasBase);
         emit log_named_uint("v1.1 entry gas", gasV11);
-        emit log_named_uint("v1.1 - hf delta", gasV11 - gasHf);
-        assertLe(gasV11 - gasHf, HF_GAS_DELTA * 110 / 100, "delta within 10% of the measured v1.1 - hf frame delta");
+        emit log_named_uint("v1.1 - base delta", gasV11 - gasBase);
+        assertLe(
+            gasV11 - gasBase, BASE_GAS_DELTA * 110 / 100, "delta within 10% of the measured v1.1 - base frame delta"
+        );
         assertLt(gasV11, 100_000, "loose absolute ceiling");
 
         bytes memory cdBase = abi.encodeCall(CATValidator.entry, (address(probe), "", address(this), 1, a11, o, ""));

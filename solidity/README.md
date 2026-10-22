@@ -346,7 +346,7 @@ $ forge test
 ### Coverage
 
 ```shell
-$ forge coverage --ir-minimum --no-match-coverage "(script|test)" --no-match-test "(test_reference_is_pinned|test_gas_entry_delta_hf_to_v1_1)" [--report lcov]
+$ forge coverage --ir-minimum --no-match-coverage "(script|test)" --no-match-test "(test_reference_is_pinned|test_gas_entry_delta_base_to_v1_1)" [--report lcov]
 ```
 
 ### Deploy
@@ -357,7 +357,7 @@ To deploy the script, provide RPC urls in `.env` in the format of: `RPC_URL_<nam
 $ forge script deploy --sig "run(string[])" "[<chains>]" --multi --verify --broadcast
 ```
 
-`CATValidatorV1_1` is deployed on its own with `deployV1_1`. It needs transient storage (EIP-1153) on the target chain.
+`CATValidatorV1_1` is deployed on its own with `deployV1_1`. It needs transient storage (EIP-1153) on the target chain; the script does not check for it, and on a chain without it the broadcast deployment reverts.
 
 ```shell
 $ forge script deployV1_1 --sig "run(string[])" "[<chains>]" --multi --verify --broadcast

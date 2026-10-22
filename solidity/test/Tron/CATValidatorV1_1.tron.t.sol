@@ -37,7 +37,7 @@ contract TypehashHelperTron {
 }
 
 /// @dev Outcome token that only the validator can forward: `transfer` reverts, so a payout works only through
-/// `allowance(validator, validator)` and `transferFrom`, the way the ledger's receipt is paid on Tron.
+/// `allowance(validator, validator)` and `transferFrom`.
 contract ForwardOnlyToken {
     address public immutable VALIDATOR;
     uint256 public held;
@@ -218,14 +218,15 @@ contract CATValidatorV1_1TronTest is Test {
         );
     }
 
-    function _deployEscrow(
+    function _deployAccount(
         address ownerAddr,
         bytes32 digest
-    ) internal returns (address payable escrow) {
+    ) internal returns (address payable account) {
         bytes32[] memory ownerArr = new bytes32[](1);
         ownerArr[0] = bytes32(uint256(uint160(ownerAddr)));
         bytes32 salt = bytes32(uint256(uint160(ownerAddr)) << 96);
-        escrow = factory.deployWithDigest(KeyedOwnable.PublicKeyType.ECDSAOrSmartContract, ownerArr, salt, digest, true);
+        account =
+            factory.deployWithDigest(KeyedOwnable.PublicKeyType.ECDSAOrSmartContract, ownerArr, salt, digest, true);
     }
 
     function _assertValidatorClean(
@@ -274,7 +275,7 @@ contract CATValidatorV1_1TronTest is Test {
             ""
         );
 
-        assertEq(usdt.balanceOf(address(this)), 0, "escrow debited");
+        assertEq(usdt.balanceOf(address(this)), 0, "signer debited");
         assertEq(exec.seenPulled(address(usdt)), spend, "published pulled");
         assertEq(exec.seenBalance(address(usdt)), spend, "balance moved == pulled");
         _assertValidatorClean(address(usdt), _two(address(exec), address(v11)));
@@ -361,7 +362,7 @@ contract CATValidatorV1_1TronTest is Test {
     }
 
     /// @dev The validator pays a token whose `transfer` reverts through `allowance(self, self)` and `transferFrom`
-    /// alone, never `approve`; the ledger's receipt relies on it.
+    /// alone, never `approve`.
     function test_outcome_forwarded_through_transferFrom_only() external {
         ForwardOnlyToken receipt = new ForwardOnlyToken(address(v11));
         address commit = makeAddr("commit");
@@ -400,7 +401,7 @@ contract CATValidatorV1_1TronTest is Test {
         );
     }
 
-    function test_outcome_tronUsdt_short_reverts_InvalidTokenAmount() external {
+    function test_revert_outcome_tronUsdt_short() external {
         address dest = makeAddr("dest");
         _fundSelf(address(std), DEPOSIT);
         usdt.mint(address(exec), DEPOSIT);
@@ -475,7 +476,7 @@ contract CATValidatorV1_1TronTest is Test {
     }
 
     /// @dev The quirk sits in whichever contract calls `transfer()`: an executor on Solady's `safeTransfer` reverts.
-    function test_executor_on_solady_safeTransfer_reverts_on_tronUsdt() external {
+    function test_revert_executor_on_solady_safeTransfer_with_tronUsdt() external {
         address dest = makeAddr("dest");
         _fundSelf(address(std), DEPOSIT);
         usdt.mint(address(exec), DEPOSIT);
@@ -548,9 +549,9 @@ contract CATValidatorV1_1TronTest is Test {
         _assertValidatorClean(address(std), _two(address(exec), dest));
     }
 
-    // ---- refund path: nonce-0 sweep from a real escrow ----
+    // ---- refund path: nonce-0 sweep from a real account ----
 
-    function test_refund_nonce0_sweep_tronUsdt_real_escrow() external {
+    function test_refund_nonce0_sweep_tronUsdt_real_account() external {
         (address ownerAddr,) = makeAddrAndKey("tronRefundDepositor");
         address refund = makeAddr("tronRefund");
         address sink = makeAddr("sink");
@@ -560,51 +561,51 @@ contract CATValidatorV1_1TronTest is Test {
         AllowanceSpend[] memory refA = _spend(address(usdt), type(uint256).max, SPEND_MAGIC);
         Outcome[] memory refO = _out(address(usdt), 0, refund);
 
-        address payable escrow = _deployEscrow(ownerAddr, _v11Digest(execA, execO, 1, address(0), 0));
+        address payable account = _deployAccount(ownerAddr, _v11Digest(execA, execO, 1, address(0), 0));
         bytes32 refundDigest = _v11Digest(refA, refO, 0, refund, EMPTY_HASH);
         vm.prank(ownerAddr);
-        Catapultar(escrow).setSignature(refundDigest, Catapultar.DigestApproval.Signature);
-        vm.prank(escrow);
+        Catapultar(account).setSignature(refundDigest, Catapultar.DigestApproval.Signature);
+        vm.prank(account);
         usdt.approve(address(v11), type(uint256).max);
-        usdt.mint(escrow, DEPOSIT + RESIDUE);
+        usdt.mint(account, DEPOSIT + RESIDUE);
 
         vm.startPrank(executor);
-        v11.entry(sink, "", escrow, 1, execA, execO, address(0), 0, "");
+        v11.entry(sink, "", account, 1, execA, execO, address(0), 0, "");
         assertEq(usdt.balanceOf(sink), DEPOSIT);
 
-        v11.entry(refund, "", escrow, 0, refA, refO, refund, EMPTY_HASH, "");
+        v11.entry(refund, "", account, 0, refA, refO, refund, EMPTY_HASH, "");
         assertEq(usdt.balanceOf(refund), RESIDUE, "residue swept");
 
-        usdt.mint(escrow, 123e6);
-        v11.entry(refund, "", escrow, 0, refA, refO, refund, EMPTY_HASH, "");
+        usdt.mint(account, 123e6);
+        v11.entry(refund, "", account, 0, refA, refO, refund, EMPTY_HASH, "");
         assertEq(usdt.balanceOf(refund), RESIDUE + 123e6, "late deposit swept");
 
-        v11.entry(refund, "", escrow, 0, refA, refO, refund, EMPTY_HASH, "");
+        v11.entry(refund, "", account, 0, refA, refO, refund, EMPTY_HASH, "");
         vm.stopPrank();
         assertEq(usdt.balanceOf(refund), RESIDUE + 123e6, "empty sweep is a no-op");
-        assertEq(usdt.balanceOf(escrow), 0);
-        _assertValidatorClean(address(usdt), _three(sink, refund, escrow));
+        assertEq(usdt.balanceOf(account), 0);
+        _assertValidatorClean(address(usdt), _three(sink, refund, account));
     }
 
     function test_zero_refund_address_fails_closed_on_tron() external {
         (address ownerAddr,) = makeAddrAndKey("tronZeroRefundDepositor");
         AllowanceSpend[] memory refA = _spend(address(usdt), type(uint256).max, SPEND_MAGIC);
         Outcome[] memory refO = _out(address(usdt), 0, address(0));
-        address payable escrow = _deployEscrow(
+        address payable account = _deployAccount(
             ownerAddr, _v11Digest(_spend(address(usdt), DEPOSIT, DEPOSIT), new Outcome[](0), 1, address(0), 0)
         );
         bytes32 refundDigest = _v11Digest(refA, refO, 0, address(0), keccak256(""));
         vm.prank(ownerAddr);
-        Catapultar(escrow).setSignature(refundDigest, Catapultar.DigestApproval.Signature);
-        vm.prank(escrow);
+        Catapultar(account).setSignature(refundDigest, Catapultar.DigestApproval.Signature);
+        vm.prank(account);
         usdt.approve(address(v11), type(uint256).max);
-        usdt.mint(escrow, DEPOSIT);
+        usdt.mint(account, DEPOSIT);
 
         address attacker = makeAddr("attacker");
         vm.prank(executor);
         vm.expectRevert(CATValidatorV1_1.ZeroDestination.selector);
-        v11.entry(attacker, "", escrow, 0, refA, refO, address(0), keccak256(""), "");
-        assertEq(usdt.balanceOf(escrow), DEPOSIT);
+        v11.entry(attacker, "", account, 0, refA, refO, address(0), keccak256(""), "");
+        assertEq(usdt.balanceOf(account), DEPOSIT);
     }
 
     function _three(

@@ -10,7 +10,7 @@ import { AllowanceSpend } from "../src/libs/LibExecutionConstraint.sol";
 import { CallbackERC20, ReceiptProbe } from "./CATValidatorV1_1.t.sol";
 
 /// @dev Exposes the base's allowance loop.
-contract HFLoop is CATValidator {
+contract BaseLoop is CATValidator {
     function run(
         address destination,
         address source,
@@ -149,7 +149,7 @@ contract CATValidatorV1_1AllowanceParityTest is Test {
         uint256[] destinationBalances;
     }
 
-    HFLoop hf;
+    BaseLoop base;
     V11Loop v11;
     PullLog pullLog;
     address[] erc20s;
@@ -158,7 +158,7 @@ contract CATValidatorV1_1AllowanceParityTest is Test {
     address destination = makeAddr("destination");
 
     function setUp() external {
-        hf = new HFLoop();
+        base = new BaseLoop();
         v11 = new V11Loop();
         pullLog = new PullLog();
         erc20s.push(address(new LoggingToken(pullLog, 0)));
@@ -172,7 +172,7 @@ contract CATValidatorV1_1AllowanceParityTest is Test {
             MockERC20 token = MockERC20(erc20s[i]);
             token.mint(source, SUPPLY);
             vm.startPrank(source);
-            token.approve(address(hf), type(uint256).max);
+            token.approve(address(base), type(uint256).max);
             token.approve(address(v11), type(uint256).max);
             vm.stopPrank();
         }
@@ -220,11 +220,11 @@ contract CATValidatorV1_1AllowanceParityTest is Test {
         vm.revertToState(snapshot);
     }
 
-    function testFuzz_loopMatchesTheBase(
+    function test_fuzz_loop_matches_the_base(
         bytes32 seed
     ) external {
         AllowanceSpend[] memory alls = allowancesFrom(seed);
-        (Observation memory a,) = observe(address(hf), abi.encodeCall(HFLoop.run, (destination, source, alls)));
+        (Observation memory a,) = observe(address(base), abi.encodeCall(BaseLoop.run, (destination, source, alls)));
         (Observation memory b, bytes memory ret) =
             observe(address(v11), abi.encodeCall(V11Loop.run, (destination, source, alls, tokens)));
 
@@ -256,7 +256,7 @@ contract CATValidatorV1_1AllowanceParityTest is Test {
     }
 
     /// A MAGIC spend of a token without a readable `balanceOf` fails closed on both loops (audit 6.2.1).
-    function test_brokenBalanceOfFailsClosedOnBothLoops() external {
+    function test_revert_broken_balanceOf_on_both_loops() external {
         address broken = tokens[2];
         AllowanceSpend[] memory alls = new AllowanceSpend[](1);
         alls[0] = AllowanceSpend({ token: broken, allocated: type(uint256).max, spend: MAGIC });
@@ -264,7 +264,7 @@ contract CATValidatorV1_1AllowanceParityTest is Test {
         list[0] = broken;
 
         vm.expectRevert(abi.encodeWithSelector(CATValidator.BalanceOfFailed.selector, broken));
-        hf.run(destination, source, alls);
+        base.run(destination, source, alls);
         vm.expectRevert(abi.encodeWithSelector(CATValidator.BalanceOfFailed.selector, broken));
         v11.run(destination, source, alls, list);
     }
@@ -290,13 +290,13 @@ contract CATValidatorV1_1AllowanceParityTest is Test {
 
         assertEq(hook.count(), 3, "one hook call per transfer");
         for (uint256 i; i < hook.count(); ++i) {
-            assertEq(hook.at(i), 0, "hook reads zero");
+            assertEq(hook.seenAt(i), 0, "hook reads zero");
         }
         assertEq(published[0], 60, "published after the last transfer");
     }
 
     /// A second MAGIC spend of a lossy token publishes the fresh balance, 1000 - 100 + 1 = 901, not 900.
-    function test_magicAfterLossyPullPublishesTheFreshBalance() external {
+    function test_magic_after_lossy_pull_publishes_the_fresh_balance() external {
         AllowanceSpend[] memory alls = new AllowanceSpend[](2);
         alls[0] = AllowanceSpend({ token: erc20s[1], allocated: type(uint256).max, spend: 100 ether });
         alls[1] = AllowanceSpend({ token: erc20s[1], allocated: type(uint256).max, spend: MAGIC });

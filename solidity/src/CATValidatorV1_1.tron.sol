@@ -7,7 +7,7 @@ import { CATValidatorV1_1 } from "./CATValidatorV1_1.sol";
 import { SafeTransferLibTron } from "./libs/SafeTransferLib.tron.sol";
 
 /// @title Constrained Asset Transaction Validator v1.1 (Tron)
-/// @author Alexander @ LIFI (https://li.fi)
+/// @author LIFI (https://li.fi)
 /// @notice Tron variant of CATValidatorV1_1. Pays outcomes through approve(self) + transferFrom(self) to bypass broken
 /// transfer() return values (Tron USDT).
 contract CATValidatorV1_1Tron is CATValidatorV1_1 {

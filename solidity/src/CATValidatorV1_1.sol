@@ -11,16 +11,15 @@ import { LibExecutionConstraintV1_1 } from "./libs/LibExecutionConstraintV1_1.so
 
 /**
  * @title Constrained Asset Transaction Validator v1.1 – C.A.T Validator V1.1
- * @author Alexander @ LIFI (https://li.fi)
+ * @author LIFI (https://li.fi)
  * @custom:version 1.1.0
- * @notice The hold-and-forward CATValidator plus `pulled(token)`, `entryId()` and a committed `executionTarget` /
- * `payloadHash`, where zero means unconstrained. See CATValidator for the validation model, the call proxy and the
- * nonce rules.
+ * @notice CATValidator plus `pulled(token)`, `entryId()` and a committed `executionTarget` / `payloadHash`, where zero
+ * means unconstrained. See CATValidator for the validation model, the call proxy and the nonce rules.
  *
  * `pulled` and the entry id live in transient storage (EIP-1153) only; the constructor reverts on a chain without it.
- * The inherited 7-argument `entry` stays callable with upstream v1's flow under this contract's "1.1" domain and
- * zero-skipping payout; it forwards the validator's native balance to the call as upstream does, publishes neither
- * `pulled` nor an entry id, and a v1.1 escrow never signs its digest.
+ * The inherited 7-argument `entry` stays callable with the base's flow under this contract's "1.1" domain and
+ * zero-skipping payout; it forwards the validator's native balance to the call as the base does, publishes neither
+ * `pulled` nor an entry id, and a v1.1 signer never signs its digest.
  */
 contract CATValidatorV1_1 is CATValidator {
     using DynamicArrayLib for uint256[];
@@ -29,6 +28,8 @@ contract CATValidatorV1_1 is CATValidator {
     error PayloadNotCommitted();
     error ZeroDestination();
 
+    /// @dev Arbitrary fixed seed with no derivation. The `pulled` slot of a token is `keccak256(token, PULLED_SEED)`
+    /// in transient storage; a hashed slot cannot meet the two entry-id slots, so any value is safe.
     uint256 private constant PULLED_SEED = 0x2c3fdc6a4b9e8a2f5d1e7c0b9a8f7e6d5c4b3a291807f6e5d4c3b2a1908f7e6d;
     bytes32 private constant ENTRY_COUNTER_SLOT = keccak256("com.lifi.catapultar.v1_1.entry-counter");
     bytes32 private constant ENTRY_ID_SLOT = keccak256("com.lifi.catapultar.v1_1.entry-id");
@@ -50,7 +51,7 @@ contract CATValidatorV1_1 is CATValidator {
         DOMAIN_THIS = address(this);
     }
 
-    /// @notice Amount of `token` moved out of the escrow by the `entry()` currently executing. Zero outside
+    /// @notice Amount of `token` moved out of the signer by the `entry()` currently executing. Zero outside
     /// `entry()` and inside the allowance transfers.
     function pulled(
         address token
@@ -71,9 +72,17 @@ contract CATValidatorV1_1 is CATValidator {
      * provided.
      * If a destination is address(0), it specifies the signer. If a spend is SPEND_BALANCE_OF_MAGIC the current balance
      * of the signer will be used. A spend of 0 pulls nothing.
+     * @param execTarget Target the call proxy calls with `execPayload`; receives the pulled allowances.
+     * @param execPayload Calldata for `execTarget`. Empty skips the call.
+     * @param account Signer of the constraint and source of the allowances.
+     * @param nonce Constraint nonce. A non-zero nonce is spent once; nonce 0 is reusable.
+     * @param allowances Signed token allowances and the spends to pull now.
+     * @param outcomes Minimum balances this contract must hold after the call; each held balance is forwarded to
+     * its destination.
      * @param executionTarget Committed `execTarget`. Zero means unconstrained, except on the reusable nonce 0, where
      * it reverts `ZeroDestination` (a zero refund address would otherwise let the executor sweep to any target).
      * @param payloadHash Committed `keccak256(execPayload)`. Zero means unconstrained.
+     * @param signature Signature of `account` over the v1.1 digest: ECDSA, or ERC-1271 data for a contract signer.
      */
     function entry(
         address execTarget,
@@ -245,15 +254,15 @@ contract CATValidatorV1_1 is CATValidator {
             let success := call(gas(), callProxy, 0, m, add(execPayload.length, 32), codesize(), 0x00)
 
             if iszero(success) {
-                // Free memory, not scratch: revert data can exceed 64 bytes.
+                // Revert data can exceed the 64-byte scratch space, so it is copied to free memory.
                 returndatacopy(m, 0x00, returndatasize())
                 revert(m, returndatasize())
             }
         }
     }
 
-    /// @dev The domain version is "1.1" so no v1 digest verifies here. The base fixes "1" and is not virtual, so the
-    /// separator, the digest and the EIP-5267 report are overridden through Solady's virtuals.
+    /// @dev The domain version is "1.1". The base fixes "1" and is not virtual, so the separator, the digest and the
+    /// EIP-5267 report are overridden through Solady's virtuals.
     function _domainSeparator() internal view override returns (bytes32) {
         if (block.chainid == DOMAIN_CHAIN_ID && address(this) == DOMAIN_THIS) return DOMAIN_CACHED;
         return _computeDomainSeparator();

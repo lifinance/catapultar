@@ -60,9 +60,8 @@ interface IDomainSeparator {
     function DOMAIN_SEPARATOR() external view returns (bytes32);
 }
 
-/// @dev Differential fuzz of the subclass against the standalone hold-and-forward reference. Each case runs on a state
-/// snapshot, once per instance, so both see identical tokens, balances and callers and only the validator address
-/// differs.
+/// @dev Differential fuzz of the subclass against the standalone reference. Each case runs on a state snapshot, once
+/// per instance, so both see identical tokens, balances and callers and only the validator address differs.
 contract CATValidatorV1_1EquivalenceTest is Test {
     uint256 constant CAP = 1e12;
     uint256 constant FUND = 1e13;
@@ -162,7 +161,7 @@ contract CATValidatorV1_1EquivalenceTest is Test {
 
     // ---- fuzz lanes ----
 
-    function testFuzz_equivalence_settles_identically(
+    function test_fuzz_equivalence_settles_identically(
         Spec memory s
     ) external {
         Case memory c = _settleCase(s);
@@ -171,7 +170,7 @@ contract CATValidatorV1_1EquivalenceTest is Test {
         _assertSame(a, b);
     }
 
-    function testFuzz_equivalence_reverts_identically(
+    function test_fuzz_equivalence_reverts_identically(
         Spec memory s,
         uint8 failKind
     ) external {
@@ -196,7 +195,7 @@ contract CATValidatorV1_1EquivalenceTest is Test {
         else assertEq(bytes4(a.ret), CATValidator.InvalidTokenAmount.selector);
     }
 
-    function testFuzz_equivalence_pulled_window_identical(
+    function test_fuzz_equivalence_pulled_window_identical(
         Spec memory s
     ) external {
         Case memory c = _settleCase(s);
@@ -228,7 +227,7 @@ contract CATValidatorV1_1EquivalenceTest is Test {
         }
     }
 
-    function testFuzz_equivalence_signed_identically(
+    function test_fuzz_equivalence_signed_identically(
         Spec memory s,
         uint8 sigMode
     ) external {
@@ -539,11 +538,11 @@ contract CATValidatorV1_1EquivalenceTest is Test {
     ) internal view {
         r.seen = new uint256[](probe.count());
         for (uint256 i; i < r.seen.length; ++i) {
-            r.seen[i] = probe.at(i);
+            r.seen[i] = probe.seenAt(i);
         }
         r.hookSeen = new uint256[](hookProbe.count());
         for (uint256 i; i < r.hookSeen.length; ++i) {
-            r.hookSeen[i] = hookProbe.at(i);
+            r.hookSeen[i] = hookProbe.seenAt(i);
         }
 
         r.pulledAfter = new uint256[](TOKENS);

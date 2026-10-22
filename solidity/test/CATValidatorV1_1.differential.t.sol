@@ -24,17 +24,17 @@ contract DiffTarget {
     }
 }
 
-/// @dev V1.1's 9-argument `entry` against `CATValidator.entry`, the vendored upstream base it builds on, with the
-/// same fuzzed allowances, outcomes and payload. Each side is signed under its own type string and domain and runs on
-/// one state snapshot. Everything observable must match except the deltas V1.1 adds: the value `_call` forwards, zero
-/// payouts on zero-rejecting tokens, `pulled` and `entryId`.
+/// @dev V1.1's 9-argument `entry` against `CATValidator.entry`, the base it extends, with the same fuzzed allowances,
+/// outcomes and payload. Each side is signed under its own type string and domain and runs on one state snapshot.
+/// Everything observable must match except the deltas V1.1 adds: the value `_call` forwards, zero payouts on
+/// zero-rejecting tokens, `pulled` and `entryId`.
 contract CATValidatorV1_1DifferentialTest is Test {
     uint256 constant CAP = 1e12;
     uint256 constant FUND = 1e13;
     uint256 constant SPEND_MAGIC = 1 << 255;
     uint256 constant TOKENS = 3;
 
-    CATValidator hf;
+    CATValidator base;
     CATValidatorV1_1 v11;
     TypehashHelper thh;
     DiffTarget target;
@@ -83,7 +83,7 @@ contract CATValidatorV1_1DifferentialTest is Test {
     }
 
     function setUp() external {
-        hf = new CATValidator();
+        base = new CATValidator();
         v11 = new CATValidatorV1_1();
         thh = new TypehashHelper();
         target = new DiffTarget();
@@ -98,18 +98,18 @@ contract CATValidatorV1_1DifferentialTest is Test {
             MockERC20(tokens[i]).mint(signer, FUND);
             MockERC20(tokens[i]).mint(address(target), FUND);
             vm.startPrank(signer);
-            MockERC20(tokens[i]).approve(address(hf), type(uint256).max);
+            MockERC20(tokens[i]).approve(address(base), type(uint256).max);
             MockERC20(tokens[i]).approve(address(v11), type(uint256).max);
             vm.stopPrank();
         }
         zt.mint(signer, FUND);
         vm.startPrank(signer);
-        zt.approve(address(hf), type(uint256).max);
+        zt.approve(address(base), type(uint256).max);
         zt.approve(address(v11), type(uint256).max);
         vm.stopPrank();
     }
 
-    function testFuzz_differential_same_outcome_as_the_base(
+    function test_fuzz_differential_same_outcome_as_the_base(
         Spec memory s
     ) external {
         Case memory c = _case(s);
@@ -117,7 +117,7 @@ contract CATValidatorV1_1DifferentialTest is Test {
         _assertSame(a, b);
     }
 
-    function testFuzz_differential_settled_entries_move_the_same_funds(
+    function test_fuzz_differential_settled_entries_move_the_same_funds(
         Spec memory s
     ) external {
         Case memory c = _case(s);
@@ -135,11 +135,11 @@ contract CATValidatorV1_1DifferentialTest is Test {
     /// @dev Delta 1: the base forwards its whole native balance to the call, which a non-payable target refuses;
     ///      V1.1 forwards none.
     function test_differential_call_value_is_forwarded_by_the_base_only() external {
-        vm.deal(address(hf), 1 wei);
+        vm.deal(address(base), 1 wei);
         vm.deal(address(v11), 1 wei);
         Case memory c = _plain(1);
         c.withPayload = true;
-        Result memory a = _run(address(hf), false, c);
+        Result memory a = _run(address(base), false, c);
         Result memory b = _run(address(v11), true, c);
         assertFalse(a.ok, "the base forwarded value to a non-payable target");
         assertTrue(b.ok, "V1.1 forwards no value");
@@ -150,7 +150,7 @@ contract CATValidatorV1_1DifferentialTest is Test {
         Case memory c = _plain(1);
         c.outcomes = new Outcome[](1);
         c.outcomes[0] = Outcome({ token: address(zt), amount: 0, destination: sink });
-        Result memory a = _run(address(hf), false, c);
+        Result memory a = _run(address(base), false, c);
         Result memory b = _run(address(v11), true, c);
         assertFalse(a.ok, "the base pays zero");
         assertEq(bytes4(a.ret), SafeTransferLib.TransferFailed.selector);
@@ -180,7 +180,7 @@ contract CATValidatorV1_1DifferentialTest is Test {
         Case memory c
     ) internal returns (Result memory a, Result memory b) {
         uint256 snap = vm.snapshotState();
-        a = _run(address(hf), false, c);
+        a = _run(address(base), false, c);
         vm.revertToState(snap);
         b = _run(address(v11), true, c);
     }

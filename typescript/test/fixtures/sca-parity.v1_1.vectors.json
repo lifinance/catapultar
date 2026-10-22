@@ -1,5 +1,5 @@
 {
-  "schema": "c2-sca-parity-v1_1/v1",
+  "schema": "sca-parity-v1_1/v1",
   "domain": {
     "name": "CAT Validator",
     "version": "1.1",
@@ -44,11 +44,11 @@
         "refundStructHash": "0x998d9f1ef5b8e308a8c4d818728ecfa65470c6f5a7d14a8202b692fbfc283298",
         "refundDigest": "0x3a582275b87457292e5f97153394bd9ae7fecee3a3d2e2dc2df0751b4eef537d",
         "saltWithDigest": "0x6ee734bc6fe7d26bdf869cad4a12cfac2bbc3382f44e8959c8dbca9aded57ad0",
-        "escrow": "0x61A4c91241841Bf7D46ec5f71d8dBA93739Ece61"
+        "account": "0x61A4c91241841Bf7D46ec5f71d8dBA93739Ece61"
       }
     },
     {
-      "name": "ledger-outcome",
+      "name": "receipt-outcome",
       "saltFlavor": "signature",
       "flavorNonce": 2,
       "salt": "0x00000000000000000000000000000000ca7a00aa000000000000000000000001",
@@ -80,7 +80,7 @@
         "refundStructHash": "0x998d9f1ef5b8e308a8c4d818728ecfa65470c6f5a7d14a8202b692fbfc283298",
         "refundDigest": "0x3a582275b87457292e5f97153394bd9ae7fecee3a3d2e2dc2df0751b4eef537d",
         "saltWithDigest": "0x48802a02a3ee075b07c221cdb963eb6cd5ae771998996dbbb4853bee934d2ebc",
-        "escrow": "0xA62d106B73BcEDBc81f0F261552d6785731dA1C1"
+        "account": "0xA62d106B73BcEDBc81f0F261552d6785731dA1C1"
       }
     },
     {
@@ -120,7 +120,7 @@
         "refundStructHash": "0x3ebf69e513f0deeb0b07b7883818462e490117412a80ea53462a0ff5f1d53a3c",
         "refundDigest": "0x62aba4f72743c2864a8851e0c17be8c92e9ce6aa7073ca95d24d5a8568403238",
         "saltWithDigest": "0xfe4c32c3f6ee066e5c96b4782392061dfae0211aac9bd9f88501d38fdcc743bd",
-        "escrow": "0x9bA86f6BB66fA01D52dA194110c68d223157D38b"
+        "account": "0x9bA86f6BB66fA01D52dA194110c68d223157D38b"
       }
     }
   ]

@@ -13,7 +13,7 @@ import { LibExecutionConstraintV1_1 } from "../../src/libs/LibExecutionConstrain
 
 /**
  * @title Constrained Asset Transaction Validator v1.1 – C.A.T Validator V1.1
- * @author Alexander @ LIFI (https://li.fi)
+ * @author LIFI (https://li.fi)
  * @custom:version 1.1.0
  * @notice Validation of a pre-approved asset allowance to execute a transaction that should result in a specific asset
  * outcome.
@@ -36,8 +36,8 @@ import { LibExecutionConstraintV1_1 } from "../../src/libs/LibExecutionConstrain
  * unconstrained. `pulled` and the entry id live in transient storage (EIP-1153) only; the constructor reverts on a
  * chain without it.
  *
- * Test-only reference: a standalone hold-and-forward v1.1 written from the same specification as CATValidatorV1_1,
- * which the equivalence suite fuzzes the subclass against.
+ * Test-only reference: a standalone v1.1 written from the same specification as CATValidatorV1_1, which the
+ * equivalence suite fuzzes the subclass against.
  */
 contract CATValidatorV1_1Standalone is EIP712, ReentrancyGuard {
     using DynamicArrayLib for uint256[];
@@ -77,7 +77,7 @@ contract CATValidatorV1_1Standalone is EIP712, ReentrancyGuard {
         return _domainSeparator();
     }
 
-    /// @notice Amount of `token` moved out of the escrow by the `entry()` currently executing. Zero outside
+    /// @notice Amount of `token` moved out of the signer by the `entry()` currently executing. Zero outside
     /// `entry()` and inside the allowance transfers.
     function pulled(
         address token

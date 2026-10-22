@@ -58,7 +58,7 @@ jobs:
         # The two excluded tests assert the optimized build's creation hash and gas.
         run: >
           forge coverage --ir-minimum --no-match-coverage "(script|test)"
-          --no-match-test "(test_reference_is_pinned|test_gas_entry_delta_hf_to_v1_1)" --report lcov
+          --no-match-test "(test_reference_is_pinned|test_gas_entry_delta_base_to_v1_1)" --report lcov
         id: coverage
         working-directory: solidity
 
