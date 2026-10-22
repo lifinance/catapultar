@@ -325,6 +325,10 @@ Since `CATValidator` relies on standing approvals, it is unsafe to execute arbit
 
 The signed `Outcome`s are validated after the external call: the executor must deliver each `Outcome.token` to `CATValidator` during execution, and the transaction reverts if the validator's balance of a token is less than `Outcome.amount`. The full held balance — including any surplus — is then forwarded to `Outcome.destination` (or the signer if the destination is `address(0)`). Note that fee-on-transfer tokens are charged on both legs: the balance check sees the amount net of the inbound fee, and the outbound forwarding incurs a further fee, so the destination may receive less than `Outcome.amount`.
 
+### CATValidatorV1_1
+
+[`CATValidatorV1_1`](./src/CATValidatorV1_1.sol) extends `CATValidator` without modifying it. Its nine-argument `entry` signs an `executionTarget` and a `payloadHash` into the constraint (zero means unconstrained) and publishes `pulled(token)`, the amount the running entry moved out of the signer, and `entryId()` for contracts called during the entry. Its EIP-712 domain version is `"1.1"`, so a v1 signature never verifies on it. `CATValidatorV1_1Tron` is the Tron variant. See [design/cat-validator-v1_1.md](./design/cat-validator-v1_1.md).
+
 ## Development
 
 ### Build
@@ -342,7 +346,7 @@ $ forge test
 ### Coverage
 
 ```shell
-$ forge coverage --no-match-coverage "(script|test)" [--report lcov]
+$ forge coverage --ir-minimum --no-match-coverage "(script|test)" --no-match-test "(test_reference_is_pinned|test_gas_entry_delta_base_to_v1_1)" [--report lcov]
 ```
 
 ### Deploy
@@ -351,6 +355,12 @@ To deploy the script, provide RPC urls in `.env` in the format of: `RPC_URL_<nam
 
 ```shell
 $ forge script deploy --sig "run(string[])" "[<chains>]" --multi --verify --broadcast
+```
+
+`CATValidatorV1_1` is deployed on its own with `deployV1_1`. It needs transient storage (EIP-1153) on the target chain; the script does not check for it, and on a chain without it the broadcast deployment reverts.
+
+```shell
+$ forge script deployV1_1 --sig "run(string[])" "[<chains>]" --multi --verify --broadcast
 ```
 
 ## License Notice

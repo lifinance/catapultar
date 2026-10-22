@@ -20,7 +20,8 @@
  *   --step CATValidatorTron
  *   --step IntentExecutorTron
  *   --step McopyTestTron   (not deployed by default)
- *   --step 1   (same as CatapultarFactoryTron; 2 = CATValidatorTron, 3 = IntentExecutorTron, 4 = McopyTestTron)
+ *   --step CATValidatorV1_1Tron   (not deployed by default)
+ *   --step 1   (same as CatapultarFactoryTron; 2 = CATValidatorTron, 3 = IntentExecutorTron, 4 = McopyTestTron, 5 = CATValidatorV1_1Tron)
  *   Repeat --step to deploy a subset, e.g. --step 1 --step 3
  */
 
@@ -59,7 +60,7 @@ const DEFAULT_CONTRACTS = [
 ] as const
 
 /** Opt-in contracts — only deployed when explicitly requested via --step. */
-const OPTIONAL_CONTRACTS = ['McopyTestTron'] as const
+const OPTIONAL_CONTRACTS = ['McopyTestTron', 'CATValidatorV1_1Tron'] as const
 
 /** Every contract selectable via --step. Must end in "Tron"; the source file is the name minus that suffix + ".tron.sol". */
 const ALL_CONTRACTS = [...DEFAULT_CONTRACTS, ...OPTIONAL_CONTRACTS] as const

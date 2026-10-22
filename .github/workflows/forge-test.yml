@@ -25,7 +25,7 @@ jobs:
           submodules: recursive
 
       - name: Install Foundry
-        uses: foundry-rs/foundry-toolchain@8789b3e21e6c11b2697f5eb56eddae542f746c10 # v1.7.0
+        uses: foundry-rs/foundry-toolchain@dba66c27052e63476d886f22216e119ba7e615bf # v1.9.2
 
       - name: Show Forge version
         run: forge --version
@@ -40,13 +40,23 @@ jobs:
         id: build
         working-directory: solidity
 
+      - name: Check V1.1 bytecode is unchanged
+        run: ./script/check-v1-1-bytecode.sh
+        id: bytecode-v1-1
+        working-directory: solidity
+
       - name: Run Forge tests
         run: forge test -vvv
         id: test
         working-directory: solidity
 
       - name: Run Forge coverage
-        run: forge coverage --no-match-coverage "(script|test)" --report lcov
+        # --ir-minimum: CATValidatorV1_1 does not compile under the legacy
+        # (non-IR) pipeline coverage otherwise uses, because of stack depth.
+        # The two excluded tests assert the optimized build's creation hash and gas.
+        run: >
+          forge coverage --ir-minimum --no-match-coverage "(script|test)"
+          --no-match-test "(test_reference_is_pinned|test_gas_entry_delta_base_to_v1_1)" --report lcov
         id: coverage
         working-directory: solidity
 
