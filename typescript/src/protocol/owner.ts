@@ -79,13 +79,11 @@ export function keyTypeLength(type: OwnerType): number {
  */
 function ecdsaAddressToWord(address: `0x${string}`): `0x${string}` {
   const raw = address.replace("0x", "");
-  if (
-    !(
-      raw.length === 20 * 2 ||
-      (raw.length === 32 * 2 &&
-        raw.slice(0, 12 * 2) === "000000000000000000000000")
-    )
-  )
+  if (!(
+    raw.length === 20 * 2 ||
+    (raw.length === 32 * 2 &&
+      raw.slice(0, 12 * 2) === "000000000000000000000000")
+  ))
     throw new Error(`Owner address incorrectly formatted: ${address}`);
   // Mirror KeyedOwnable._isValidKey (case 0): the lower 20 bytes must be non-zero.
   // The zero address is only valid via the dedicated resignation path, never here.
