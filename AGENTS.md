@@ -19,6 +19,7 @@ Keep changes scoped to the relevant package; avoid editing generated artifacts (
   - `bun run build`: compile library to `dist/`.
   - `bun run test`: run Bun tests with preload setup.
   - `bun run coverage:lcov`: generate LCOV coverage for CI/codecov.
+  - `bun run format` / `bun run format:check`: format or check with `bun fmt` (Prettier-compatible defaults).
 - Solidity package (`cd solidity`):
   - `forge fmt --check`: verify Solidity formatting.
   - `forge build --sizes`: compile contracts and report sizes.
@@ -27,12 +28,12 @@ Keep changes scoped to the relevant package; avoid editing generated artifacts (
 
 ## Coding Style & Naming Conventions
 - Solidity: use `forge fmt` defaults configured in `solidity/foundry.toml` (`tab_width = 4`, sorted imports).
-- TypeScript: strict compiler settings are enabled (`strict`, `noUnusedLocals`, `noUnusedParameters`).
+- TypeScript: strict compiler settings are enabled (`strict`, `noUnusedLocals`, `noUnusedParameters`); formatted with `bun fmt`.
 - Naming:
   - Types/classes: `PascalCase`
   - Functions/variables: `camelCase`
   - Test files: `*.spec.ts` (TS), `*.t.sol` (Solidity)
-- Run formatting before commits (`typescript/.husky/pre-commit` runs `lint-staged`, build, and tests).
+- Run formatting before commits (`typescript/.husky/pre-commit` runs `bun fmt --staged`, build, and tests).
 
 ## Testing Guidelines
 - Add tests for all behavior changes in the same package as the change.

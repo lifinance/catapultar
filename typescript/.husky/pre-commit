@@ -1,6 +1,6 @@
 #!/bin/sh
 set -e
 cd typescript
-bunx lint-staged
+bun fmt --no-script --staged
 bun run build
 bun run test
