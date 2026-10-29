@@ -8,6 +8,9 @@ optimizer = true
 optimizer_runs = 100_000_000
 bytecode_hash = 'none'
 
+# Read by the sca-parity test; VC_REGEN_SCA_FIXTURE=true rewrites it.
+fs_permissions = [{ access = "read-write", path = "test/vc/fixtures/sca-parity" }]
+
 [profile.tron]
 src = "src"
 out = "out"

@@ -1,0 +1,127 @@
+{
+  "schema": "sca-parity-v1_1/v1",
+  "domain": {
+    "name": "CAT Validator",
+    "version": "1.1",
+    "chainId": 1,
+    "verifyingContract": "0x00000000000000000000000000000000ca7a0011"
+  },
+  "clone": {
+    "factory": "0x00000000000000000000000000000000Fac70127",
+    "executorImpl": "0x00000000000000000000000000000000Ca7A0001"
+  },
+  "executor": "0x00000000000000000000000000000000ca7A0003",
+  "refundAddress": "0x00000000000000000000000000000000Ca7A00Bb",
+  "vectors": [
+    {
+      "name": "empty-outcomes",
+      "saltFlavor": "call",
+      "flavorNonce": 1,
+      "salt": "0x00000000000000000000000000000000ca7a00aa000000000000000000000001",
+      "execute": {
+        "nonce": "1",
+        "executionTarget": "0x0000000000000000000000000000000000000000",
+        "payloadHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+        "allowances": [
+          { "token": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", "amount": "1000000000" }
+        ],
+        "outcomes": []
+      },
+      "refund": {
+        "nonce": "0",
+        "executionTarget": "0x00000000000000000000000000000000Ca7A00Bb",
+        "payloadHash": "0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470",
+        "allowances": [
+          { "token": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", "amount": "115792089237316195423570985008687907853269984665640564039457584007913129639935" }
+        ],
+        "outcomes": [
+          { "token": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", "amount": "0", "destination": "0x00000000000000000000000000000000Ca7A00Bb" }
+        ]
+      },
+      "expected": {
+        "executeStructHash": "0xda751442bfc7d571c33ac8c2d8392722a9f9a40f402f16370779d1601d5dc27e",
+        "executeDigest": "0x8aa66ffcdaf845e4429028bb68ae85d2e034e97912aebbcda03ef3c63d8a3d66",
+        "refundStructHash": "0x998d9f1ef5b8e308a8c4d818728ecfa65470c6f5a7d14a8202b692fbfc283298",
+        "refundDigest": "0x3a582275b87457292e5f97153394bd9ae7fecee3a3d2e2dc2df0751b4eef537d",
+        "saltWithDigest": "0x6ee734bc6fe7d26bdf869cad4a12cfac2bbc3382f44e8959c8dbca9aded57ad0",
+        "account": "0x61A4c91241841Bf7D46ec5f71d8dBA93739Ece61"
+      }
+    },
+    {
+      "name": "receipt-outcome",
+      "saltFlavor": "signature",
+      "flavorNonce": 2,
+      "salt": "0x00000000000000000000000000000000ca7a00aa000000000000000000000001",
+      "execute": {
+        "nonce": "18953316885384679754168324741850966684085256905369181143701579439574794685250",
+        "executionTarget": "0x0000000000000000000000000000000000000000",
+        "payloadHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+        "allowances": [
+          { "token": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", "amount": "1000000000" }
+        ],
+        "outcomes": [
+          { "token": "0x00000000000000000000000000000000cA7A0004", "amount": "1", "destination": "0xCC0b3e681fF087DEaA56CE4F3fB9B2AD0e13568a" }
+        ]
+      },
+      "refund": {
+        "nonce": "0",
+        "executionTarget": "0x00000000000000000000000000000000Ca7A00Bb",
+        "payloadHash": "0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470",
+        "allowances": [
+          { "token": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", "amount": "115792089237316195423570985008687907853269984665640564039457584007913129639935" }
+        ],
+        "outcomes": [
+          { "token": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", "amount": "0", "destination": "0x00000000000000000000000000000000Ca7A00Bb" }
+        ]
+      },
+      "expected": {
+        "executeStructHash": "0x8802426e714392f99e754381f1ad731c0ad008d499fd9f45acad39c9217e3907",
+        "executeDigest": "0x34e29c50090d7a2b890f54acb023d1a57782fa866330a582a3abc015523a6b1f",
+        "refundStructHash": "0x998d9f1ef5b8e308a8c4d818728ecfa65470c6f5a7d14a8202b692fbfc283298",
+        "refundDigest": "0x3a582275b87457292e5f97153394bd9ae7fecee3a3d2e2dc2df0751b4eef537d",
+        "saltWithDigest": "0x48802a02a3ee075b07c221cdb963eb6cd5ae771998996dbbb4853bee934d2ebc",
+        "account": "0xA62d106B73BcEDBc81f0F261552d6785731dA1C1"
+      }
+    },
+    {
+      "name": "two-allowances",
+      "saltFlavor": "signature",
+      "flavorNonce": 2,
+      "salt": "0x00000000000000000000000000000000ca7a00aa000000000000000000000001",
+      "execute": {
+        "nonce": "1",
+        "executionTarget": "0x0000000000000000000000000000000000000000",
+        "payloadHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+        "allowances": [
+          { "token": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2", "amount": "2000000000000000000" },
+          { "token": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", "amount": "1000000000" }
+        ],
+        "outcomes": [
+          { "token": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2", "amount": "1000000000000000000", "destination": "0x1111111111111111111111111111111111111111" },
+          { "token": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", "amount": "1000000000", "destination": "0x1111111111111111111111111111111111111111" }
+        ]
+      },
+      "refund": {
+        "nonce": "0",
+        "executionTarget": "0x00000000000000000000000000000000Ca7A00Bb",
+        "payloadHash": "0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470",
+        "allowances": [
+          { "token": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2", "amount": "115792089237316195423570985008687907853269984665640564039457584007913129639935" },
+          { "token": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", "amount": "115792089237316195423570985008687907853269984665640564039457584007913129639935" }
+        ],
+        "outcomes": [
+          { "token": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2", "amount": "0", "destination": "0x00000000000000000000000000000000Ca7A00Bb" },
+          { "token": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", "amount": "0", "destination": "0x00000000000000000000000000000000Ca7A00Bb" }
+        ]
+      },
+      "expected": {
+        "executeStructHash": "0x3e9911d5252f5dbba52e604a2a98833fcd059110eed29bc4bf11e7d23d533660",
+        "executeDigest": "0x38b64950612520abbbe67af9d14e20e91e1ce7e542ceb4e1a79b18bfa963b4cc",
+        "refundStructHash": "0x3ebf69e513f0deeb0b07b7883818462e490117412a80ea53462a0ff5f1d53a3c",
+        "refundDigest": "0x62aba4f72743c2864a8851e0c17be8c92e9ce6aa7073ca95d24d5a8568403238",
+        "saltWithDigest": "0xfe4c32c3f6ee066e5c96b4782392061dfae0211aac9bd9f88501d38fdcc743bd",
+        "account": "0x9bA86f6BB66fA01D52dA194110c68d223157D38b"
+      }
+    }
+  ]
+}
