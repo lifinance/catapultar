@@ -198,7 +198,7 @@ describe("Catapultar gas estimation PoC", () => {
   }
 
   it.serial(
-    "verifies Anvil can estimate the skip batch far below the high-gas failure path",
+    "verifies a naive Anvil estimate for the skip batch silently skips the expensive call",
     async () => {
       const ownerAccount = privateKeyToAccount(random(32));
       const account = await deployCatapultar({
@@ -243,7 +243,11 @@ describe("Catapultar gas estimation PoC", () => {
 
       expect(highGasReceipt.status).toBe("success");
       expect(await healthyCalls(target)).toBe(2n);
-      expect(highGasReceipt.gasUsed).toBeGreaterThan(estimate * 10n);
+      // The naive estimate is below what the expensive call needs, so at `gas: estimate`
+      // it runs out of gas (empty revert data above) instead of reaching its real failure.
+      // How far below varies by Anvil version (~16x under 1.7, ~1x under 1.9), so only
+      // the behavioral difference is asserted, not a fixed ratio.
+      expect(highGasReceipt.gasUsed).toBeGreaterThan(lowGasReceipt.gasUsed);
       expect(highGasReverts).toHaveLength(1);
       expect(highGasReverts[0]!.startsWith(expensiveFailureSelector)).toBe(
         true,
