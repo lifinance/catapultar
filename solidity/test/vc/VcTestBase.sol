@@ -84,6 +84,46 @@ abstract contract VcTestBase is Test {
         _;
     }
 
+    /* ─────────────────────────── Base fork
+    ─────────────────────────── */
+
+    string internal constant BASE_FORK_RPC_ENV = "VC_BASE_RPC_URL";
+
+    /// @dev Base (8453) addresses for the triggers suites.
+    address internal constant BASE_WETH = 0x4200000000000000000000000000000000000006;
+    address internal constant BASE_USDC = 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913;
+    /// @dev Canonical (non-SVR) Chainlink proxies, 8 decimals.
+    address internal constant BASE_FEED_ETH_USD = 0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70;
+    address internal constant BASE_FEED_BTC_USD = 0x64c911996D3c6aC71f9b455B1E8E7266BcbD848F;
+    address payable internal constant BASE_VALIDATOR_V2 = payable(0x96942258dEaDfD17820C8BEf19D7CbABC1A491A8);
+    address internal constant MULTICALL3 = 0xcA11bde05977b3631167028862bE2a173976CA11;
+
+    /// @notice True when the tests run on a Base fork: either `VC_BASE_RPC_URL` is
+    /// set, or forge was started with `--fork-url <base rpc>`.
+    function hasBaseFork() internal view returns (bool) {
+        return bytes(vm.envOr(BASE_FORK_RPC_ENV, string(""))).length != 0 || block.chainid == 8453;
+    }
+
+    /// @notice Forks Base at the latest block when `VC_BASE_RPC_URL` is set (else
+    /// keeps a `--fork-url` fork), and checks chain id and the deployed VM and
+    /// validator. A no-op when no Base fork is configured.
+    function forkBaseIfConfigured() internal {
+        string memory url = vm.envOr(BASE_FORK_RPC_ENV, string(""));
+        if (bytes(url).length != 0) vm.createSelectFork(url);
+        else if (block.chainid != 8453) return;
+        require(block.chainid == 8453, "VcTestBase: VC_BASE_RPC_URL is not a Base RPC");
+        require(VM_ADDR.code.length != 0, "VcTestBase: no VirtualMachine code at the canonical address");
+        require(BASE_VALIDATOR_V2.code.length != 0, "VcTestBase: no CATValidatorV2 code on Base");
+    }
+
+    modifier onlyBaseFork() {
+        if (!hasBaseFork()) {
+            vm.skip(true, "VC_BASE_RPC_URL unset and not a Base --fork-url run");
+            return;
+        }
+        _;
+    }
+
     /* ─────────────────────────── V2 constraint digest
     ─────────────────────────── */
 
