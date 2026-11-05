@@ -65,6 +65,8 @@ abstract contract DerivedProgramHarness is VcTestBase {
         validator = CATValidatorV2(BASE_VALIDATOR_V2);
         fillTarget = new FixtureFill();
         executor = makeAddr("executor");
+        // The pass case asserts exact USDC deltas; drop any live stray balance on the validator.
+        deal(BASE_USDC, address(validator), 0);
         user = vm.addr(USER_KEY);
         // On Base the public anvil key carries an EIP-7702 delegation; SignatureCheckerLib would
         // then ask the delegate (ERC-1271) instead of ecrecover. Clear it, as the demo fork must.

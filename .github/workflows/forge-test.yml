@@ -54,6 +54,9 @@ jobs:
         run: forge test -vvv
         id: test
         working-directory: solidity
+        env:
+          # Base fork suites under test/vc skip when this is unset.
+          VC_BASE_RPC_URL: ${{ secrets.VC_BASE_RPC_URL }}
 
       - name: Run Forge coverage
         # --ir-minimum: CATValidatorV2 does not compile under the legacy
