@@ -99,6 +99,20 @@ abstract contract DerivedProgramHarness is VcTestBase {
         params[2] = bytes32(STRIKE);
     }
 
+    /// @notice WS-A's committed program for the fixture, read from the Intent Factory row
+    /// (`fixtures/handoff-a-program.json`). Asserts the harness hashes it exactly as the row does.
+    function derivedProgram() internal view returns (bytes memory program, bytes32[] memory params) {
+        string memory j = readFixture("handoff-a-program.json");
+        program = vm.parseJsonBytes(j, ".validationProgram");
+        params = vm.parseJsonBytes32Array(j, ".validationParams");
+        assertEq(
+            hashProgram(abi.decode(program, (VMCommand[]))),
+            vm.parseJsonBytes32(j, ".validationProgramHash"),
+            "validationProgramHash parity"
+        );
+        assertEq(hashParams(params), vm.parseJsonBytes32(j, ".paramsHash"), "paramsHash parity");
+    }
+
     /* ─────────────────────────── entry building
     ─────────────────────────── */
 

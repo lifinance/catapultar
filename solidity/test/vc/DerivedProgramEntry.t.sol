@@ -18,7 +18,7 @@ contract DerivedProgramEntryTest is DerivedProgramHarness {
     }
 
     function test_derived_pass_feedAt1990() external onlyBaseFork {
-        (bytes memory program, bytes32[] memory params) = placeholderProgram();
+        (bytes memory program, bytes32[] memory params) = derivedProgram();
         mockAnswer(1990e8);
         (uint256 entryGas, uint256 vmGas) = settleThroughEntry(program, params, 0xC1A55, "");
         emit log_named_uint("pass entry gas", entryGas);
@@ -26,7 +26,7 @@ contract DerivedProgramEntryTest is DerivedProgramHarness {
     }
 
     function test_derived_fail_feedAt2251() external onlyBaseFork {
-        (bytes memory program, bytes32[] memory params) = placeholderProgram();
+        (bytes memory program, bytes32[] memory params) = derivedProgram();
         mockAnswer(2251e8);
         (uint256 entryGas, uint256 vmGas) =
             settleThroughEntry(program, params, 0xC1A56, abi.encodeWithSelector(LTE_FAILED, 2251e8, STRIKE));
@@ -35,7 +35,7 @@ contract DerivedProgramEntryTest is DerivedProgramHarness {
     }
 
     function test_derived_fail_pastExpiry() external onlyBaseFork {
-        (bytes memory program, bytes32[] memory params) = placeholderProgram();
+        (bytes memory program, bytes32[] memory params) = derivedProgram();
         mockAnswer(1990e8);
         vm.warp(EXPIRES_AT + 1);
         (uint256 entryGas, uint256 vmGas) =
@@ -49,7 +49,7 @@ contract DerivedProgramEntryTest is DerivedProgramHarness {
     function test_step7_forcedSettlement_reverts() external onlyBaseFork {
         uint256 answer = uint256(IFeed(BASE_FEED_ETH_USD).latestAnswer());
         require(answer > STRIKE, "live ETH/USD is below the strike; step 7 needs it above");
-        (bytes memory program, bytes32[] memory params) = placeholderProgram();
+        (bytes memory program, bytes32[] memory params) = derivedProgram();
         uint256 nonce = uint256(keccak256("triggers-step7"));
 
         fundFixture();
