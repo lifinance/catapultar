@@ -201,15 +201,24 @@ contract IntentExecutorGateTest is Test {
         ERC7821.Call[] memory calls,
         bytes memory expectedRevert
     ) internal {
+        bytes memory executionData = signBatch(mode, calls);
+        address relayer = makeAddr("relayer");
+        if (expectedRevert.length != 0) vm.expectRevert(expectedRevert);
+        vm.prank(relayer, relayer);
+        Catapultar(worker).execute(mode, executionData);
+    }
+
+    /// @dev The worker-signed `execute` data for `calls`, which anyone can relay.
+    function signBatch(
+        bytes32 mode,
+        ERC7821.Call[] memory calls
+    ) internal returns (bytes memory) {
         uint256 nonce = ++workerNonce;
         bytes32 digest = keccak256(
             abi.encodePacked("\x19\x01", IDomain(worker).DOMAIN_SEPARATOR(), this.typehash(nonce, mode, calls))
         );
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(workerKey, digest);
-        address relayer = makeAddr("relayer");
-        if (expectedRevert.length != 0) vm.expectRevert(expectedRevert);
-        vm.prank(relayer, relayer);
-        Catapultar(worker).execute(mode, abi.encode(calls, abi.encodePacked(nonce, abi.encodePacked(r, s, v))));
+        return abi.encode(calls, abi.encodePacked(nonce, abi.encodePacked(r, s, v)));
     }
 
     /// @dev The fill payload: drive the compose proxy to deliver the parked position to
@@ -595,6 +604,35 @@ contract IntentExecutorGateTest is Test {
         attackerEntry(payload, "");
         assertEq(usdc.balanceOf(attacker), POSITION);
         assertEq(usdc.balanceOf(address(composeProxy)), 0);
+        assertEq(executor.authorizations(keccak256(payload)), 0);
+    }
+
+    /// @dev The skipping-batch leak needs no accidental failure: anyone can relay the
+    /// worker's signed batch with enough gas for authorizeCall but not for `entry`.
+    function test_skipFailuresBatch_attackerStarvesEntry() external {
+        bytes memory payload = fillPayload(address(validator));
+        Fill memory fill = signFill(address(inToken), POSITION, payload);
+        bytes memory executionData = signBatch(SKIP_FAILURES_MODE, authorizeThenEntry(payload, fill));
+
+        vm.prank(attacker, attacker);
+        Catapultar(worker).execute{ gas: 150_000 }(SKIP_FAILURES_MODE, executionData);
+        assertEq(executor.authorizations(keccak256(payload)), 1);
+        assertEq(usdc.balanceOf(destination), 0);
+
+        attackerEntry(payload, "");
+        assertEq(usdc.balanceOf(attacker), POSITION);
+    }
+
+    /// @dev The same relay against an atomic batch reverts as a whole.
+    function test_atomicBatch_attackerStarvesEntry_reverts() external {
+        bytes memory payload = fillPayload(address(validator));
+        Fill memory fill = signFill(address(inToken), POSITION, payload);
+        bytes memory executionData = signBatch(ATOMIC_MODE, authorizeThenEntry(payload, fill));
+
+        vm.prank(attacker, attacker);
+        (bool ok,) =
+            worker.call{ gas: 150_000 }(abi.encodeWithSignature("execute(bytes32,bytes)", ATOMIC_MODE, executionData));
+        assertFalse(ok);
         assertEq(executor.authorizations(keccak256(payload)), 0);
     }
 

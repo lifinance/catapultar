@@ -34,6 +34,7 @@
 import { readFile } from 'fs/promises'
 import { resolve } from 'path'
 
+import type { TronWeb } from 'tronweb'
 import { consola } from 'consola'
 
 import {
@@ -88,14 +89,42 @@ function constructorParams(
       'IntentExecutorTron needs INTENT_EXECUTOR_OWNER and INTENT_EXECUTOR_SOLVERS'
     )
   const tronWeb = getTronWebCodecOnlyForNetwork(network)
-  const toEvm = (address: string) => tronAddressToHex(tronWeb, address.trim())
-  return [
-    toEvm(owner),
-    solvers
-      .split(',')
-      .filter((solver) => solver.trim() !== '')
-      .map(toEvm),
-  ]
+  const ownerHex = parseTronAccount(tronWeb, 'INTENT_EXECUTOR_OWNER', owner)
+  const solverHexes = solvers
+    .split(',')
+    .filter((solver) => solver.trim() !== '')
+    .map((solver) =>
+      parseTronAccount(tronWeb, 'INTENT_EXECUTOR_SOLVERS', solver)
+    )
+  consola.info('IntentExecutorTron constructor:', {
+    owner: `${tronWeb.address.fromHex(ownerHex)} (${ownerHex})`,
+    solvers: solverHexes.map(
+      (solver) => `${tronWeb.address.fromHex(solver)} (${solver})`
+    ),
+  })
+  return [ownerHex, solverHexes]
+}
+
+/**
+ * Parses one account as base58 (T...) or 20-byte hex with a 0x or 41 prefix, and
+ * returns its 0x hex form. Anything else, including the zero address, throws: a
+ * mistyped owner would freeze the solver set for good.
+ */
+function parseTronAccount(
+  tronWeb: TronWeb,
+  variable: string,
+  raw: string
+): string {
+  const value = raw.trim()
+  const wellFormed =
+    /^T[1-9A-HJ-NP-Za-km-z]{33}$/.test(value) ||
+    /^(0x|41)[0-9a-fA-F]{40}$/.test(value)
+  if (!wellFormed || (value.startsWith('T') && !tronWeb.isAddress(value)))
+    throw new Error(`${variable}: not a Tron or 0x address: ${value}`)
+  const hex = tronAddressToHex(tronWeb, value)
+  if (!/^0x[0-9a-fA-F]{40}$/.test(hex) || BigInt(hex) === 0n)
+    throw new Error(`${variable}: resolves to an invalid or zero address: ${value}`)
+  return hex
 }
 
 async function loadTronArtifact(
@@ -294,6 +323,16 @@ async function main() {
       )
 
       results.push({ contract: contractName, result })
+      // The pre-3.0.0 executor is ungated and stays callable forever: keep its address
+      // on record for the migration instead of overwriting it.
+      const previous = deployments[contractName]
+      if (
+        contractName === 'IntentExecutorTron' &&
+        previous &&
+        previous !== result.contractAddress &&
+        !deployments.IntentExecutorTronUngated
+      )
+        deployments.IntentExecutorTronUngated = previous
       deployments[contractName] = result.contractAddress
 
       consola.success(`${contractName} deployed:`)
