@@ -110,7 +110,7 @@ describe("applyEstimateGasMargin", () => {
       SIGNED_PATH_GAS_OVERHEAD,
       SIGNED_PATH_GAS_OVERHEAD_WITH_P256_PRECOMPILE,
     ]) {
-      expect([...Object.keys(table)].sort()).toEqual([...ownerTypes].sort());
+      expect(Object.keys(table).sort()).toEqual([...ownerTypes].sort());
     }
   });
 });
