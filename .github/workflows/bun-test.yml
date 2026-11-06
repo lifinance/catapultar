@@ -45,15 +45,23 @@ jobs:
         id: install
         working-directory: typescript
 
+      - name: Lint (oxlint)
+        run: bun run lint
+        working-directory: typescript
+
+      - name: Format check (oxfmt)
+        run: bun run format:check
+        working-directory: typescript
+
       - name: Build package (typecheck + bundle + smoke)
         run: bun run build
         id: build
         working-directory: typescript
 
       - name: Install Anvil
-        uses: foundry-rs/foundry-toolchain@8789b3e21e6c11b2697f5eb56eddae542f746c10 # v1.7.0
+        uses: foundry-rs/foundry-toolchain@908c540300062bd5a7e473851cdb4282204cee09 # v1.9.1
         with:
-          version: v1.7.1
+          version: v1.9.0
 
       - name: Build Solidity artifacts (for bytecode sync spec)
         run: forge build

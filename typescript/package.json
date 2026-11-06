@@ -46,7 +46,11 @@
     "build:markers": "node ./scripts/write-subdir-markers.mjs",
     "build:smoke": "node ./scripts/smoke.mjs",
     "build": "bun run build:js && bun run build:types && bun run build:markers && bun run build:smoke",
-    "lint:staged": "prettier -w",
+    "lint": "oxlint",
+    "lint:fix": "oxlint --fix",
+    "format": "oxfmt",
+    "format:check": "oxfmt --check",
+    "lint:staged": "oxfmt",
     "prepublishOnly": "bun run build && bun run test",
     "test": "bun test --preload ./test/setup.ts",
     "test:watch": "bun run test --watch",
@@ -69,8 +73,8 @@
     "form-data": "4.0.6",
     "picomatch": "4.0.5",
     "tar": "7.5.19",
-    "ws": "8.21.0",
-    "yaml": "2.9.0"
+    "yaml": "2.9.0",
+    "ws": "8.21.1"
   },
   "devDependencies": {
     "@lifi/tron-devkit": "^1.0.1",
@@ -79,7 +83,8 @@
     "esbuild": "^0.28.1",
     "husky": "^9.1.7",
     "lint-staged": "^16.4.0",
-    "prettier": "^3.9.4",
+    "oxfmt": "^0.76.0",
+    "oxlint": "^1.91.0",
     "prool": "^0.2.4",
     "rollup": "^4.62.2",
     "rollup-plugin-esbuild": "^6.2.1",
