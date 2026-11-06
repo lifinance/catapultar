@@ -45,6 +45,14 @@ jobs:
         id: install
         working-directory: typescript
 
+      - name: Lint (oxlint)
+        run: bun run lint
+        working-directory: typescript
+
+      - name: Format check (oxfmt)
+        run: bun run format:check
+        working-directory: typescript
+
       - name: Build package (typecheck + bundle + smoke)
         run: bun run build
         id: build
