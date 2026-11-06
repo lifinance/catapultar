@@ -3,7 +3,7 @@ pragma solidity ^0.8.25;
 
 import { Ownable } from "solady/src/auth/Ownable.sol";
 import { LibBit } from "solady/src/utils/LibBit.sol";
-import { ReentrancyGuard } from "solady/src/utils/ReentrancyGuard.sol";
+import { ReentrancyGuardTransient } from "solady/src/utils/ReentrancyGuardTransient.sol";
 import { SafeTransferLib } from "solady/src/utils/SafeTransferLib.sol";
 
 /// @title IntentExecutor
@@ -40,9 +40,8 @@ import { SafeTransferLib } from "solady/src/utils/SafeTransferLib.sol";
 ///      for `entry`, or replay a multichain batch on a chain where `entry` fails.
 ///
 ///      An authorization admits the exact calldata only, so its approvals, calls and
-///      sweep recipients are those the solver chose. Two exceptions: native value sent
-///      with executeAndSweepNative() is not part of the authorization, and a zero
-///      `nativeSweepRecipient` sends the native sweep to `msg.sender`, whoever ran it.
+///      sweep recipients are those the solver chose. One exception: native value sent
+///      with executeAndSweepNative() is not part of the authorization.
 ///
 ///      A solver must be an account only its key controls. Adding a forwarder (such as
 ///      a validator's CALL_PROXY) as a solver lets anyone authorize any call.
@@ -50,10 +49,12 @@ import { SafeTransferLib } from "solady/src/utils/SafeTransferLib.sol";
 ///      The owner manages the solver set and transfers ownership only through solady's
 ///      two-step handover. The gate cannot be disabled.
 ///
-///      Transient storage requires a Cancun-compatible VM (TSTORE/TLOAD).
+///      The authorizations and the reentrancy guard live in transient storage, so the
+///      contract requires a Cancun-compatible VM (TSTORE/TLOAD).
 ///
-///      Tokens or ETH left in this contract after a call can only be moved by a later
-///      authorized call. Do not leave tokens behind.
+///      Tokens or ETH left in this contract after a call stay until a later authorized
+///      call moves them, or until a spender that an earlier call max-approved pulls
+///      them. Do not leave tokens behind.
 ///
 ///      function selection:
 ///      - If the swap/call outputs ERC20 tokens only, use executeAndSweep().
@@ -63,7 +64,7 @@ import { SafeTransferLib } from "solady/src/utils/SafeTransferLib.sol";
 ///        execution will remain in the contract until the next authorized call.
 ///
 /// @custom:version 3.0.0
-contract IntentExecutor is Ownable, ReentrancyGuard {
+contract IntentExecutor is Ownable, ReentrancyGuardTransient {
     /// @dev Multicall3-compatible call struct (no value)
     struct Call3 {
         address target;
@@ -104,6 +105,8 @@ contract IntentExecutor is Ownable, ReentrancyGuard {
     error CallNotAuthorized();
     /// @dev The caller of authorizeCall() is not in the solver set.
     error NotSolver();
+    /// @dev The zero address cannot be a solver.
+    error ZeroSolver();
     /// @dev Ownership moves only through the two-step handover and cannot be renounced.
     error OwnershipTransferDisabled();
 
@@ -144,10 +147,13 @@ contract IntentExecutor is Ownable, ReentrancyGuard {
         _setSolver(solver, allowed);
     }
 
+    /// @dev Reverts ZeroSolver when adding the zero address: it can never call, so it
+    /// only signals a mistyped solver list.
     function _setSolver(
         address solver,
         bool allowed
     ) private {
+        if (allowed && solver == address(0)) revert ZeroSolver();
         isSolver[solver] = allowed;
         emit SolverSet(solver, allowed);
     }
@@ -162,6 +168,12 @@ contract IntentExecutor is Ownable, ReentrancyGuard {
     /// @dev Disabled: the solver set must stay manageable.
     function renounceOwnership() public payable override onlyOwner {
         revert OwnershipTransferDisabled();
+    }
+
+    /// @dev The contract already requires TSTORE for its authorizations, so the guard uses
+    /// transient storage on every chain, not only on Ethereum mainnet.
+    function _useTransientReentrancyGuardOnlyOnMainnet() internal pure override returns (bool) {
+        return false;
     }
 
     /// Solver Methods ///
@@ -238,8 +250,8 @@ contract IntentExecutor is Ownable, ReentrancyGuard {
     /// @param approvals Token+spender pairs to max-approve before execution
     /// @param calls Array of calls with value to execute
     /// @param sweepTargets ERC20 token+recipient pairs to sweep after execution
-    /// @param nativeSweepRecipient Address to receive remaining native balance (zero address falls back to
-    ///     msg.sender)
+    /// @param nativeSweepRecipient Address to receive remaining native balance. Reverts ZeroRecipient
+    ///     when zero, like an ERC20 sweep target.
     /// @return results Array of call results
     function executeAndSweepNative(
         Approval[] calldata approvals,
@@ -247,6 +259,7 @@ contract IntentExecutor is Ownable, ReentrancyGuard {
         SweepTarget[] calldata sweepTargets,
         address payable nativeSweepRecipient
     ) external payable nonReentrant returns (Result[] memory results) {
+        if (nativeSweepRecipient == address(0)) revert ZeroRecipient();
         _consumeAuthorization();
         _safeApproveAll(approvals);
         results = _executeCallsWithValue(calls);
@@ -254,9 +267,8 @@ contract IntentExecutor is Ownable, ReentrancyGuard {
 
         uint256 nativeBalance = address(this).balance;
         if (nativeBalance > 0) {
-            address sweepRecipient = nativeSweepRecipient == address(0) ? msg.sender : nativeSweepRecipient;
-            SafeTransferLib.safeTransferETH(sweepRecipient, nativeBalance);
-            emit SweptNative(sweepRecipient, nativeBalance);
+            SafeTransferLib.safeTransferETH(nativeSweepRecipient, nativeBalance);
+            emit SweptNative(nativeSweepRecipient, nativeBalance);
         }
     }
 
