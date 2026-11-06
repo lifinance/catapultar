@@ -669,6 +669,18 @@ contract IntentExecutorGateTest is Test {
         new IntentExecutor(address(0), new address[](0));
     }
 
+    /// @dev Before Cancun, TSTORE is an undefined opcode, so deployment must fail.
+    function test_admin_constructorFailsWithoutTransientStorage() external {
+        address[] memory solvers = new address[](1);
+        solvers[0] = worker;
+        vm.setEvmVersion("shanghai");
+        vm.expectRevert();
+        new IntentExecutor(owner, solvers);
+
+        vm.setEvmVersion("cancun");
+        assertTrue(new IntentExecutor(owner, solvers).isSolver(worker));
+    }
+
     /// @dev The zero address cannot be added, by the constructor or by the owner; removing
     /// it stays allowed.
     function test_admin_zeroSolverRejected() external {
