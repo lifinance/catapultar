@@ -9,7 +9,14 @@ import { IntentExecutor } from "./IntentExecutor.sol";
 /// @author LI.FI / Intent Factory
 /// @notice Tron variant of IntentExecutor. Overrides _transfer to bypass
 ///         broken transfer() return values (Tron USDT) via approve(self) + transferFrom(self).
+///         The solver gate is inherited unchanged and needs TVM Cancun (TLOAD/TSTORE),
+///         which Tron activated through committee proposal 103.
 contract IntentExecutorTron is IntentExecutor {
+    constructor(
+        address owner_,
+        address[] memory solvers
+    ) IntentExecutor(owner_, solvers) { }
+
     function _transfer(
         address token,
         address to,

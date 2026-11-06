@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.25;
 
+import { Ownable } from "solady/src/auth/Ownable.sol";
 import { LibBit } from "solady/src/utils/LibBit.sol";
 import { ReentrancyGuard } from "solady/src/utils/ReentrancyGuard.sol";
 import { SafeTransferLib } from "solady/src/utils/SafeTransferLib.sol";
@@ -18,27 +19,48 @@ import { SafeTransferLib } from "solady/src/utils/SafeTransferLib.sol";
 ///      3. Balance sweep — reads balanceOf(this) for each output token and transfers
 ///         the full remaining balance to the specified recipient.
 ///
-///      This contract is stateless and designed for permissionless deployment
-///      via the Catapultar stack's CREATE2 deployment scheme.
+///      Access control: executeAndSweep() and executeAndSweepNative() only run a call
+///      that a solver authorized earlier in the same transaction. The solver is the
+///      account that calls the CAT validator's `entry`. The validator then reaches this
+///      contract through its CALL_PROXY, a permissionless forwarder, so `msg.sender`
+///      cannot identify the solver. The solver therefore calls
+///      authorizeCall(keccak256(execPayload)) first, and each execution consumes one
+///      authorization of keccak256(msg.data). The authorization lives in transient
+///      storage, so it ends with the transaction and rolls back with a reverted frame.
 ///
-///      This contract intentionally has no access control. executeAndSweep(),
-///      executeAndSweepNative(), and receive() are all open to any caller.
-///      The security model relies entirely on the caller supplying correct sweep
-///      recipients: tokens and ETH are swept out within the same transaction,
-///      so the contract should hold no balance between calls under normal
-///      operation. Any residual balance (e.g. from a direct ETH send or a
-///      failed sweep) can be extracted by any subsequent caller — this is
-///      accepted and expected. Do not leave tokens behind.
+///      The solver MUST call authorizeCall() in the same atomic batch as the validator
+///      `entry` it authorizes (an ERC-7821 mode whose revert flag bubbles any failed
+///      call), directly before that `entry`. If `entry` fails inside a batch that skips
+///      failures, the authorization stays live until the transaction ends, and any code
+///      that runs later in that transaction can execute the authorized payload. That
+///      payload delivers the fill's proceeds to the validator, where any account can
+///      take them with a self-signed constraint, so a skipping batch leaks the fill.
+///
+///      An authorization admits the exact calldata only, so its approvals, calls and
+///      sweep recipients are those the solver chose. Two exceptions: native value sent
+///      with executeAndSweepNative() is not part of the authorization, and a zero
+///      `nativeSweepRecipient` sends the native sweep to `msg.sender`, whoever ran it.
+///
+///      A solver must be an account only its key controls. Adding a forwarder (such as
+///      a validator's CALL_PROXY) as a solver lets anyone authorize any call.
+///
+///      The owner manages the solver set and transfers ownership only through solady's
+///      two-step handover. The gate cannot be disabled.
+///
+///      Transient storage requires a Cancun-compatible VM (TSTORE/TLOAD).
+///
+///      Tokens or ETH left in this contract after a call can only be moved by a later
+///      authorized call. Do not leave tokens behind.
 ///
 ///      function selection:
 ///      - If the swap/call outputs ERC20 tokens only, use executeAndSweep().
 ///      - If the swap/call outputs native ETH (e.g. unwrap WETH → ETH, or a
 ///        DEX that settles in ETH), you MUST use executeAndSweepNative().
 ///        executeAndSweep() has no native sweep step; any ETH received during
-///        execution will remain in the contract and be claimable by anyone.
+///        execution will remain in the contract until the next authorized call.
 ///
-/// @custom:version 2.0.0
-contract IntentExecutor is ReentrancyGuard {
+/// @custom:version 3.0.0
+contract IntentExecutor is Ownable, ReentrancyGuard {
     /// @dev Multicall3-compatible call struct (no value)
     struct Call3 {
         address target;
@@ -75,11 +97,91 @@ contract IntentExecutor is ReentrancyGuard {
     /// Errors ///
 
     error ZeroRecipient();
+    /// @dev No authorization from a solver covers this calldata in the current transaction.
+    error CallNotAuthorized();
+    /// @dev The caller of authorizeCall() is not in the solver set.
+    error NotSolver();
+    /// @dev Ownership moves only through the two-step handover and cannot be renounced.
+    error OwnershipTransferDisabled();
 
     /// Events ///
 
     event Swept(address indexed token, address indexed recipient, uint256 amount);
     event SweptNative(address indexed recipient, uint256 amount);
+    event SolverSet(address indexed solver, bool allowed);
+
+    /// Storage ///
+
+    /// @notice Accounts allowed to authorize calls.
+    mapping(address solver => bool allowed) public isSolver;
+
+    /// @param owner_ Manages the solver set. Must not be zero.
+    /// @param solvers Initial solver set.
+    constructor(
+        address owner_,
+        address[] memory solvers
+    ) {
+        if (owner_ == address(0)) revert NewOwnerIsZeroAddress();
+        _initializeOwner(owner_);
+        for (uint256 i = 0; i < solvers.length; ++i) {
+            _setSolver(solvers[i], true);
+        }
+    }
+
+    /// Admin Methods ///
+
+    /// @notice Add or remove a solver.
+    function setSolver(
+        address solver,
+        bool allowed
+    ) external onlyOwner {
+        _setSolver(solver, allowed);
+    }
+
+    function _setSolver(
+        address solver,
+        bool allowed
+    ) private {
+        isSolver[solver] = allowed;
+        emit SolverSet(solver, allowed);
+    }
+
+    /// @dev Disabled: use requestOwnershipHandover() and completeOwnershipHandover().
+    function transferOwnership(
+        address
+    ) public payable override onlyOwner {
+        revert OwnershipTransferDisabled();
+    }
+
+    /// @dev Disabled: the solver set must stay manageable.
+    function renounceOwnership() public payable override onlyOwner {
+        revert OwnershipTransferDisabled();
+    }
+
+    /// Solver Methods ///
+
+    /// @notice Authorize one execution of the call whose complete calldata hashes to
+    /// `callHash`, for the rest of the current transaction.
+    /// @dev `callHash` is keccak256 of the calldata this contract will receive, which is
+    /// the validator's `execPayload` and the V2 binding's `payloadHash`. Authorizing the
+    /// same hash twice admits two executions.
+    function authorizeCall(
+        bytes32 callHash
+    ) external {
+        if (!isSolver[msg.sender]) revert NotSolver();
+        assembly ("memory-safe") {
+            tstore(callHash, add(tload(callHash), 1))
+        }
+    }
+
+    /// @notice Number of executions of `callHash` still authorized in this transaction.
+    function authorizations(
+        bytes32 callHash
+    ) external view returns (uint256 count) {
+        assembly ("memory-safe") {
+            count := tload(callHash)
+        }
+    }
 
     /// External Methods ///
 
@@ -91,9 +193,12 @@ contract IntentExecutor is ReentrancyGuard {
     ///
     ///      ERC20 outputs only. This function does NOT sweep native ETH.
     ///      If any executed call sends ETH to this contract (e.g. WETH unwrap,
-    ///      native-output DEX), that ETH will be left in the contract and can
-    ///      be swept by any subsequent caller. Use executeAndSweepNative()
-    ///      instead whenever the output may include native ETH.
+    ///      native-output DEX), that ETH will be left in the contract until the
+    ///      next authorized call. Use executeAndSweepNative() instead whenever
+    ///      the output may include native ETH.
+    ///
+    ///      Reverts CallNotAuthorized unless a solver authorized keccak256(msg.data)
+    ///      earlier in this transaction. Consumes that authorization before any call.
     /// @param approvals Token+spender pairs to max-approve before execution
     /// @param calls Array of calls to execute (swap, fee transfer, etc.)
     /// @param sweepTargets Token+recipient pairs to sweep after execution
@@ -103,6 +208,7 @@ contract IntentExecutor is ReentrancyGuard {
         Call3[] calldata calls,
         SweepTarget[] calldata sweepTargets
     ) external nonReentrant returns (Result[] memory results) {
+        _consumeAuthorization();
         _safeApproveAll(approvals);
         results = _executeCalls(calls);
         _sweepAll(sweepTargets);
@@ -116,7 +222,11 @@ contract IntentExecutor is ReentrancyGuard {
     ///      Use this function (instead of executeAndSweep()) whenever the output may include
     ///      native ETH — e.g. WETH unwrap, a DEX that settles in ETH, or any call chain where
     ///      ETH could land in this contract. If you use executeAndSweep() in that scenario the
-    ///      ETH will be left in the contract and claimable by anyone.
+    ///      ETH will be left in the contract until the next authorized call.
+    ///
+    ///      Reverts CallNotAuthorized unless a solver authorized keccak256(msg.data)
+    ///      earlier in this transaction. Consumes that authorization before any call.
+    ///      msg.value is not part of the authorization.
     /// @param approvals Token+spender pairs to max-approve before execution
     /// @param calls Array of calls with value to execute
     /// @param sweepTargets ERC20 token+recipient pairs to sweep after execution
@@ -129,6 +239,7 @@ contract IntentExecutor is ReentrancyGuard {
         SweepTarget[] calldata sweepTargets,
         address payable nativeSweepRecipient
     ) external payable nonReentrant returns (Result[] memory results) {
+        _consumeAuthorization();
         _safeApproveAll(approvals);
         results = _executeCallsWithValue(calls);
         _sweepAll(sweepTargets);
@@ -145,6 +256,21 @@ contract IntentExecutor is ReentrancyGuard {
     receive() external payable { }
 
     /// Internal Methods ///
+
+    /// @dev Consumes one authorization of keccak256(msg.data), or reverts
+    ///      CallNotAuthorized when none is left.
+    function _consumeAuthorization() private {
+        bool authorized;
+        assembly ("memory-safe") {
+            let m := mload(0x40)
+            calldatacopy(m, 0, calldatasize())
+            let callHash := keccak256(m, calldatasize())
+            let count := tload(callHash)
+            authorized := iszero(iszero(count))
+            if authorized { tstore(callHash, sub(count, 1)) }
+        }
+        if (!authorized) revert CallNotAuthorized();
+    }
 
     /// @dev Safe max-approve each token to its spender.
     ///      Uses SafeTransferLib.safeApproveWithRetry which handles USDT-style tokens

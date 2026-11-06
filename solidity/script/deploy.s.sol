@@ -46,7 +46,7 @@ contract deploy is multichain {
         factory = deployFactory();
         validator = deployCATValidator();
         validatorV2 = deployCATValidatorV2();
-        intentExecutor = deployIntentExecutor();
+        intentExecutor = deployIntentExecutor(intentExecutorOwner(), intentExecutorSolvers());
     }
 
     /// @notice Deploy only CATValidatorV2. Consumers that keep an existing factory and
@@ -55,6 +55,25 @@ contract deploy is multichain {
         string[] calldata chains
     ) public iterChains(chains) broadcast returns (CATValidatorV2) {
         return deployCATValidatorV2();
+    }
+
+    /// @notice Deploy only the IntentExecutor, owned by INTENT_EXECUTOR_OWNER with the
+    /// initial solver set INTENT_EXECUTOR_SOLVERS (comma-separated addresses).
+    function runIntentExecutor(
+        string[] calldata chains
+    ) public iterChains(chains) broadcast returns (IntentExecutor) {
+        return deployIntentExecutor(intentExecutorOwner(), intentExecutorSolvers());
+    }
+
+    /// @dev The owner and initial solvers fold into the CREATE2 init code. Every chain
+    /// must use the same owner and the same solver list, in the same order, to share one
+    /// executor address. Later solver changes go through setSolver and do not move it.
+    function intentExecutorOwner() internal view returns (address) {
+        return vm.envAddress("INTENT_EXECUTOR_OWNER");
+    }
+
+    function intentExecutorSolvers() internal view returns (address[] memory) {
+        return vm.envAddress("INTENT_EXECUTOR_SOLVERS", ",");
     }
 
     function deployFactory() internal returns (CatapultarFactory factory) {
@@ -127,11 +146,21 @@ contract deploy is multichain {
         }
     }
 
-    function deployIntentExecutor() internal returns (IntentExecutor intentExecutor) {
+    /// @dev The executor keeps solver authorizations in transient storage, so the chain
+    /// must support TSTORE. A chain without Cancun reverts ChainLacksCancun: the executor
+    /// has no storage fallback, because a stored authorization that a failed fill never
+    /// consumed would outlive its transaction.
+    function deployIntentExecutor(
+        address owner,
+        address[] memory solvers
+    ) internal returns (IntentExecutor intentExecutor) {
+        requireCancun();
+
+        bytes memory initArgs = abi.encode(owner, solvers);
         address payable expectedAddress =
-            payable(getExpectedCreate2Address(bytes32(0), type(IntentExecutor).creationCode, hex""));
+            payable(getExpectedCreate2Address(bytes32(0), type(IntentExecutor).creationCode, initArgs));
         if (expectedAddress.code.length == 0) {
-            intentExecutor = new IntentExecutor{ salt: bytes32(0) }();
+            intentExecutor = new IntentExecutor{ salt: bytes32(0) }(owner, solvers);
             if (expectedAddress != address(intentExecutor)) {
                 revert NotExpectedAddress(expectedAddress, address(intentExecutor));
             }
