@@ -7,6 +7,7 @@ import {
   numberToHex,
   pad,
   sha256,
+  toHex,
   type PublicClient,
 } from "viem";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
@@ -20,7 +21,12 @@ import { PUBLIC_DEFAULT_ANVIL_ACCOUNT_0 } from "../../test/fixtures";
 import type { Owner } from "../types/types";
 import { defaultFactory } from "../config";
 import CATAPULTAR_FACTORY_ABI from "../abi/catapultarFactory";
-import { P256 } from "ox";
+import { encodeWebAuthnAuth } from "../protocol/signature";
+import { Base64, P256 } from "ox";
+
+// secp256r1 group order; `s > N / 2` is the malleable (high-s) half.
+const P256_N =
+  0xffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551n;
 
 const chainId = 31337;
 const anvilAccountVersion = "0.1.0";
@@ -314,16 +320,23 @@ describe("Catapultar Account", () => {
       return `0x${rHex}${sHex}00${flag}`;
     };
 
+    const p256Owner = (
+      privateKey: `0x${string}`,
+      type: "p256" | "webauthn-p256" = "p256",
+    ): Owner => {
+      const pub = P256.getPublicKey({ privateKey });
+      return {
+        type,
+        x: numberToHex(pub.x, { size: 32 }),
+        y: numberToHex(pub.y, { size: 32 }),
+      };
+    };
+
     it.concurrent("honors the P256 prehash flag", async () => {
       const privateKey = P256.randomPrivateKey();
-      const pub = P256.getPublicKey({ privateKey });
       const account = new CatapultarAccount({
         address: random(20),
-        owner: {
-          type: "p256",
-          x: numberToHex(pub.x, { size: 32 }),
-          y: numberToHex(pub.y, { size: 32 }),
-        },
+        owner: p256Owner(privateKey),
       });
       const digest = random(32);
 
@@ -358,6 +371,130 @@ describe("Catapultar Account", () => {
           hash: digest,
         }),
       ).toBe(false);
+    });
+
+    // Off-chain verification must reject what Solady's `P256.verifySignature`
+    // rejects: the malleable high-s twin `s' = N - s` of a valid signature.
+    it.concurrent("rejects high-s P256 signatures", async () => {
+      const privateKey = P256.randomPrivateKey();
+      const account = new CatapultarAccount({
+        address: random(20),
+        owner: p256Owner(privateKey),
+      });
+      const digest = random(32);
+      const sig = P256.sign({ payload: digest, privateKey });
+      expect(sig.s <= P256_N / 2n).toBe(true);
+      expect(
+        await account.isSignatureValid({
+          signature: p256Wire(sig.r, sig.s, "00"),
+          hash: digest,
+        }),
+      ).toBe(true);
+      expect(
+        await account.isSignatureValid({
+          signature: p256Wire(sig.r, P256_N - sig.s, "00"),
+          hash: digest,
+        }),
+      ).toBe(false);
+    });
+
+    describe("WebAuthn P256 (mirrors Solady WebAuthn.verify)", () => {
+      const privateKey = P256.randomPrivateKey();
+      const account = new CatapultarAccount({
+        address: random(20),
+        owner: p256Owner(privateKey, "webauthn-p256"),
+      });
+
+      // Signs like an authenticator; returns the on-chain wire bytes.
+      const webAuthnWire = (
+        challenge: `0x${string}`,
+        overrides: {
+          clientDataJSON?: string;
+          challengeIndex?: number;
+          typeIndex?: number;
+          flags?: number;
+          highS?: boolean;
+          flag?: "00" | "01";
+        } = {},
+      ): `0x${string}` => {
+        const encoded = Base64.fromHex(challenge, { url: true, pad: false });
+        const clientDataJSON =
+          overrides.clientDataJSON ??
+          `{"type":"webauthn.get","challenge":"${encoded}","origin":"https://example.com","crossOrigin":false}`;
+        // rpIdHash (32 bytes) + flags (UP|UV by default) + signCount (4 bytes).
+        const authenticatorData = concatHex([
+          random(32),
+          numberToHex(overrides.flags ?? 0x05, { size: 1 }),
+          "0x00000001",
+        ]);
+        const message = sha256(
+          concatHex([authenticatorData, sha256(toHex(clientDataJSON))]),
+        );
+        const sig = P256.sign({ payload: message, privateKey });
+        return `${encodeWebAuthnAuth({
+          authenticatorData,
+          clientDataJSON,
+          challengeIndex:
+            overrides.challengeIndex ?? clientDataJSON.indexOf('"challenge"'),
+          typeIndex: overrides.typeIndex ?? clientDataJSON.indexOf('"type"'),
+          r: sig.r,
+          s: overrides.highS ? P256_N - sig.s : sig.s,
+        })}${overrides.flag ?? "00"}`;
+      };
+
+      it.concurrent("accepts a well-formed assertion", async () => {
+        const digest = random(32);
+        expect(
+          await account.isSignatureValid({
+            signature: webAuthnWire(digest),
+            hash: digest,
+          }),
+        ).toBe(true);
+        // Prehash flag: the challenge is sha256(digest).
+        expect(
+          await account.isSignatureValid({
+            signature: webAuthnWire(sha256(digest), { flag: "01" }),
+            hash: digest,
+          }),
+        ).toBe(true);
+        expect(
+          await account.isSignatureValid({
+            signature: webAuthnWire(digest),
+            hash: random(32),
+          }),
+        ).toBe(false);
+      });
+
+      // Each case is validly signed but must fail like it does on-chain. ox >= 0.14
+      // ignores the indices, so the index cases pass ox and fail Solady.
+      it.concurrent.each([
+        ["the high-s twin", { highS: true }],
+        ["a wrong typeIndex", { typeIndex: 2 }],
+        ["a wrong challengeIndex", { challengeIndex: 0 }],
+        ["an out-of-range typeIndex", { typeIndex: 2 ** 40 }],
+        ["a cleared User Present flag", { flags: 0x04 }],
+        [
+          "non-JSON clientDataJSON (no throw)",
+          { clientDataJSON: "not json", typeIndex: 0, challengeIndex: 0 },
+        ],
+      ] as const)("rejects %s", async (_, overrides) => {
+        const digest = random(32);
+        expect(
+          await account.isSignatureValid({
+            signature: webAuthnWire(digest, overrides),
+            hash: digest,
+          }),
+        ).toBe(false);
+      });
+
+      it.concurrent("returns false for undecodable WebAuthnAuth bytes", async () => {
+        expect(
+          await account.isSignatureValid({
+            signature: `0x${"ab".repeat(80)}00`,
+            hash: random(32),
+          }),
+        ).toBe(false);
+      });
     });
 
     it.concurrent("verifies an ECDSA owner signature", async () => {
