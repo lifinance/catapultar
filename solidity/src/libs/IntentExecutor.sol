@@ -29,12 +29,15 @@ import { SafeTransferLib } from "solady/src/utils/SafeTransferLib.sol";
 ///      storage, so it ends with the transaction and rolls back with a reverted frame.
 ///
 ///      The solver MUST call authorizeCall() in the same atomic batch as the validator
-///      `entry` it authorizes (an ERC-7821 mode whose revert flag bubbles any failed
-///      call), directly before that `entry`. If `entry` fails inside a batch that skips
-///      failures, the authorization stays live until the transaction ends, and any code
-///      that runs later in that transaction can execute the authorized payload. That
-///      payload delivers the fill's proceeds to the validator, where any account can
-///      take them with a self-signed constraint, so a skipping batch leaks the fill.
+///      `entry` it authorizes (ERC-7821 revert flag 0x00, which bubbles any failed call,
+///      and no multichain replay), directly before that `entry`. If `entry` fails inside
+///      a batch that skips failures (flag 0x01, or 0x02 for logical failures), the
+///      authorization stays live until the transaction ends, and any code that runs
+///      later in that transaction can execute the authorized payload. That payload
+///      delivers the fill's proceeds to the validator, where any account can take them
+///      with a self-signed constraint, so a skipping batch leaks the fill. The failure
+///      need not be accidental: anyone can relay the signed batch with too little gas
+///      for `entry`, or replay a multichain batch on a chain where `entry` fails.
 ///
 ///      An authorization admits the exact calldata only, so its approvals, calls and
 ///      sweep recipients are those the solver chose. Two exceptions: native value sent
@@ -112,6 +115,9 @@ contract IntentExecutor is Ownable, ReentrancyGuard {
 
     /// Storage ///
 
+    /// @dev Seed of the transient authorization slots: keccak256("IntentExecutor.authorization").
+    uint256 private constant _AUTHORIZATION_SEED = 0x019bc4d42441a5967a54f65a55b6922eab59e08350d9747659b3c06bbbe4f3fa;
+
     /// @notice Accounts allowed to authorize calls.
     mapping(address solver => bool allowed) public isSolver;
 
@@ -169,8 +175,9 @@ contract IntentExecutor is Ownable, ReentrancyGuard {
         bytes32 callHash
     ) external {
         if (!isSolver[msg.sender]) revert NotSolver();
+        bytes32 slot = _authorizationSlot(callHash);
         assembly ("memory-safe") {
-            tstore(callHash, add(tload(callHash), 1))
+            tstore(slot, add(tload(slot), 1))
         }
     }
 
@@ -178,8 +185,9 @@ contract IntentExecutor is Ownable, ReentrancyGuard {
     function authorizations(
         bytes32 callHash
     ) external view returns (uint256 count) {
+        bytes32 slot = _authorizationSlot(callHash);
         assembly ("memory-safe") {
-            count := tload(callHash)
+            count := tload(slot)
         }
     }
 
@@ -260,16 +268,32 @@ contract IntentExecutor is Ownable, ReentrancyGuard {
     /// @dev Consumes one authorization of keccak256(msg.data), or reverts
     ///      CallNotAuthorized when none is left.
     function _consumeAuthorization() private {
-        bool authorized;
+        bytes32 callHash;
         assembly ("memory-safe") {
             let m := mload(0x40)
             calldatacopy(m, 0, calldatasize())
-            let callHash := keccak256(m, calldatasize())
-            let count := tload(callHash)
+            callHash := keccak256(m, calldatasize())
+        }
+        bytes32 slot = _authorizationSlot(callHash);
+        bool authorized;
+        assembly ("memory-safe") {
+            let count := tload(slot)
             authorized := iszero(iszero(count))
-            if authorized { tstore(callHash, sub(count, 1)) }
+            if authorized { tstore(slot, sub(count, 1)) }
         }
         if (!authorized) revert CallNotAuthorized();
+    }
+
+    /// @dev Transient slot of the authorization counter for `callHash`. Hashing with a
+    ///      seed keeps solver-chosen hashes away from any other transient slot.
+    function _authorizationSlot(
+        bytes32 callHash
+    ) private pure returns (bytes32 slot) {
+        assembly ("memory-safe") {
+            mstore(0x00, callHash)
+            mstore(0x20, _AUTHORIZATION_SEED)
+            slot := keccak256(0x00, 0x40)
+        }
     }
 
     /// @dev Safe max-approve each token to its spender.
