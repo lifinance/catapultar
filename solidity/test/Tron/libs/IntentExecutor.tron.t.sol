@@ -166,6 +166,19 @@ contract IntentExecutorTronTest is Test {
         executor.executeAndSweep(approvals, calls, sweeps);
     }
 
+    // -- Solver gate --
+
+    function testRevert_executeWithoutAuthorization() external {
+        tronUsdt.mint(address(executor), 1000e6);
+
+        IntentExecutor.SweepTarget[] memory sweeps = new IntentExecutor.SweepTarget[](1);
+        sweeps[0] = IntentExecutor.SweepTarget({ token: address(tronUsdt), recipient: recipient });
+
+        vm.expectRevert(IntentExecutor.CallNotAuthorized.selector);
+        executor.executeAndSweep(new IntentExecutor.Approval[](0), new IntentExecutor.Call3[](0), sweeps);
+        assertEq(tronUsdt.balanceOf(address(executor)), 1000e6);
+    }
+
     // -- Standard token still works --
 
     function test_executeAndSweep_standardToken_stillWorks() external {

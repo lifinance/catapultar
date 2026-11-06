@@ -96,6 +96,8 @@ function constructorParams(
     .map((solver) =>
       parseTronAccount(tronWeb, "INTENT_EXECUTOR_SOLVERS", solver),
     );
+  if (solverHexes.length === 0)
+    throw new Error("INTENT_EXECUTOR_SOLVERS: lists no solver address");
   consola.info("IntentExecutorTron constructor:", {
     owner: `${tronWeb.address.fromHex(ownerHex)} (${ownerHex})`,
     solvers: solverHexes.map(
@@ -312,6 +314,11 @@ async function main() {
 
   if (contractsToRun.includes("IntentExecutorTron"))
     await requireTvmCancun(rpcUrl, headers);
+  // Resolve every constructor argument up front: a bad INTENT_EXECUTOR_* value must
+  // fail before the run deploys anything.
+  const params = new Map(
+    contractsToRun.map((name) => [name, constructorParams(name, network)]),
+  );
 
   const deployments = await loadDeployments();
   const results: Array<{
@@ -326,7 +333,7 @@ async function main() {
       const artifact = await loadTronArtifact(contractName);
       const result = await deployer.deployContract(
         artifact,
-        constructorParams(contractName, network),
+        params.get(contractName),
       );
 
       results.push({ contract: contractName, result });

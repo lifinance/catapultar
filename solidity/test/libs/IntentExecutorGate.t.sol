@@ -5,7 +5,7 @@ import { Test } from "forge-std/src/Test.sol";
 
 import { ERC7821 } from "solady/src/accounts/ERC7821.sol";
 import { Ownable } from "solady/src/auth/Ownable.sol";
-import { ReentrancyGuard } from "solady/src/utils/ReentrancyGuard.sol";
+import { ReentrancyGuardTransient } from "solady/src/utils/ReentrancyGuardTransient.sol";
 import { MockERC20 } from "solady/test/utils/mocks/MockERC20.sol";
 
 import { CATValidator } from "../../src/CATValidator.sol";
@@ -20,6 +20,15 @@ import { ExecutionBinding } from "../../src/libs/LibExecutionConstraintV2.sol";
 import { VMCommand } from "../../src/libs/LibValidationVM.sol";
 
 import { V2ConstraintDigest } from "../helpers/V2ConstraintDigest.sol";
+
+/// @dev Call-proxy calldata that forwards `payload` to `executor`: the target as one
+/// 32-byte word, then the payload.
+function proxyCalldata(
+    IntentExecutor executor,
+    bytes memory payload
+) pure returns (bytes memory) {
+    return abi.encodePacked(bytes32(uint256(uint160(address(executor)))), payload);
+}
 
 /// @dev The V2 `entry` overload, so batches can encode it with abi.encodeCall.
 interface IValidatorV2 {
@@ -118,8 +127,7 @@ contract Reenterer {
 
     function reenter() external {
         authorizationsDuringCall = executor.authorizations(keccak256(payload));
-        (replaySucceeded, replayReturn) =
-            callProxy.call(abi.encodePacked(bytes32(uint256(uint160(address(executor)))), payload));
+        (replaySucceeded, replayReturn) = callProxy.call(proxyCalldata(executor, payload));
     }
 }
 
@@ -228,13 +236,28 @@ contract IntentExecutorGateTest is Test {
     ) internal view returns (bytes memory) {
         IntentExecutor.Call3[] memory calls = new IntentExecutor.Call3[](1);
         calls[0] = IntentExecutor.Call3({
-            target: address(composeProxy),
-            allowFailure: false,
-            callData: abi.encodeCall(MockComposeProxy.withdrawTo, (usdc, deliverTo, POSITION))
+            target: address(composeProxy), allowFailure: false, callData: withdrawCall(deliverTo)
         });
         IntentExecutor.SweepTarget[] memory sweeps = new IntentExecutor.SweepTarget[](1);
         sweeps[0] = IntentExecutor.SweepTarget({ token: address(inToken), recipient: solverTreasury });
         return abi.encodeCall(IntentExecutor.executeAndSweep, (new IntentExecutor.Approval[](0), calls, sweeps));
+    }
+
+    /// @dev The compose proxy call that moves the parked position to `to`.
+    function withdrawCall(
+        address to
+    ) internal view returns (bytes memory) {
+        return abi.encodeCall(MockComposeProxy.withdrawTo, (usdc, to, POSITION));
+    }
+
+    /// @dev withdrawCall(to) as the single call of an executeAndSweepNative() payload.
+    function withdrawCallsWithValue(
+        address to
+    ) internal view returns (IntentExecutor.Call3Value[] memory calls) {
+        calls = new IntentExecutor.Call3Value[](1);
+        calls[0] = IntentExecutor.Call3Value({
+            target: address(composeProxy), allowFailure: false, value: 0, callData: withdrawCall(to)
+        });
     }
 
     struct Fill {
@@ -309,16 +332,11 @@ contract IntentExecutorGateTest is Test {
         calls[1] = entryCall(payload, fill);
     }
 
-    function viaCallProxy(
-        bytes memory payload
-    ) internal pure returns (bytes memory) {
-        return abi.encodePacked(bytes32(0), payload);
-    }
-
+    /// @dev Calls the executor with `payload` through the validator's call proxy.
     function callThroughProxy(
         bytes memory payload
     ) internal returns (bool ok, bytes memory ret) {
-        (ok, ret) = callProxy.call(abi.encodePacked(bytes32(uint256(uint160(address(executor)))), payload));
+        (ok, ret) = callProxy.call(proxyCalldata(executor, payload));
     }
 
     function notAuthorized() internal pure returns (bytes memory) {
@@ -362,13 +380,7 @@ contract IntentExecutorGateTest is Test {
         assertFalse(ok);
         assertEq(ret, notAuthorized());
 
-        IntentExecutor.Call3Value[] memory calls = new IntentExecutor.Call3Value[](1);
-        calls[0] = IntentExecutor.Call3Value({
-            target: address(composeProxy),
-            allowFailure: false,
-            value: 0,
-            callData: abi.encodeCall(MockComposeProxy.withdrawTo, (usdc, attacker, POSITION))
-        });
+        IntentExecutor.Call3Value[] memory calls = withdrawCallsWithValue(attacker);
         vm.prank(attacker);
         vm.expectRevert(notAuthorized());
         executor.executeAndSweepNative(
@@ -439,13 +451,7 @@ contract IntentExecutorGateTest is Test {
         assertFalse(ok);
         assertEq(ret, notAuthorized());
 
-        IntentExecutor.Call3Value[] memory calls = new IntentExecutor.Call3Value[](1);
-        calls[0] = IntentExecutor.Call3Value({
-            target: address(composeProxy),
-            allowFailure: false,
-            value: 0,
-            callData: abi.encodeCall(MockComposeProxy.withdrawTo, (usdc, address(validator), POSITION))
-        });
+        IntentExecutor.Call3Value[] memory calls = withdrawCallsWithValue(address(validator));
         IntentExecutor.SweepTarget[] memory sweeps = new IntentExecutor.SweepTarget[](1);
         sweeps[0] = IntentExecutor.SweepTarget({ token: address(inToken), recipient: solverTreasury });
         (ok, ret) = callThroughProxy(
@@ -481,9 +487,7 @@ contract IntentExecutorGateTest is Test {
         HookToken hookToken = new HookToken();
         bytes memory payload = fillPayload(address(validator));
         Fill memory fill = signFill(address(hookToken), POSITION, payload);
-        hookToken.setHook(
-            callProxy, abi.encodePacked(bytes32(uint256(uint160(address(executor)))), fillPayload(attacker))
-        );
+        hookToken.setHook(callProxy, proxyCalldata(executor, fillPayload(attacker)));
 
         runWorkerBatch(ATOMIC_MODE, authorizeThenEntry(payload, fill));
 
@@ -500,7 +504,7 @@ contract IntentExecutorGateTest is Test {
         HookToken hookToken = new HookToken();
         bytes memory payload = fillPayload(address(validator));
         Fill memory fill = signFill(address(hookToken), POSITION, payload);
-        hookToken.setHook(callProxy, abi.encodePacked(bytes32(uint256(uint160(address(executor)))), payload));
+        hookToken.setHook(callProxy, proxyCalldata(executor, payload));
 
         ERC7821.Call[] memory calls = authorizeThenEntry(payload, fill);
         runWorkerBatch(ATOMIC_MODE, calls, notAuthorized());
@@ -538,7 +542,7 @@ contract IntentExecutorGateTest is Test {
 
         assertEq(reenterer.authorizationsDuringCall(), 1);
         assertFalse(reenterer.replaySucceeded());
-        assertEq(reenterer.replayReturn(), abi.encodeWithSelector(ReentrancyGuard.Reentrancy.selector));
+        assertEq(reenterer.replayReturn(), abi.encodeWithSelector(ReentrancyGuardTransient.Reentrancy.selector));
         assertEq(executor.authorizations(keccak256(payload)), 1);
     }
 
@@ -663,6 +667,22 @@ contract IntentExecutorGateTest is Test {
     function test_admin_constructorRejectsZeroOwner() external {
         vm.expectRevert(Ownable.NewOwnerIsZeroAddress.selector);
         new IntentExecutor(address(0), new address[](0));
+    }
+
+    /// @dev The zero address cannot be added, by the constructor or by the owner; removing
+    /// it stays allowed.
+    function test_admin_zeroSolverRejected() external {
+        address[] memory solvers = new address[](2);
+        solvers[0] = worker;
+        vm.expectRevert(IntentExecutor.ZeroSolver.selector);
+        new IntentExecutor(owner, solvers);
+
+        vm.startPrank(owner);
+        vm.expectRevert(IntentExecutor.ZeroSolver.selector);
+        executor.setSolver(address(0), true);
+        executor.setSolver(address(0), false);
+        vm.stopPrank();
+        assertFalse(executor.isSolver(address(0)));
     }
 
     function test_admin_nonSolverCannotAuthorize() external {
