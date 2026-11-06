@@ -11,6 +11,13 @@
  *      - PRIVATE_KEY (deployer private key) - can be also passed as --private-key <key>
  *      - RPC_URL_TRON (optional, defaults to https://api.trongrid.io)
  *      - TRONGRID_API_KEY (optional)
+ *      - INTENT_EXECUTOR_OWNER (required to deploy IntentExecutorTron): owner of the
+ *        solver set (a multisig), base58 (T...) or hex
+ *      - INTENT_EXECUTOR_SOLVERS (required to deploy IntentExecutorTron): comma-separated
+ *        accounts that call the validator's `entry`, base58 or hex
+ *
+ * IntentExecutorTron keeps solver authorizations in transient storage, so it needs
+ * TVM Cancun (TLOAD/TSTORE, chain parameter getAllowTvmCancun = 1).
  *
  * Usage (run from catapultar/typescript):
  *   bun run scripts/tron/deploy-catapultar.ts [--dry-run] [--testnet|--network tronshasta] [--private-key 0x...] [--rpc-url <url>] [--trongrid-api-key <key>]
@@ -41,6 +48,8 @@ import {
   type ITronDeploymentConfig,
   type ITronDeploymentResult,
   type TronTvmNetworkName,
+  getTronWebCodecOnlyForNetwork,
+  tronAddressToHex,
 } from '@lifi/tron-devkit'
 
 // ── Configuration ──────────────────────────────────────────────────────────────
@@ -65,6 +74,29 @@ const OPTIONAL_CONTRACTS = ['McopyTestTron'] as const
 const ALL_CONTRACTS = [...DEFAULT_CONTRACTS, ...OPTIONAL_CONTRACTS] as const
 
 type DeployStepName = (typeof ALL_CONTRACTS)[number]
+
+/** Constructor arguments per contract; contracts without arguments return []. */
+function constructorParams(
+  contractName: DeployStepName,
+  network: TronTvmNetworkName
+): unknown[] {
+  if (contractName !== 'IntentExecutorTron') return []
+  const owner = process.env.INTENT_EXECUTOR_OWNER
+  const solvers = process.env.INTENT_EXECUTOR_SOLVERS
+  if (!owner || !solvers)
+    throw new Error(
+      'IntentExecutorTron needs INTENT_EXECUTOR_OWNER and INTENT_EXECUTOR_SOLVERS'
+    )
+  const tronWeb = getTronWebCodecOnlyForNetwork(network)
+  const toEvm = (address: string) => tronAddressToHex(tronWeb, address.trim())
+  return [
+    toEvm(owner),
+    solvers
+      .split(',')
+      .filter((solver) => solver.trim() !== '')
+      .map(toEvm),
+  ]
+}
 
 async function loadTronArtifact(
   contractName: DeployStepName
@@ -170,6 +202,32 @@ async function saveDeployments(
 
 // ── Main ───────────────────────────────────────────────────────────────────────
 
+/**
+ * IntentExecutorTron keeps solver authorizations in transient storage and has no
+ * storage fallback. Refuse to deploy it unless the chain has TLOAD/TSTORE enabled.
+ */
+async function requireTvmCancun(
+  rpcUrl: string,
+  headers: Record<string, string>
+): Promise<void> {
+  const response = await fetch(`${rpcUrl}/wallet/getchainparameters`, {
+    headers,
+  })
+  if (!response.ok)
+    throw new Error(`getchainparameters failed: HTTP ${response.status}`)
+  const { chainParameter } = (await response.json()) as {
+    chainParameter: Array<{ key: string; value?: number }>
+  }
+  const allowCancun = chainParameter.find(
+    (parameter) => parameter.key === 'getAllowTvmCancun'
+  )?.value
+  if (allowCancun !== 1)
+    throw new Error(
+      'IntentExecutorTron needs TVM Cancun (getAllowTvmCancun = 1); this chain lacks it'
+    )
+  consola.info('TVM Cancun enabled (getAllowTvmCancun = 1)')
+}
+
 async function main() {
   const {
     dryRun,
@@ -216,6 +274,9 @@ async function main() {
     balance: `${info.balance} TRX`,
   })
 
+  if (contractsToRun.includes('IntentExecutorTron'))
+    await requireTvmCancun(rpcUrl, headers)
+
   const deployments = await loadDeployments()
   const results: Array<{
     contract: string
@@ -227,7 +288,10 @@ async function main() {
 
     try {
       const artifact = await loadTronArtifact(contractName)
-      const result = await deployer.deployContract(artifact)
+      const result = await deployer.deployContract(
+        artifact,
+        constructorParams(contractName, network)
+      )
 
       results.push({ contract: contractName, result })
       deployments[contractName] = result.contractAddress

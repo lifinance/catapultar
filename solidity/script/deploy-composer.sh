@@ -1,15 +1,19 @@
 #!/usr/bin/env bash
 #
-# deploy-validator-v2.sh
+# deploy-composer.sh
 #
-# Deploys CATValidatorV2 to every chain Composer serves. Each chain gets its own
-# `forge script deploy --sig 'runValidatorV2(string[])' '[<chain>]'` process, and all chains run in
-# parallel. The deployment is CREATE2 through the deterministic deployer with salt 0, so every
-# chain gets the same address, and the forge script skips a chain that already has code there.
+# Deploys one contract to every chain Composer serves: CATValidatorV2 (default) or the
+# IntentExecutor. Each chain gets its own `forge script deploy --sig '<entry>(string[])' '[<chain>]'`
+# process, and all chains run in parallel. The deployment is CREATE2 through the deterministic
+# deployer with salt 0, so every chain gets the same address, and the forge script skips a chain
+# that already has code there. Both contracts need a Cancun VM; deploy.s.sol reverts
+# ChainLacksCancun on a chain without it.
 #
-#   ERPC_SECRET=... ./script/deploy-validator-v2.sh --account deployer               # simulate only
-#   ERPC_SECRET=... ./script/deploy-validator-v2.sh --account deployer --broadcast   # deploy
-#   CHAINS="base tempo" ./script/deploy-validator-v2.sh --account deployer --broadcast
+#   ERPC_SECRET=... ./script/deploy-composer.sh --account deployer               # simulate only
+#   ERPC_SECRET=... ./script/deploy-composer.sh --account deployer --broadcast   # deploy
+#   CHAINS="base tempo" ./script/deploy-composer.sh --account deployer --broadcast
+#   CONTRACT=IntentExecutor INTENT_EXECUTOR_OWNER=0x... INTENT_EXECUTOR_SOLVERS=0x...,0x... \
+#     ERPC_SECRET=... ./script/deploy-composer.sh --account deployer --broadcast
 #
 # Every argument goes to `forge script`: wallet flags, --broadcast, -vvvv, ... Without --broadcast
 # forge only simulates. A keystore (--account or --keystore) without --password or --password-file
@@ -23,9 +27,15 @@
 #                   RPC_URL_<NAME> uses https://erpc-dev.li.finance/yggdrasil/evm/<chainId>.
 #   RPC_URL_<NAME>  RPC for one chain, e.g. RPC_URL_BASE. deploy.s.sol forks the same variable.
 #   CHAINS          Space-separated subset of the chain names below (default: every chain).
+#   CONTRACT        CATValidatorV2 (default) or IntentExecutor.
+#   INTENT_EXECUTOR_OWNER    IntentExecutor only: owner of the solver set (a multisig). Required.
+#   INTENT_EXECUTOR_SOLVERS  IntentExecutor only: comma-separated initial solver accounts, the
+#                   accounts that call the validator's `entry`. Required. The owner and the solver
+#                   list fold into the init code, so every chain must get the same values in the
+#                   same order to share one address.
 #   FORGE_TEMPO     forge for Tempo (default: ~/.foundry-tempo/bin/forge). Tempo has no native gas
 #                   coin: each transaction names a TIP-20 fee token, which stock forge cannot send.
-#   LOG_DIR         Per-chain forge logs (default: cache/deploy-validator-v2/<timestamp>).
+#   LOG_DIR         Per-chain forge logs (default: cache/deploy-composer/<contract>-<timestamp>).
 
 set -uo pipefail
 
@@ -76,7 +86,25 @@ CREATE2_DEPLOYER=0x4e59b44847b379578588920ca78fbf26c0b4956c
 CANONICAL_VM=0xA9f22b951d5A9CBBD0eC8d2741EA44BFDD2D11fd # deploy.s.sol CANONICAL_VM
 ERPC_BASE=https://erpc-dev.li.finance/yggdrasil/evm
 FORGE_TEMPO=${FORGE_TEMPO:-"$HOME/.foundry-tempo/bin/forge"}
-LOG_DIR=${LOG_DIR:-"cache/deploy-validator-v2/$(date +%Y%m%d-%H%M%S)"}
+CONTRACT=${CONTRACT:-CATValidatorV2}
+LOG_DIR=${LOG_DIR:-"cache/deploy-composer/$CONTRACT-$(date +%Y%m%d-%H%M%S)"}
+
+case $CONTRACT in
+  CATValidatorV2)
+    ENTRY='runValidatorV2(string[])'
+    ;;
+  IntentExecutor)
+    ENTRY='runIntentExecutor(string[])'
+    if [ -z "${INTENT_EXECUTOR_OWNER:-}" ] || [ -z "${INTENT_EXECUTOR_SOLVERS:-}" ]; then
+      echo "Error: CONTRACT=IntentExecutor needs INTENT_EXECUTOR_OWNER and INTENT_EXECUTOR_SOLVERS."
+      exit 1
+    fi
+    ;;
+  *)
+    echo "Error: unknown CONTRACT '$CONTRACT'. Use CATValidatorV2 or IntentExecutor."
+    exit 1
+    ;;
+esac
 
 chain_row() {
   # chain_row NAME — prints NAME's table row, or nothing when NAME is unknown.
@@ -148,9 +176,17 @@ fi
 echo "Building..."
 forge build >"$LOG_DIR/build.log" 2>&1 || { echo "Build failed, see $LOG_DIR/build.log"; exit 1; }
 
-INIT_CODE="$(jq -r '.bytecode.object' out/CATValidatorV2.sol/CATValidatorV2.json)$(cast abi-encode 'f(address)' "$CANONICAL_VM" | cut -c3-)"
+case $CONTRACT in
+  CATValidatorV2)
+    INIT_ARGS=$(cast abi-encode 'f(address)' "$CANONICAL_VM")
+    ;;
+  IntentExecutor)
+    INIT_ARGS=$(cast abi-encode 'f(address,address[])' "$INTENT_EXECUTOR_OWNER" "[$INTENT_EXECUTOR_SOLVERS]")
+    ;;
+esac
+INIT_CODE="$(jq -r '.bytecode.object' "out/$CONTRACT.sol/$CONTRACT.json")$(cut -c3- <<<"$INIT_ARGS")"
 EXPECTED=$(cast compute-address "$CREATE2_DEPLOYER" --salt "$(cast to-uint256 0)" --init-code "$INIT_CODE" | awk '{ print $NF }')
-echo "CATValidatorV2 expected at $EXPECTED"
+echo "$CONTRACT expected at $EXPECTED"
 echo "Logs: $LOG_DIR"
 [ "$BROADCAST" = 1 ] || echo "No --broadcast: simulating only."
 
@@ -168,7 +204,7 @@ for name in $SELECTED; do
   fi
   (
     export "$(rpc_var "$name")=$(resolve_rpc "$name" "$id")"
-    "$forge_bin" script script/deploy.s.sol:deploy --sig 'runValidatorV2(string[])' "[$name]" \
+    "$forge_bin" script script/deploy.s.sol:deploy --sig "$ENTRY" "[$name]" \
       ${extra_args[@]+"${extra_args[@]}"} ${FORGE_ARGS[@]+"${FORGE_ARGS[@]}"}
   ) >"$LOG_DIR/$name.log" 2>&1 </dev/null &
   PIDS+=($!)
@@ -208,7 +244,7 @@ for i in "${!PIDS[@]}"; do
 done
 
 echo ""
-echo "==================== CATValidatorV2 $EXPECTED ===================="
+echo "==================== $CONTRACT $EXPECTED ===================="
 printf '%s\n' "${SUMMARY[@]}"
 [ "$FAILED" = 1 ] && echo "" && echo "Failures: see $LOG_DIR/<chain>.log"
 exit "$FAILED"
