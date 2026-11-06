@@ -50,7 +50,8 @@ import { SafeTransferLib } from "solady/src/utils/SafeTransferLib.sol";
 ///      two-step handover. The gate cannot be disabled.
 ///
 ///      The authorizations and the reentrancy guard live in transient storage, so the
-///      contract requires a Cancun-compatible VM (TSTORE/TLOAD).
+///      contract requires a Cancun-compatible VM (TSTORE/TLOAD). The constructor probes
+///      transient storage, so deployment fails on any other VM.
 ///
 ///      Tokens or ETH left in this contract after a call stay until a later authorized
 ///      call moves them, or until a spender that an earlier call max-approved pulls
@@ -109,6 +110,8 @@ contract IntentExecutor is Ownable, ReentrancyGuardTransient {
     error ZeroSolver();
     /// @dev Ownership moves only through the two-step handover and cannot be renounced.
     error OwnershipTransferDisabled();
+    /// @dev The VM does not support transient storage (TSTORE/TLOAD).
+    error TransientStorageUnsupported();
 
     /// Events ///
 
@@ -126,10 +129,20 @@ contract IntentExecutor is Ownable, ReentrancyGuardTransient {
 
     /// @param owner_ Manages the solver set. Must not be zero.
     /// @param solvers Initial solver set.
+    /// @dev Deployment fails on a VM without transient storage. TSTORE is an undefined
+    /// opcode there, so the probe aborts the creation. A VM that accepts TSTORE but does
+    /// not read the value back reverts TransientStorageUnsupported.
     constructor(
         address owner_,
         address[] memory solvers
     ) {
+        bool transientStorage;
+        assembly ("memory-safe") {
+            tstore(0, 1)
+            transientStorage := tload(0)
+            tstore(0, 0)
+        }
+        if (!transientStorage) revert TransientStorageUnsupported();
         if (owner_ == address(0)) revert NewOwnerIsZeroAddress();
         _initializeOwner(owner_);
         for (uint256 i = 0; i < solvers.length; ++i) {
