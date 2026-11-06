@@ -611,15 +611,47 @@ contract IntentExecutorGateTest is Test {
         assertEq(executor.authorizations(keccak256(payload)), 0);
     }
 
+    /// @dev Relays the worker's signed batch from the attacker with `gas` gas.
+    function relayWithGas(
+        bytes32 mode,
+        bytes memory executionData,
+        uint256 gas
+    ) internal returns (bool ok) {
+        vm.prank(attacker, attacker);
+        (ok,) = worker.call{ gas: gas }(abi.encodeWithSignature("execute(bytes32,bytes)", mode, executionData));
+    }
+
+    /// @dev The lowest relay gas at which a skipping batch runs authorizeCall but `entry`
+    /// runs out of gas. Searched rather than fixed, because the window moves with the
+    /// compiler settings (coverage builds are unoptimized). Leaves the state untouched.
+    function starvingGas(
+        bytes memory payload,
+        Fill memory fill
+    ) internal returns (uint256) {
+        uint256 nonce = workerNonce;
+        bytes memory executionData = signBatch(SKIP_FAILURES_MODE, authorizeThenEntry(payload, fill));
+        for (uint256 gas = 50_000; gas < 2_000_000; gas += 5000) {
+            uint256 snapshot = vm.snapshotState();
+            bool starved = relayWithGas(SKIP_FAILURES_MODE, executionData, gas)
+                && executor.authorizations(keccak256(payload)) == 1 && usdc.balanceOf(destination) == 0;
+            vm.revertToState(snapshot);
+            if (starved) {
+                workerNonce = nonce;
+                return gas;
+            }
+        }
+        revert("no starving gas found");
+    }
+
     /// @dev The skipping-batch leak needs no accidental failure: anyone can relay the
     /// worker's signed batch with enough gas for authorizeCall but not for `entry`.
     function test_skipFailuresBatch_attackerStarvesEntry() external {
         bytes memory payload = fillPayload(address(validator));
         Fill memory fill = signFill(address(inToken), POSITION, payload);
+        uint256 gas = starvingGas(payload, fill);
         bytes memory executionData = signBatch(SKIP_FAILURES_MODE, authorizeThenEntry(payload, fill));
 
-        vm.prank(attacker, attacker);
-        Catapultar(worker).execute{ gas: 150_000 }(SKIP_FAILURES_MODE, executionData);
+        assertTrue(relayWithGas(SKIP_FAILURES_MODE, executionData, gas));
         assertEq(executor.authorizations(keccak256(payload)), 1);
         assertEq(usdc.balanceOf(destination), 0);
 
@@ -631,13 +663,12 @@ contract IntentExecutorGateTest is Test {
     function test_atomicBatch_attackerStarvesEntry_reverts() external {
         bytes memory payload = fillPayload(address(validator));
         Fill memory fill = signFill(address(inToken), POSITION, payload);
+        uint256 gas = starvingGas(payload, fill);
         bytes memory executionData = signBatch(ATOMIC_MODE, authorizeThenEntry(payload, fill));
 
-        vm.prank(attacker, attacker);
-        (bool ok,) =
-            worker.call{ gas: 150_000 }(abi.encodeWithSignature("execute(bytes32,bytes)", ATOMIC_MODE, executionData));
-        assertFalse(ok);
+        assertFalse(relayWithGas(ATOMIC_MODE, executionData, gas));
         assertEq(executor.authorizations(keccak256(payload)), 0);
+        assertEq(usdc.balanceOf(address(composeProxy)), POSITION);
     }
 
     /// forge-config: default.isolate = true
