@@ -385,20 +385,24 @@ $ forge coverage --ir-minimum --no-match-coverage "(script|test)" [--report lcov
 
 ### Deploy
 
-To deploy the script, provide RPC urls in `.env` in the format of: `RPC_URL_<name>`. The name does not matter but when used in the below script, the name is accessed through the `string[]` array.
+To deploy the script, provide RPC urls in `.env` in the format of: `RPC_URL_<name>`. The name does not matter but when used in the below script, the name is accessed through the `string[]` array. `run` also deploys the IntentExecutor, so it needs `INTENT_EXECUTOR_OWNER` and `INTENT_EXECUTOR_SOLVERS` (see below).
 
 ```shell
 $ forge script deploy --sig "run(string[])" "[<chains>]" --multi --verify --broadcast
 ```
 
-#### CATValidatorV2 on every Composer chain
+#### CATValidatorV2 or IntentExecutor on every Composer chain
 
-`script/deploy-validator-v2.sh` runs `runValidatorV2` on every chain Composer serves, one `forge script` process per chain, all in parallel. Every argument goes to `forge script`; without `--broadcast` forge only simulates. A keystore account gets one password prompt for all chains. Chains without an `RPC_URL_<NAME>` use the develop eRPC, so set `ERPC_SECRET`. Tempo uses the Tempo fork of forge (`FORGE_TEMPO`, default `~/.foundry-tempo/bin/forge`). The header of the script lists every option.
+`script/deploy-composer.sh` runs `runValidatorV2` (default) or, with `CONTRACT=IntentExecutor`, `runIntentExecutor` on every chain Composer serves, one `forge script` process per chain, all in parallel. Every argument goes to `forge script`; without `--broadcast` forge only simulates. A keystore account gets one password prompt for all chains. Chains without an `RPC_URL_<NAME>` use the develop eRPC, so set `ERPC_SECRET`. Tempo uses the Tempo fork of forge (`FORGE_TEMPO`, default `~/.foundry-tempo/bin/forge`). The header of the script lists every option.
 
 ```shell
-$ ERPC_SECRET=... ./script/deploy-validator-v2.sh --account deployer --broadcast
-$ CHAINS="pharos tempo" ERPC_SECRET=... ./script/deploy-validator-v2.sh --account deployer --broadcast
+$ ERPC_SECRET=... ./script/deploy-composer.sh --account deployer --broadcast
+$ CHAINS="pharos tempo" ERPC_SECRET=... ./script/deploy-composer.sh --account deployer --broadcast
+$ CONTRACT=IntentExecutor INTENT_EXECUTOR_OWNER=0x... INTENT_EXECUTOR_SOLVERS=0x...,0x... \
+    ERPC_SECRET=... ./script/deploy-composer.sh --account deployer --broadcast
 ```
+
+The IntentExecutor only runs a call that one of its solvers authorized earlier in the same transaction (`authorizeCall(keccak256(execPayload))`). `INTENT_EXECUTOR_OWNER` manages the solver set; use a multisig. `INTENT_EXECUTOR_SOLVERS` lists the accounts that call the validator's `entry`. Both fold into the CREATE2 init code, so every chain must get the same owner and the same solver list in the same order to share one address. The executor keeps authorizations in transient storage, so the deploy reverts `ChainLacksCancun` on a chain without Cancun.
 
 ## License Notice
 
