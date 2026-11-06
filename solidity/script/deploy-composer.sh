@@ -92,6 +92,7 @@ LOG_DIR=${LOG_DIR:-"cache/deploy-composer/$CONTRACT-$(date +%Y%m%d-%H%M%S)"}
 case $CONTRACT in
   CATValidatorV2)
     ENTRY='runValidatorV2(string[])'
+    INIT_ARGS=$(cast abi-encode 'f(address)' "$CANONICAL_VM")
     ;;
   IntentExecutor)
     ENTRY='runIntentExecutor(string[])'
@@ -99,6 +100,7 @@ case $CONTRACT in
       echo "Error: CONTRACT=IntentExecutor needs INTENT_EXECUTOR_OWNER and INTENT_EXECUTOR_SOLVERS."
       exit 1
     fi
+    INIT_ARGS=$(cast abi-encode 'f(address,address[])' "$INTENT_EXECUTOR_OWNER" "[$INTENT_EXECUTOR_SOLVERS]") || exit 1
     ;;
   *)
     echo "Error: unknown CONTRACT '$CONTRACT'. Use CATValidatorV2 or IntentExecutor."
@@ -176,16 +178,9 @@ fi
 echo "Building..."
 forge build >"$LOG_DIR/build.log" 2>&1 || { echo "Build failed, see $LOG_DIR/build.log"; exit 1; }
 
-case $CONTRACT in
-  CATValidatorV2)
-    INIT_ARGS=$(cast abi-encode 'f(address)' "$CANONICAL_VM")
-    ;;
-  IntentExecutor)
-    INIT_ARGS=$(cast abi-encode 'f(address,address[])' "$INTENT_EXECUTOR_OWNER" "[$INTENT_EXECUTOR_SOLVERS]")
-    ;;
-esac
 INIT_CODE="$(jq -r '.bytecode.object' "out/$CONTRACT.sol/$CONTRACT.json")$(cut -c3- <<<"$INIT_ARGS")"
 EXPECTED=$(cast compute-address "$CREATE2_DEPLOYER" --salt "$(cast to-uint256 0)" --init-code "$INIT_CODE" | awk '{ print $NF }')
+[ -n "$EXPECTED" ] || { echo "Error: could not compute the expected $CONTRACT address."; exit 1; }
 echo "$CONTRACT expected at $EXPECTED"
 echo "Logs: $LOG_DIR"
 [ "$BROADCAST" = 1 ] || echo "No --broadcast: simulating only."
