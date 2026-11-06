@@ -33,7 +33,9 @@ contract IntentExecutorTest is Test {
     address feeCollector;
 
     function setUp() external {
-        executor = new IntentExecutor();
+        address[] memory solvers = new address[](1);
+        solvers[0] = address(this);
+        executor = new IntentExecutor(makeAddr("owner"), solvers);
         tokenA = new MockERC20("Token A", "TKA", 18);
         tokenB = new MockERC20("Token B", "TKB", 18);
         user = makeAddr("user");
@@ -52,6 +54,7 @@ contract IntentExecutorTest is Test {
         IntentExecutor.SweepTarget[] memory sweeps = new IntentExecutor.SweepTarget[](1);
         sweeps[0] = IntentExecutor.SweepTarget({ token: address(tokenA), recipient: recipient });
 
+        authorize(abi.encodeCall(IntentExecutor.executeAndSweep, (approvals, calls, sweeps)));
         vm.expectEmit(true, true, false, true);
         emit IntentExecutor.Swept(address(tokenA), recipient, amount);
 
@@ -73,6 +76,7 @@ contract IntentExecutorTest is Test {
         sweeps[0] = IntentExecutor.SweepTarget({ token: address(tokenA), recipient: recipient });
         sweeps[1] = IntentExecutor.SweepTarget({ token: address(tokenB), recipient: recipient });
 
+        authorize(abi.encodeCall(IntentExecutor.executeAndSweep, (approvals, calls, sweeps)));
         executor.executeAndSweep(approvals, calls, sweeps);
 
         assertEq(tokenA.balanceOf(recipient), amountA);
@@ -88,6 +92,7 @@ contract IntentExecutorTest is Test {
         IntentExecutor.SweepTarget[] memory sweeps = new IntentExecutor.SweepTarget[](1);
         sweeps[0] = IntentExecutor.SweepTarget({ token: address(tokenA), recipient: recipient });
 
+        authorize(abi.encodeCall(IntentExecutor.executeAndSweep, (approvals, calls, sweeps)));
         vm.recordLogs();
         executor.executeAndSweep(approvals, calls, sweeps);
 
@@ -112,6 +117,7 @@ contract IntentExecutorTest is Test {
         IntentExecutor.SweepTarget[] memory sweeps = new IntentExecutor.SweepTarget[](1);
         sweeps[0] = IntentExecutor.SweepTarget({ token: address(tokenA), recipient: recipient });
 
+        authorize(abi.encodeCall(IntentExecutor.executeAndSweep, (approvals, calls, sweeps)));
         executor.executeAndSweep(approvals, calls, sweeps);
 
         assertEq(tokenA.balanceOf(feeCollector), amount / 10);
@@ -130,6 +136,7 @@ contract IntentExecutorTest is Test {
         IntentExecutor.SweepTarget[] memory sweeps = new IntentExecutor.SweepTarget[](1);
         sweeps[0] = IntentExecutor.SweepTarget({ token: address(tokenA), recipient: recipient });
 
+        authorize(abi.encodeCall(IntentExecutor.executeAndSweep, (approvals, calls, sweeps)));
         executor.executeAndSweep(approvals, calls, sweeps);
 
         assertEq(tokenA.balanceOf(recipient), amount);
@@ -146,6 +153,7 @@ contract IntentExecutorTest is Test {
         IntentExecutor.Call3Value[] memory calls = new IntentExecutor.Call3Value[](0);
         IntentExecutor.SweepTarget[] memory sweeps = new IntentExecutor.SweepTarget[](0);
 
+        authorize(abi.encodeCall(IntentExecutor.executeAndSweepNative, (approvals, calls, sweeps, payable(recipient))));
         vm.expectEmit(true, false, false, true);
         emit IntentExecutor.SweptNative(recipient, amount);
 
@@ -165,6 +173,7 @@ contract IntentExecutorTest is Test {
 
         uint256 callerBalanceBefore = address(this).balance;
 
+        authorize(abi.encodeCall(IntentExecutor.executeAndSweepNative, (approvals, calls, sweeps, payable(address(0)))));
         executor.executeAndSweepNative(approvals, calls, sweeps, payable(address(0)));
 
         assertEq(address(this).balance, callerBalanceBefore + amount);
@@ -182,6 +191,7 @@ contract IntentExecutorTest is Test {
         IntentExecutor.SweepTarget[] memory sweeps = new IntentExecutor.SweepTarget[](1);
         sweeps[0] = IntentExecutor.SweepTarget({ token: address(tokenA), recipient: recipient });
 
+        authorize(abi.encodeCall(IntentExecutor.executeAndSweepNative, (approvals, calls, sweeps, payable(recipient))));
         executor.executeAndSweepNative(approvals, calls, sweeps, payable(recipient));
 
         assertEq(tokenA.balanceOf(recipient), tokenAmount);
@@ -196,6 +206,7 @@ contract IntentExecutorTest is Test {
         IntentExecutor.Call3Value[] memory calls = new IntentExecutor.Call3Value[](0);
         IntentExecutor.SweepTarget[] memory sweeps = new IntentExecutor.SweepTarget[](0);
 
+        authorize(abi.encodeCall(IntentExecutor.executeAndSweepNative, (approvals, calls, sweeps, payable(recipient))));
         vm.recordLogs();
         executor.executeAndSweepNative(approvals, calls, sweeps, payable(recipient));
 
@@ -208,6 +219,7 @@ contract IntentExecutorTest is Test {
         IntentExecutor.SweepTarget[] memory sweeps = new IntentExecutor.SweepTarget[](0);
 
         vm.deal(address(this), 1 ether);
+        authorize(abi.encodeCall(IntentExecutor.executeAndSweepNative, (approvals, calls, sweeps, payable(recipient))));
         executor.executeAndSweepNative{ value: 1 ether }(approvals, calls, sweeps, payable(recipient));
 
         assertEq(recipient.balance, 1 ether);
@@ -225,6 +237,7 @@ contract IntentExecutorTest is Test {
         });
         IntentExecutor.SweepTarget[] memory sweeps = new IntentExecutor.SweepTarget[](0);
 
+        authorize(abi.encodeCall(IntentExecutor.executeAndSweep, (approvals, calls, sweeps)));
         vm.expectRevert();
         executor.executeAndSweep(approvals, calls, sweeps);
     }
@@ -239,6 +252,7 @@ contract IntentExecutorTest is Test {
         });
         IntentExecutor.SweepTarget[] memory sweeps = new IntentExecutor.SweepTarget[](0);
 
+        authorize(abi.encodeCall(IntentExecutor.executeAndSweep, (approvals, calls, sweeps)));
         IntentExecutor.Result[] memory results = executor.executeAndSweep(approvals, calls, sweeps);
 
         assertEq(results.length, 1);
@@ -258,6 +272,7 @@ contract IntentExecutorTest is Test {
         });
         IntentExecutor.SweepTarget[] memory sweeps = new IntentExecutor.SweepTarget[](0);
 
+        authorize(abi.encodeCall(IntentExecutor.executeAndSweep, (approvals, calls, sweeps)));
         IntentExecutor.Result[] memory results = executor.executeAndSweep(approvals, calls, sweeps);
 
         assertEq(results.length, 1);
@@ -273,6 +288,7 @@ contract IntentExecutorTest is Test {
         calls[0] = IntentExecutor.Call3Value({ target: recipient, allowFailure: false, value: amount, callData: hex"" });
         IntentExecutor.SweepTarget[] memory sweeps = new IntentExecutor.SweepTarget[](0);
 
+        authorize(abi.encodeCall(IntentExecutor.executeAndSweepNative, (approvals, calls, sweeps, payable(address(0)))));
         executor.executeAndSweepNative(approvals, calls, sweeps, payable(address(0)));
 
         assertEq(recipient.balance, amount);
@@ -289,6 +305,7 @@ contract IntentExecutorTest is Test {
         });
         IntentExecutor.SweepTarget[] memory sweeps = new IntentExecutor.SweepTarget[](0);
 
+        authorize(abi.encodeCall(IntentExecutor.executeAndSweepNative, (approvals, calls, sweeps, payable(address(0)))));
         vm.expectRevert();
         executor.executeAndSweepNative{ value: 1 ether }(approvals, calls, sweeps, payable(address(0)));
     }
@@ -303,6 +320,7 @@ contract IntentExecutorTest is Test {
         IntentExecutor.SweepTarget[] memory sweeps = new IntentExecutor.SweepTarget[](1);
         sweeps[0] = IntentExecutor.SweepTarget({ token: address(tokenA), recipient: address(0) });
 
+        authorize(abi.encodeCall(IntentExecutor.executeAndSweep, (approvals, calls, sweeps)));
         vm.expectRevert(abi.encodeWithSelector(IntentExecutor.ZeroRecipient.selector));
         executor.executeAndSweep(approvals, calls, sweeps);
     }
@@ -318,10 +336,12 @@ contract IntentExecutorTest is Test {
         IntentExecutor.SweepTarget[] memory sweeps = new IntentExecutor.SweepTarget[](0);
 
         // First call sets max allowance.
+        authorize(abi.encodeCall(IntentExecutor.executeAndSweep, (approvals, calls, sweeps)));
         executor.executeAndSweep(approvals, calls, sweeps);
         assertEq(tokenA.allowance(address(executor), address(this)), type(uint256).max);
 
         // Second call: allowance already max — no Approval event should be emitted.
+        authorize(abi.encodeCall(IntentExecutor.executeAndSweep, (approvals, calls, sweeps)));
         vm.recordLogs();
         executor.executeAndSweep(approvals, calls, sweeps);
         assertEq(vm.getRecordedLogs().length, 0);
@@ -342,6 +362,7 @@ contract IntentExecutorTest is Test {
         IntentExecutor.Call3[] memory calls = new IntentExecutor.Call3[](0);
         IntentExecutor.SweepTarget[] memory sweeps = new IntentExecutor.SweepTarget[](0);
 
+        authorize(abi.encodeCall(IntentExecutor.executeAndSweep, (approvals, calls, sweeps)));
         vm.expectEmit(true, true, false, true, address(tokenA));
         emit Approval(address(executor), spender, type(uint256).max);
         executor.executeAndSweep(approvals, calls, sweeps);
@@ -365,6 +386,7 @@ contract IntentExecutorTest is Test {
         IntentExecutor.SweepTarget[] memory sweeps = new IntentExecutor.SweepTarget[](0);
 
         // Only spenderB should trigger an Approval event.
+        authorize(abi.encodeCall(IntentExecutor.executeAndSweep, (approvals, calls, sweeps)));
         vm.recordLogs();
         executor.executeAndSweep(approvals, calls, sweeps);
 
@@ -389,10 +411,12 @@ contract IntentExecutorTest is Test {
         IntentExecutor.Call3[] memory calls = new IntentExecutor.Call3[](0);
         IntentExecutor.SweepTarget[] memory sweeps = new IntentExecutor.SweepTarget[](0);
 
+        authorize(abi.encodeCall(IntentExecutor.executeAndSweep, (approvals, calls, sweeps)));
         executor.executeAndSweep(approvals, calls, sweeps);
         assertEq(usdt.allowance(address(executor), spender), type(uint256).max);
 
         // Second call: guard skips approve entirely — USDT would revert if approve were called.
+        authorize(abi.encodeCall(IntentExecutor.executeAndSweep, (approvals, calls, sweeps)));
         executor.executeAndSweep(approvals, calls, sweeps);
         assertEq(usdt.allowance(address(executor), spender), type(uint256).max);
     }
@@ -414,6 +438,7 @@ contract IntentExecutorTest is Test {
         IntentExecutor.SweepTarget[] memory sweeps = new IntentExecutor.SweepTarget[](0);
 
         // safeApproveWithRetry should reset to 0, then approve max.
+        authorize(abi.encodeCall(IntentExecutor.executeAndSweep, (approvals, calls, sweeps)));
         executor.executeAndSweep(approvals, calls, sweeps);
         assertEq(usdt.allowance(address(executor), spender), type(uint256).max);
     }
@@ -425,6 +450,7 @@ contract IntentExecutorTest is Test {
         IntentExecutor.Call3[] memory calls = new IntentExecutor.Call3[](0);
         IntentExecutor.SweepTarget[] memory sweeps = new IntentExecutor.SweepTarget[](0);
 
+        authorize(abi.encodeCall(IntentExecutor.executeAndSweep, (approvals, calls, sweeps)));
         executor.executeAndSweep(approvals, calls, sweeps);
 
         assertEq(tokenA.allowance(address(executor), address(this)), type(uint256).max);
@@ -437,11 +463,13 @@ contract IntentExecutorTest is Test {
         IntentExecutor.SweepTarget[] memory sweeps = new IntentExecutor.SweepTarget[](0);
 
         // First call — cold SSTORE
+        authorize(abi.encodeCall(IntentExecutor.executeAndSweep, (approvals, calls, sweeps)));
         uint256 gasBefore1 = gasleft();
         executor.executeAndSweep(approvals, calls, sweeps);
         uint256 gasUsed1 = gasBefore1 - gasleft();
 
         // Second call — already max approved, should be cheaper (SLOAD only)
+        authorize(abi.encodeCall(IntentExecutor.executeAndSweep, (approvals, calls, sweeps)));
         uint256 gasBefore2 = gasleft();
         executor.executeAndSweep(approvals, calls, sweeps);
         uint256 gasUsed2 = gasBefore2 - gasleft();
@@ -489,6 +517,7 @@ contract IntentExecutorTest is Test {
         IntentExecutor.SweepTarget[] memory sweeps = new IntentExecutor.SweepTarget[](1);
         sweeps[0] = IntentExecutor.SweepTarget({ token: address(tokenB), recipient: recipient });
 
+        authorize(abi.encodeCall(IntentExecutor.executeAndSweep, (approvals, calls, sweeps)));
         executor.executeAndSweep(approvals, calls, sweeps);
 
         assertEq(tokenA.balanceOf(feeCollector), feeAmount);
@@ -510,11 +539,19 @@ contract IntentExecutorTest is Test {
         IntentExecutor.SweepTarget[] memory sweeps = new IntentExecutor.SweepTarget[](1);
         sweeps[0] = IntentExecutor.SweepTarget({ token: address(tronUsdt), recipient: recipient });
 
+        authorize(abi.encodeCall(IntentExecutor.executeAndSweep, (approvals, calls, sweeps)));
         vm.expectRevert();
         executor.executeAndSweep(approvals, calls, sweeps);
     }
 
     // -- Helpers --
+
+    /// @dev This test contract is a solver: authorize one execution of `data`.
+    function authorize(
+        bytes memory data
+    ) internal {
+        executor.authorizeCall(keccak256(data));
+    }
 
     receive() external payable { }
 }

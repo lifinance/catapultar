@@ -17,7 +17,9 @@ contract IntentExecutorTronTest is Test {
     address recipient;
 
     function setUp() external {
-        executor = new IntentExecutorTron();
+        address[] memory solvers = new address[](1);
+        solvers[0] = address(this);
+        executor = new IntentExecutorTron(makeAddr("owner"), solvers);
         tronUsdt = new MockTronUSDT();
         standardToken = new MockERC20("Standard", "STD", 18);
         recipient = makeAddr("recipient");
@@ -34,6 +36,7 @@ contract IntentExecutorTronTest is Test {
         IntentExecutor.SweepTarget[] memory sweeps = new IntentExecutor.SweepTarget[](1);
         sweeps[0] = IntentExecutor.SweepTarget({ token: address(tronUsdt), recipient: recipient });
 
+        authorize(abi.encodeCall(IntentExecutor.executeAndSweep, (approvals, calls, sweeps)));
         vm.expectEmit(true, true, false, true);
         emit IntentExecutor.Swept(address(tronUsdt), recipient, amount);
 
@@ -55,6 +58,7 @@ contract IntentExecutorTronTest is Test {
         sweeps[0] = IntentExecutor.SweepTarget({ token: address(tronUsdt), recipient: recipient });
         sweeps[1] = IntentExecutor.SweepTarget({ token: address(standardToken), recipient: recipient });
 
+        authorize(abi.encodeCall(IntentExecutor.executeAndSweep, (approvals, calls, sweeps)));
         executor.executeAndSweep(approvals, calls, sweeps);
 
         assertEq(tronUsdt.balanceOf(recipient), usdtAmount);
@@ -74,6 +78,7 @@ contract IntentExecutorTronTest is Test {
         IntentExecutor.SweepTarget[] memory sweeps = new IntentExecutor.SweepTarget[](1);
         sweeps[0] = IntentExecutor.SweepTarget({ token: address(tronUsdt), recipient: recipient });
 
+        authorize(abi.encodeCall(IntentExecutor.executeAndSweep, (approvals, calls, sweeps)));
         executor.executeAndSweep(approvals, calls, sweeps);
 
         assertEq(tronUsdt.balanceOf(recipient), amount);
@@ -93,6 +98,7 @@ contract IntentExecutorTronTest is Test {
         IntentExecutor.SweepTarget[] memory sweeps = new IntentExecutor.SweepTarget[](1);
         sweeps[0] = IntentExecutor.SweepTarget({ token: address(tronUsdt), recipient: recipient });
 
+        authorize(abi.encodeCall(IntentExecutor.executeAndSweepNative, (approvals, calls, sweeps, payable(recipient))));
         executor.executeAndSweepNative(approvals, calls, sweeps, payable(recipient));
 
         assertEq(tronUsdt.balanceOf(recipient), tokenAmount);
@@ -110,6 +116,7 @@ contract IntentExecutorTronTest is Test {
         IntentExecutor.Call3[] memory calls = new IntentExecutor.Call3[](0);
         IntentExecutor.SweepTarget[] memory sweeps = new IntentExecutor.SweepTarget[](0);
 
+        authorize(abi.encodeCall(IntentExecutor.executeAndSweep, (approvals, calls, sweeps)));
         executor.executeAndSweep(approvals, calls, sweeps);
 
         assertEq(tronUsdt.allowance(address(executor), address(this)), type(uint256).max);
@@ -136,6 +143,7 @@ contract IntentExecutorTronTest is Test {
         IntentExecutor.SweepTarget[] memory sweeps = new IntentExecutor.SweepTarget[](1);
         sweeps[0] = IntentExecutor.SweepTarget({ token: address(tronUsdt), recipient: recipient });
 
+        authorize(abi.encodeCall(IntentExecutor.executeAndSweep, (approvals, calls, sweeps)));
         executor.executeAndSweep(approvals, calls, sweeps);
 
         assertEq(tronUsdt.balanceOf(feeCollector), feeAmount);
@@ -153,6 +161,7 @@ contract IntentExecutorTronTest is Test {
         IntentExecutor.SweepTarget[] memory sweeps = new IntentExecutor.SweepTarget[](1);
         sweeps[0] = IntentExecutor.SweepTarget({ token: address(tronUsdt), recipient: address(0) });
 
+        authorize(abi.encodeCall(IntentExecutor.executeAndSweep, (approvals, calls, sweeps)));
         vm.expectRevert(abi.encodeWithSelector(IntentExecutor.ZeroRecipient.selector));
         executor.executeAndSweep(approvals, calls, sweeps);
     }
@@ -168,12 +177,20 @@ contract IntentExecutorTronTest is Test {
         IntentExecutor.SweepTarget[] memory sweeps = new IntentExecutor.SweepTarget[](1);
         sweeps[0] = IntentExecutor.SweepTarget({ token: address(standardToken), recipient: recipient });
 
+        authorize(abi.encodeCall(IntentExecutor.executeAndSweep, (approvals, calls, sweeps)));
         executor.executeAndSweep(approvals, calls, sweeps);
 
         assertEq(standardToken.balanceOf(recipient), amount);
     }
 
     // -- Helpers --
+
+    /// @dev This test contract is a solver: authorize one execution of `data`.
+    function authorize(
+        bytes memory data
+    ) internal {
+        executor.authorizeCall(keccak256(data));
+    }
 
     receive() external payable { }
 }
