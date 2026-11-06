@@ -78,9 +78,9 @@ type Signable = {
     chainId?: bigint;
     verifyingContract: `0x${string}`;
   };
-  types: { /** Universal typed const */ };
+  types: {/** Universal typed const */};
   primaryType: string;
-  message: { /** Typed Message */ };
+  message: {/** Typed Message */};
 };
 ```
 
@@ -94,8 +94,8 @@ type EthersSignable = {
     chainId?: bigint;
     verifyingContract: `0x${string}`;
   };
-  types: { /** Universal typed const */ };
-  data: { /** Typed Message */ };
+  types: {/** Universal typed const */};
+  data: {/** Typed Message */};
 };
 ```
 
