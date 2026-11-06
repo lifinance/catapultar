@@ -2,8 +2,5 @@
   "$schema": "./node_modules/oxfmt/configuration_schema.json",
   "printWidth": 80,
   "sortPackageJson": false,
-  "ignorePatterns": [
-    "anvil.state",
-    "bun.lock"
-  ]
+  "ignorePatterns": ["anvil.state", "bun.lock"]
 }

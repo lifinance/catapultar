@@ -66,21 +66,18 @@ describe("applyEstimateGasMargin", () => {
     );
   });
 
-  it.concurrent(
-    "signatureValidationGas replaces the owner-type default",
-    () => {
-      expect(
-        applyEstimateGasMargin(estimate, "webauthn-p256", {
-          signatureValidationGas: 1_000_000n,
-        }),
-      ).toBe(estimate + 1_000_000n);
-      expect(
-        applyEstimateGasMargin(estimate, "ecdsa", {
-          signatureValidationGas: 0n,
-        }),
-      ).toBe(estimate);
-    },
-  );
+  it.concurrent("signatureValidationGas replaces the owner-type default", () => {
+    expect(
+      applyEstimateGasMargin(estimate, "webauthn-p256", {
+        signatureValidationGas: 1_000_000n,
+      }),
+    ).toBe(estimate + 1_000_000n);
+    expect(
+      applyEstimateGasMargin(estimate, "ecdsa", {
+        signatureValidationGas: 0n,
+      }),
+    ).toBe(estimate);
+  });
 
   it.concurrent("handles a zero estimate", () => {
     expect(applyEstimateGasMargin(0n, "ecdsa")).toBe(
