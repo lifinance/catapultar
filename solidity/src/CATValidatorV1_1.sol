@@ -129,16 +129,8 @@ contract CATValidatorV1_1 is CATValidator {
         address token,
         uint256 amount,
         address dest
-    ) internal override {
-        if (amount != 0) _payout(token, amount, dest);
-    }
-
-    function _payout(
-        address token,
-        uint256 amount,
-        address dest
-    ) internal virtual {
-        super._transfer(token, amount, dest);
+    ) internal virtual override {
+        if (amount != 0) super._transfer(token, amount, dest);
     }
 
     /**

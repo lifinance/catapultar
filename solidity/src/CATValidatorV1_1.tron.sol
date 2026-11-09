@@ -11,13 +11,15 @@ import { SafeTransferLibTron } from "./libs/SafeTransferLib.tron.sol";
 /// @notice Tron variant of CATValidatorV1_1. Pays outcomes through approve(self) + transferFrom(self) to bypass broken
 /// transfer() return values (Tron USDT).
 contract CATValidatorV1_1Tron is CATValidatorV1_1 {
-    function _payout(
+    function _transfer(
         address token,
         uint256 amount,
         address dest
     ) internal override {
-        token == address(0)
-            ? SafeTransferLib.safeTransferETH(dest, amount)
-            : SafeTransferLibTron.safeTransfer(token, dest, amount);
+        if (amount != 0) {
+            token == address(0)
+                ? SafeTransferLib.safeTransferETH(dest, amount)
+                : SafeTransferLibTron.safeTransfer(token, dest, amount);
+        }
     }
 }

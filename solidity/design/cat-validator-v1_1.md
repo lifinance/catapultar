@@ -30,13 +30,13 @@ ExecutionConstraint(Allowance[] allowances,Outcome[] outcomes,address executor,u
 
 **Domain.** Name `"CAT Validator"`, version `"1.1"`; the base's version is `"1"`. A v1 signature never verifies here and a v1.1 signature never verifies on v1: the verifying contract and the version both differ. `@custom:version 1.1.0` matches this domain version; the base's `@custom:version` is `0.1.0`. `_domainNameAndVersion` is overridden; Solady's `EIP712` caches the separator and recomputes it on a fork.
 
-**`pulled(token)`.** The amount of `token` moved out of the signer by the `entry` currently executing, summed over the allowances. It is written to transient storage once, after the last transfer of the loop, so a token hook that runs during the loop reads zero, never a partial sum. It is cleared after the call and before the outcomes are paid, so it is zero inside `_payout` and outside `entry`. `pulled` reports the spend, not the amount received: a fee-on-transfer token reports the full spend.
+**`pulled(token)`.** The amount of `token` moved out of the signer by the `entry` currently executing, summed over the allowances. It is written to transient storage once, after the last transfer of the loop, so a token hook that runs during the loop reads zero, never a partial sum. It is cleared after the call and before the outcomes are paid, so it is zero during the payout and outside `entry`. `pulled` reports the spend, not the amount received: a fee-on-transfer token reports the full spend.
 
 **`entryId()`.** 1, 2, 3, ... for the nine-argument entries of a transaction. The counter is transient and never reset within the transaction, so a settled entry's id is not reused. Zero outside the nine-argument `entry`. A reverted entry rolls its increment back, so the next entry takes the same id.
 
 **Strict balance read.** `SPEND_BALANCE_OF_MAGIC` reads the signer's balance through the same `checkBalanceOf` the base uses and reverts `BalanceOfFailed` on a failed or short read.
 
-**Zero-skipping payout.** `_transfer` is overridden to skip a zero amount, so a `{token, 0, refund}` refund outcome does not revert on tokens that reject zero transfers. Non-zero payouts go through `_payout`, which calls the base `_transfer`. `CATValidatorV1_1Tron` overrides `_payout` only.
+**Zero-skipping payout.** `_transfer` is overridden to skip a zero amount, so a `{token, 0, refund}` refund outcome does not revert on tokens that reject zero transfers. `CATValidatorV1_1Tron` overrides `_transfer` again with the same zero check and its own payout path.
 
 **No value to the call.** `_call` is overridden to call the proxy with value 0, so a force-fed native balance does not reach a non-payable execution target.
 
