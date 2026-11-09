@@ -213,6 +213,47 @@ contract ZeroRejectingERC20 is MockERC20 {
     }
 }
 
+/// @dev Re-enters `validator` with `nested` from `transfer` and `transferFrom`, recording the revert data.
+contract ReentrantERC20 is MockERC20 {
+    address public validator;
+    bytes public nested;
+    bytes public reason;
+
+    constructor() MockERC20("REENTER", "REENTER", 6) { }
+
+    function arm(
+        address v,
+        bytes calldata call
+    ) external {
+        validator = v;
+        nested = call;
+    }
+
+    function transfer(
+        address to,
+        uint256 amount
+    ) public override returns (bool) {
+        _reenter();
+        return super.transfer(to, amount);
+    }
+
+    function transferFrom(
+        address from,
+        address to,
+        uint256 amount
+    ) public override returns (bool) {
+        _reenter();
+        return super.transferFrom(from, to, amount);
+    }
+
+    function _reenter() internal {
+        if (validator == address(0)) return;
+        (bool ok, bytes memory ret) = validator.call(nested);
+        require(!ok, "nested entry succeeded");
+        reason = ret;
+    }
+}
+
 /// @dev Burns 1% of every `transferFrom` from the recipient.
 contract FeeOnTransferERC20 is MockERC20 {
     constructor() MockERC20("FOT", "FOT", 6) { }
@@ -982,6 +1023,44 @@ contract CATValidatorV1_1Test is Test {
         assertFalse(v11.spentNonces(address(acct), 1));
     }
 
+    /// @dev Solady's `ReentrancyGuard` slot; the entry's lock is transient, so the slot stays zero.
+    bytes32 constant STORAGE_GUARD_SLOT = bytes32(uint256(0x929eee149b4bd21268));
+
+    function test_entry_leaves_the_storage_guard_slot_untouched() external {
+        _fund(address(v11));
+        vm.prank(executor);
+        v11.entry(
+            address(probe), "", address(this), 1, _spend(address(token), DEPOSIT, DEPOSIT), _noOut(), address(0), 0, ""
+        );
+        assertEq(vm.load(address(v11), STORAGE_GUARD_SLOT), bytes32(0));
+    }
+
+    /// @dev A nested entry reverts `Reentrancy()` while the outer entry pulls and while it pays out.
+    function testFuzz_nested_entry_reverts_in_pull_and_payout(
+        bool duringPayout
+    ) external {
+        _fund(address(v11));
+        ReentrantERC20 rt = new ReentrantERC20();
+        AllowanceSpend[] memory a;
+        Outcome[] memory o = _noOut();
+        if (duringPayout) {
+            a = _spend(address(token), DEPOSIT, DEPOSIT);
+            rt.mint(address(v11), 1);
+            o = new Outcome[](1);
+            o[0] = Outcome({ token: address(rt), amount: 1, destination: makeAddr("dest") });
+        } else {
+            rt.mint(address(this), DEPOSIT);
+            rt.approve(address(v11), type(uint256).max);
+            a = _spend(address(rt), DEPOSIT, DEPOSIT);
+        }
+        rt.arm(address(v11), _entryCall(makeAddr("sink"), "", address(this), 2, _spend(address(token), 1, 1)));
+
+        vm.prank(executor);
+        v11.entry(address(probe), "", address(this), 1, a, o, address(0), 0, "");
+        assertEq(rt.reason(), abi.encodeWithSelector(ReentrancyGuard.Reentrancy.selector));
+        assertFalse(v11.spentNonces(address(this), 2));
+    }
+
     function test_revert_nested_entry_reentrancy() external {
         _fund(address(v11));
         ReentryProbe rp = new ReentryProbe();
@@ -1741,7 +1820,8 @@ contract CATValidatorV1_1Test is Test {
 
     // ---- gas ----
 
-    uint256 constant BASE_GAS_DELTA = 2005;
+    /// @dev Fresh validators: the base frame includes the first write of its storage guard, which V1.1 does not have.
+    int256 constant BASE_GAS_DELTA = -20_345;
 
     function test_gas_entry_delta_base_to_v1_1() external {
         MockERC20 tBase = new MockERC20("H", "H", 6);
@@ -1765,10 +1845,9 @@ contract CATValidatorV1_1Test is Test {
 
         emit log_named_uint("base entry gas", gasBase);
         emit log_named_uint("v1.1 entry gas", gasV11);
-        emit log_named_uint("v1.1 - base delta", gasV11 - gasBase);
-        assertLe(
-            gasV11 - gasBase, BASE_GAS_DELTA * 110 / 100, "delta within 10% of the measured v1.1 - base frame delta"
-        );
+        int256 delta = int256(gasV11) - int256(gasBase);
+        emit log_named_int("v1.1 - base delta", delta);
+        assertLe(delta, BASE_GAS_DELTA + 200, "delta within 200 gas of the measured v1.1 - base frame delta");
         assertLt(gasV11, 100_000, "loose absolute ceiling");
 
         bytes memory cdBase = abi.encodeCall(CATValidator.entry, (address(probe), "", address(this), 1, a11, o, ""));

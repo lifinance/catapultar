@@ -40,7 +40,7 @@ ExecutionConstraint(Allowance[] allowances,Outcome[] outcomes,address executor,u
 
 **No value to the call.** `_call` is overridden to call the proxy with value 0, so a force-fed native balance does not reach a non-payable execution target.
 
-**Transient storage.** `pulled` and the entry id use EIP-1153 only. The constructor probes `tstore`/`tload` and reverts on a chain without it. The probe slot is cleared. The `pulled` slot of a token is `keccak256(token, PULLED_SEED)`, where `PULLED_SEED` is an arbitrary fixed constant; the entry counter and the entry id sit at the keccak256 of their namespaced names.
+**Transient storage.** `pulled` and the entry id use EIP-1153 only. A non-zero entry id is also the nine-argument `entry`'s reentrancy lock: a nested entry reverts `Reentrancy()`, and the base's storage guard is not used. The constructor probes `tstore`/`tload` and reverts on a chain without it. The probe slot is cleared. The `pulled` slot of a token is `keccak256(token, PULLED_SEED)`, where `PULLED_SEED` is an arbitrary fixed constant; the entry counter and the entry id sit at the keccak256 of their namespaced names.
 
 ## Tron
 
@@ -57,7 +57,7 @@ Inherited from the base, not introduced here:
 
 ## Deployment and pins
 
-`script/deployV1_1.s.sol` deploys through the deterministic deployer (`0x4e59b44847b379578588920cA78FbF26c0B4956C`, salt 0), so the address is a function of the creation code and therefore of the compiler. At solc 0.8.35, the default profile, it is `0x54013b1aa6825420b941f9bFae1C26fC6135523e`. The script does not check the chain for EIP-1153. On a chain without it, forge's local simulation passes and the broadcast deployment reverts on chain, spending its gas.
+`script/deployV1_1.s.sol` deploys through the deterministic deployer (`0x4e59b44847b379578588920cA78FbF26c0B4956C`, salt 0), so the address is a function of the creation code and therefore of the compiler. At solc 0.8.35, the default profile, it is `0xA1d38c83e842ebA863238845Dc4fF14F5668041A`. The script does not check the chain for EIP-1153. On a chain without it, forge's local simulation passes and the broadcast deployment reverts on chain, spending its gas.
 
 `script/check-v1-1-bytecode.sh` pins the creation hashes of `CATValidatorV1_1` and `CATValidatorV1_1Tron` and the git blob id of each v1.1 source file (`snapshots/v1-1-bytecode.json`). A change to the base moves the hashes and fails the check. `script/check-v1-bytecode.sh` pins the creation hashes of `CATValidator` and `CATValidatorTron` (`snapshots/v1-bytecode.json`), so the base's `virtual` keywords are proven bytecode-neutral.
 

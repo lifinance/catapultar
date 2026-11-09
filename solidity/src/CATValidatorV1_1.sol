@@ -54,7 +54,7 @@ contract CATValidatorV1_1 is CATValidator {
     }
 
     /// @notice Id of the 9-argument `entry()` currently executing: 1, 2, 3, ... within a transaction and never
-    /// reused, since the counter is not reset. Zero outside it.
+    /// reused, since the counter is not reset. Zero outside it. A non-zero id is also the entry's reentrancy lock.
     function entryId() external view returns (uint256) {
         return _tload(ENTRY_ID_SLOT);
     }
@@ -101,7 +101,8 @@ contract CATValidatorV1_1 is CATValidator {
         address executionTarget,
         bytes32 payloadHash,
         bytes calldata signature
-    ) external nonReentrant {
+    ) external {
+        if (_tload(ENTRY_ID_SLOT) != 0) revert Reentrancy();
         uint256 id = _tload(ENTRY_COUNTER_SLOT) + 1;
         _tstore(ENTRY_COUNTER_SLOT, id);
         _tstore(ENTRY_ID_SLOT, id);
