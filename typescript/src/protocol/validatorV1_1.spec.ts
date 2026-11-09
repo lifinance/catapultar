@@ -152,11 +152,17 @@ describe("v1.1 ABI", () => {
     ]);
   });
 
-  it("keeps the base's 7-argument entry", () => {
+  it("disables the base's 7-argument entry", () => {
     const entry = functions.find(
       (i) => i.name === "entry" && i.inputs.length === 7,
     )!;
     expect(toFunctionSelector(entry)).toBe("0xe5ce4787");
+    expect(entry.stateMutability).toBe("pure");
+    expect(
+      CAT_VALIDATOR_V1_1_ABI.some(
+        (i) => i.type === "error" && i.name === "V1EntryDisabled",
+      ),
+    ).toBe(true);
   });
 
   it("adds pulled and entryId", () => {

@@ -170,27 +170,27 @@ export const CAT_VALIDATOR_V1_1_ABI = [
     name: "entry",
     inputs: [
       {
-        name: "execTarget",
+        name: "",
         type: "address",
         internalType: "address",
       },
       {
-        name: "execPayload",
+        name: "",
         type: "bytes",
         internalType: "bytes",
       },
       {
-        name: "account",
+        name: "",
         type: "address",
         internalType: "address",
       },
       {
-        name: "nonce",
+        name: "",
         type: "uint256",
         internalType: "uint256",
       },
       {
-        name: "allowances",
+        name: "",
         type: "tuple[]",
         internalType: "struct AllowanceSpend[]",
         components: [
@@ -212,7 +212,7 @@ export const CAT_VALIDATOR_V1_1_ABI = [
         ],
       },
       {
-        name: "outcomes",
+        name: "",
         type: "tuple[]",
         internalType: "struct Outcome[]",
         components: [
@@ -234,13 +234,13 @@ export const CAT_VALIDATOR_V1_1_ABI = [
         ],
       },
       {
-        name: "signature",
+        name: "",
         type: "bytes",
         internalType: "bytes",
       },
     ],
     outputs: [],
-    stateMutability: "nonpayable",
+    stateMutability: "pure",
   },
   {
     type: "function",
@@ -364,6 +364,11 @@ export const CAT_VALIDATOR_V1_1_ABI = [
   {
     type: "error",
     name: "TargetNotCommitted",
+    inputs: [],
+  },
+  {
+    type: "error",
+    name: "V1EntryDisabled",
     inputs: [],
   },
   {

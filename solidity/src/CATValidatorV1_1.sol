@@ -17,9 +17,7 @@ import { LibExecutionConstraintV1_1 } from "./libs/LibExecutionConstraintV1_1.so
  * means unconstrained. See CATValidator for the validation model, the call proxy and the nonce rules.
  *
  * `pulled` and the entry id live in transient storage (EIP-1153) only; the constructor reverts on a chain without it.
- * The inherited 7-argument `entry` stays callable with the base's flow under this contract's "1.1" domain and
- * zero-skipping payout; it forwards the validator's native balance to the call as the base does, publishes neither
- * `pulled` nor an entry id, and a v1.1 signer never signs its digest.
+ * The base's 7-argument `entry` reverts `V1EntryDisabled`.
  */
 contract CATValidatorV1_1 is CATValidator {
     using DynamicArrayLib for uint256[];
@@ -27,28 +25,24 @@ contract CATValidatorV1_1 is CATValidator {
     error TargetNotCommitted();
     error PayloadNotCommitted();
     error ZeroDestination();
+    error V1EntryDisabled();
 
     /// @dev Arbitrary fixed seed with no derivation. The `pulled` slot of a token is `keccak256(token, PULLED_SEED)`
     /// in transient storage; a hashed slot cannot meet the two entry-id slots, so any value is safe.
     uint256 private constant PULLED_SEED = 0x2c3fdc6a4b9e8a2f5d1e7c0b9a8f7e6d5c4b3a291807f6e5d4c3b2a1908f7e6d;
     bytes32 private constant ENTRY_COUNTER_SLOT = keccak256("com.lifi.catapultar.v1_1.entry-counter");
     bytes32 private constant ENTRY_ID_SLOT = keccak256("com.lifi.catapultar.v1_1.entry-id");
-    bytes32 private constant DOMAIN_NAME_HASH = keccak256("CAT Validator");
-    bytes32 private constant DOMAIN_VERSION_HASH = keccak256("1.1");
-
-    bytes32 private immutable DOMAIN_CACHED;
-    uint256 private immutable DOMAIN_CHAIN_ID;
-    address private immutable DOMAIN_THIS;
 
     constructor() {
         bytes32 probe = _pulledSlot(address(0));
         _tstore(probe, 1);
         require(_tload(probe) == 1);
         _tstore(probe, 0);
+    }
 
-        DOMAIN_CACHED = _computeDomainSeparator();
-        DOMAIN_CHAIN_ID = block.chainid;
-        DOMAIN_THIS = address(this);
+    function _domainNameAndVersion() internal pure override returns (string memory name, string memory version) {
+        name = "CAT Validator";
+        version = "1.1";
     }
 
     /// @notice Amount of `token` moved out of the signer by the `entry()` currently executing. Zero outside
@@ -60,9 +54,22 @@ contract CATValidatorV1_1 is CATValidator {
     }
 
     /// @notice Id of the 9-argument `entry()` currently executing: 1, 2, 3, ... within a transaction and never
-    /// reused, since the counter is not reset. Zero outside it, and inside the inherited 7-argument `entry`.
+    /// reused, since the counter is not reset. Zero outside it.
     function entryId() external view returns (uint256) {
         return _tload(ENTRY_ID_SLOT);
+    }
+
+    /// @dev v1 entry point, disabled: V1.1 accounts sign the V1.1 typehash only.
+    function entry(
+        address,
+        bytes calldata,
+        address,
+        uint256,
+        AllowanceSpend[] calldata,
+        Outcome[] calldata,
+        bytes calldata
+    ) external pure override {
+        revert V1EntryDisabled();
     }
 
     /**
@@ -108,7 +115,7 @@ contract CATValidatorV1_1 is CATValidator {
 
         _handleAllowancesPulled(execTarget, account, allowances);
 
-        if (execPayload.length != 0) _callNoValue(execTarget, execPayload);
+        if (execPayload.length != 0) _call(execTarget, execPayload);
 
         _clearPulled(allowances);
 
@@ -239,10 +246,10 @@ contract CATValidatorV1_1 is CATValidator {
      * bytes32(execTarget) || bytes(execPayload).
      * Forwards no value: a force-fed native balance must not reach a non-payable execution target.
      */
-    function _callNoValue(
+    function _call(
         address execTarget,
         bytes calldata execPayload
-    ) private {
+    ) internal override {
         address callProxy = CALL_PROXY;
         assembly ("memory-safe") {
             let m := mload(0x40)
@@ -259,53 +266,5 @@ contract CATValidatorV1_1 is CATValidator {
                 revert(m, returndatasize())
             }
         }
-    }
-
-    /// @dev The domain version is "1.1". The base fixes "1" and is not virtual, so the separator, the digest and the
-    /// EIP-5267 report are overridden through Solady's virtuals.
-    function _domainSeparator() internal view override returns (bytes32) {
-        if (block.chainid == DOMAIN_CHAIN_ID && address(this) == DOMAIN_THIS) return DOMAIN_CACHED;
-        return _computeDomainSeparator();
-    }
-
-    function _hashTypedData(
-        bytes32 structHash
-    ) internal view override returns (bytes32 digest) {
-        digest = _domainSeparator();
-        assembly ("memory-safe") {
-            mstore(0x00, 0x1901000000000000)
-            mstore(0x1a, digest)
-            mstore(0x3a, structHash)
-            digest := keccak256(0x18, 0x42)
-            mstore(0x3a, 0)
-        }
-    }
-
-    function eip712Domain()
-        public
-        view
-        override
-        returns (
-            bytes1 fields,
-            string memory name,
-            string memory version,
-            uint256 chainId,
-            address verifyingContract,
-            bytes32 salt,
-            uint256[] memory extensions
-        )
-    {
-        fields = hex"0f";
-        name = "CAT Validator";
-        version = "1.1";
-        chainId = block.chainid;
-        verifyingContract = address(this);
-        salt = salt;
-        extensions = extensions;
-    }
-
-    function _computeDomainSeparator() private view returns (bytes32) {
-        return
-            keccak256(abi.encode(_DOMAIN_TYPEHASH, DOMAIN_NAME_HASH, DOMAIN_VERSION_HASH, block.chainid, address(this)));
     }
 }

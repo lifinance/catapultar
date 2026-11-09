@@ -42,6 +42,14 @@ jobs:
         id: build
         working-directory: solidity
 
+      - name: Check audited v1 bytecode is unchanged
+        # CATValidatorV1_1 subclasses CATValidator; this proves the `virtual` hooks
+        # (and any later v1 edit) leave the deployed bytes, and so the CREATE2
+        # address and audit status, untouched. See solidity/snapshots/v1-bytecode.json.
+        run: ./script/check-v1-bytecode.sh
+        id: bytecode
+        working-directory: solidity
+
       - name: Check V1.1 bytecode is unchanged
         run: ./script/check-v1-1-bytecode.sh
         id: bytecode-v1-1

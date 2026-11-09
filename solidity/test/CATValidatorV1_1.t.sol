@@ -662,35 +662,19 @@ contract CATValidatorV1_1Test is Test {
         assertEq(ICATValidatorV1_1.entryId.selector, bytes4(0xd323e74d));
     }
 
-    /// @dev The inherited 7-argument entry follows the base's flow: it pulls like the base, bumps no id, and its
-    ///      v1 digest cannot pass a v1.1 account's commitment.
-    function test_entry_v1_overload_keeps_base_flow() external {
+    /// @dev The base's 7-argument entry is disabled: it reverts before any pull, nonce or entry id.
+    function testFuzz_entry_v1_overload_is_disabled(
+        uint256 nonce,
+        uint256 spend
+    ) external {
         _fund(address(v11));
-        EntryIdProbe idProbe = new EntryIdProbe();
+        AllowanceSpend[] memory a = _spend(address(token), type(uint256).max, spend);
         vm.prank(executor);
-        v11.entry(
-            address(idProbe),
-            abi.encodeCall(EntryIdProbe.record, (address(v11))),
-            address(this),
-            1,
-            _spend(address(token), DEPOSIT, DEPOSIT),
-            _noOut(),
-            ""
-        );
-        assertEq(token.balanceOf(address(idProbe)), DEPOSIT, "pulled like the base");
-        assertEq(idProbe.ids(0), 0, "no entry id inside it");
-        assertEq(v11.entryId(), 0, "bumped no entry id");
-        assertTrue(v11.spentNonces(address(this), 1), "spent the nonce");
-
-        (address ownerAddr,) = makeAddrAndKey("v1OverloadDepositor");
-        AllowanceSpend[] memory a = _spend(address(token), DEPOSIT, DEPOSIT);
-        address payable account = _deployAccount(ownerAddr, _v11Digest(a, _noOut(), 1, address(0), 0));
-        token.mint(account, DEPOSIT);
-        vm.prank(account);
-        token.approve(address(v11), type(uint256).max);
-        vm.prank(executor);
-        vm.expectRevert(CATValidator.BadSignature.selector);
-        v11.entry(address(probe), "", account, 1, a, _noOut(), "");
+        vm.expectRevert(CATValidatorV1_1.V1EntryDisabled.selector);
+        v11.entry(address(probe), "", address(this), nonce, a, _noOut(), "");
+        assertEq(token.balanceOf(address(this)), DEPOSIT, "nothing pulled");
+        assertFalse(v11.spentNonces(address(this), nonce), "nonce not spent");
+        assertEq(v11.entryId(), 0, "no entry id");
     }
 
     function test_domain_name_and_version() external view {
