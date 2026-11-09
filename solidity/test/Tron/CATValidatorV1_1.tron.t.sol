@@ -108,6 +108,13 @@ contract MockExecutorTron {
     ) external {
         SafeTransferLib.safeTransfer(token, dest, amount);
     }
+
+    function payNative(
+        address validator,
+        uint256 amount
+    ) external {
+        SafeTransferLib.safeTransferETH(validator, amount);
+    }
 }
 
 contract CATValidatorV1_1TronTest is Test {
@@ -399,6 +406,27 @@ contract CATValidatorV1_1TronTest is Test {
             0,
             ""
         );
+    }
+
+    function test_outcome_native_trx_pays_destination() external {
+        address dest = makeAddr("dest");
+        vm.deal(address(exec), DEPOSIT);
+
+        vm.prank(executor);
+        v11.entry(
+            address(exec),
+            abi.encodeCall(MockExecutorTron.payNative, (address(v11), DEPOSIT)),
+            address(this),
+            1,
+            new AllowanceSpend[](0),
+            _out(address(0), DEPOSIT, dest),
+            address(0),
+            0,
+            ""
+        );
+
+        assertEq(dest.balance, DEPOSIT, "destination paid");
+        assertEq(address(v11).balance, 0, "validator holds nothing");
     }
 
     function test_revert_outcome_tronUsdt_short() external {
