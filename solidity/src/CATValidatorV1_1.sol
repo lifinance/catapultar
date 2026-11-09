@@ -53,8 +53,9 @@ contract CATValidatorV1_1 is CATValidator {
         return _tload(_pulledSlot(token));
     }
 
-    /// @notice Id of the 9-argument `entry()` currently executing: 1, 2, 3, ... within a transaction and never
-    /// reused, since the counter is not reset. Zero outside it. A non-zero id is also the entry's reentrancy lock.
+    /// @notice Id of the 9-argument `entry()` currently executing: 1, 2, 3, ... within a transaction. A settled
+    /// entry's id is not reused; a reverted entry rolls the counter back, so the next entry takes its id. Zero outside
+    /// it. A non-zero id is also the entry's reentrancy lock.
     function entryId() external view returns (uint256) {
         return _tload(ENTRY_ID_SLOT);
     }
@@ -78,7 +79,7 @@ contract CATValidatorV1_1 is CATValidator {
      * msg.sender as the executor in the typehash. This contract does not support _any_ executor and one has to be
      * provided.
      * If a destination is address(0), it specifies the signer. If a spend is SPEND_BALANCE_OF_MAGIC the current balance
-     * of the signer will be used. A spend of 0 pulls nothing.
+     * of the signer will be used. A spend of 0 still calls `transferFrom` with 0.
      * @param execTarget Target the call proxy calls with `execPayload`; receives the pulled allowances.
      * @param execPayload Calldata for `execTarget`. Empty skips the call.
      * @param account Signer of the constraint and source of the allowances.

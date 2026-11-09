@@ -689,7 +689,7 @@ contract CATValidatorV1_1Test is Test {
     function test_reference_is_pinned() external pure {
         assertEq(
             keccak256(type(CATValidatorV1_1Standalone).creationCode),
-            0xb0b6e910d65139d80e793c8313cfc292670f5763b95a04e7d0a73df1c877ba1d
+            0x6f8d41cc58ed1274fdadda600add468c31e07fd001018e4ad8fb34f0eaa2b429
         );
     }
 

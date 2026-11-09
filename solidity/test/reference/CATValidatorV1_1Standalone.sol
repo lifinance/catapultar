@@ -3,7 +3,6 @@ pragma solidity ^0.8.30;
 
 import { DynamicArrayLib } from "solady/src/utils/DynamicArrayLib.sol";
 import { EIP712 } from "solady/src/utils/EIP712.sol";
-import { ReentrancyGuard } from "solady/src/utils/ReentrancyGuard.sol";
 import { SafeTransferLib } from "solady/src/utils/SafeTransferLib.sol";
 import { SignatureCheckerLib } from "solady/src/utils/SignatureCheckerLib.sol";
 
@@ -39,7 +38,7 @@ import { LibExecutionConstraintV1_1 } from "../../src/libs/LibExecutionConstrain
  * Test-only reference: a standalone v1.1 written from the same specification as CATValidatorV1_1, which the
  * equivalence suite fuzzes the subclass against.
  */
-contract CATValidatorV1_1Standalone is EIP712, ReentrancyGuard {
+contract CATValidatorV1_1Standalone is EIP712 {
     using DynamicArrayLib for uint256[];
     error InvalidTokenAmount(uint256 expected, uint256 received);
     error AllocationTooSmall(uint256 allocated, uint256 spend);
@@ -49,6 +48,7 @@ contract CATValidatorV1_1Standalone is EIP712, ReentrancyGuard {
     error TargetNotCommitted();
     error PayloadNotCommitted();
     error ZeroDestination();
+    error Reentrancy();
 
     address public immutable CALL_PROXY;
     uint256 constant SPEND_BALANCE_OF_MAGIC = 1 << 255;
@@ -97,7 +97,7 @@ contract CATValidatorV1_1Standalone is EIP712, ReentrancyGuard {
      * msg.sender as the executor in the typehash. This contract does not support _any_ executor and one has to be
      * provided.
      * If a destination is address(0), it specifies the signer. If a spend is SPEND_BALANCE_OF_MAGIC the current balance
-     * of the signer will be used. A spend of 0 pulls nothing.
+     * of the signer will be used. A spend of 0 still calls `transferFrom` with 0.
      * @param executionTarget Committed `execTarget`. Zero means unconstrained.
      * @param payloadHash Committed `keccak256(execPayload)`. Zero means unconstrained.
      */
@@ -111,7 +111,8 @@ contract CATValidatorV1_1Standalone is EIP712, ReentrancyGuard {
         address executionTarget,
         bytes32 payloadHash,
         bytes calldata signature
-    ) external nonReentrant {
+    ) external {
+        if (_tload(bytes32(CURRENT_SLOT)) != 0) revert Reentrancy();
         uint256 id = _tload(bytes32(COUNTER_SLOT)) + 1;
         _tstore(bytes32(COUNTER_SLOT), id);
         _tstore(bytes32(CURRENT_SLOT), id);
@@ -311,9 +312,7 @@ contract CATValidatorV1_1Standalone is EIP712, ReentrancyGuard {
 
             if iszero(success) {
                 returndatacopy(m, 0x00, returndatasize())
-                if iszero(success) {
-                    revert(m, returndatasize())
-                }
+                revert(m, returndatasize())
             }
         }
     }

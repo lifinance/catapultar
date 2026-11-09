@@ -327,7 +327,7 @@ The signed `Outcome`s are validated after the external call: the executor must d
 
 ### CATValidatorV1_1
 
-[`CATValidatorV1_1`](./src/CATValidatorV1_1.sol) extends `CATValidator` without modifying it. Its nine-argument `entry` signs an `executionTarget` and a `payloadHash` into the constraint (zero means unconstrained) and publishes `pulled(token)`, the amount the running entry moved out of the signer, and `entryId()` for contracts called during the entry. Its EIP-712 domain version is `"1.1"`, so a v1 signature never verifies on it. `CATValidatorV1_1Tron` is the Tron variant. See [design/cat-validator-v1_1.md](./design/cat-validator-v1_1.md).
+[`CATValidatorV1_1`](./src/CATValidatorV1_1.sol) extends `CATValidator`, which gains three `virtual` hooks (`entry`, `_domainNameAndVersion`, `_call`); `script/check-v1-bytecode.sh` pins the base's bytecode, which is unchanged. Its nine-argument `entry` signs an `executionTarget` and a `payloadHash` into the constraint (zero means unconstrained) and publishes `pulled(token)`, the amount the running entry moved out of the signer, and `entryId()` for contracts called during the entry. Its EIP-712 domain version is `"1.1"`, so a v1 signature never verifies on it. `CATValidatorV1_1Tron` is the Tron variant. See [design/cat-validator-v1_1.md](./design/cat-validator-v1_1.md).
 
 ## Development
 

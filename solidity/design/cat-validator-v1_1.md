@@ -11,7 +11,7 @@
 
 ## What it inherits
 
-Everything not listed below comes from `CATValidator` unchanged: nonce handling (`spentNonces`, `_checkNonce`), `_validatePayment`, the call proxy, `receive()`, `BalanceOfFailed`, and the reentrancy guard.
+Everything not listed below comes from `CATValidator` unchanged: nonce handling (`spentNonces`, `_checkNonce`), `_validatePayment`, the call proxy, `receive()` and `BalanceOfFailed`. The nine-argument `entry` replaces the base's reentrancy guard with a transient lock (see **Transient storage**).
 
 - **Settlement.** Outcomes are settled by the inherited `_validatePayment`. The executor delivers outcome tokens to the validator during the call; `_validatePayment` checks the validator's own balance against each `Outcome.amount` and forwards the full balance to `Outcome.destination`, or to the signer when it is `address(0)`.
 - **Base `entry`.** The base's seven-argument `entry` reverts `V1EntryDisabled`; the nine-argument `entry` is the only way in.
@@ -27,6 +27,7 @@ ExecutionConstraint(Allowance[] allowances,Outcome[] outcomes,address executor,u
 - `executionTarget != 0` must equal `execTarget`, else `TargetNotCommitted`. Zero is unconstrained.
 - `payloadHash != 0` must equal `keccak256(execPayload)`, else `PayloadNotCommitted`. Zero is unconstrained.
 - On the reusable nonce `0`, a zero `executionTarget` reverts `ZeroDestination`. Without it, a zero refund address would let the executor sweep to any target.
+- On nonce `0` with a zero `payloadHash`, the executor may call the committed `executionTarget` with any calldata through the call proxy. A constraint that may only sweep commits `keccak256("")`.
 
 **Domain.** Name `"CAT Validator"`, version `"1.1"`; the base's version is `"1"`. A v1 signature never verifies here and a v1.1 signature never verifies on v1: the verifying contract and the version both differ. `@custom:version 1.1.0` matches this domain version; the base's `@custom:version` is `0.1.0`. `_domainNameAndVersion` is overridden; Solady's `EIP712` caches the separator and recomputes it on a fork.
 
