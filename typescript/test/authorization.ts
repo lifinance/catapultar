@@ -20,15 +20,19 @@ export function executeAndSweepPayload(): Hex {
   });
 }
 
-/** `IntentExecutor.authorizeCall(callHash)` sent to `executor`. */
-export function authorizeCall(executor: Hex, callHash: Hex): Call {
+/** `IntentExecutor.authorizeCall(callHash, validator)` sent to `executor`. */
+export function authorizeCall(
+  executor: Hex,
+  callHash: Hex,
+  validator: Hex = cat_validator_v2,
+): Call {
   return {
     to: executor,
     value: 0n,
     data: encodeFunctionData({
       abi: INTENT_EXECUTOR_ABI,
       functionName: "authorizeCall",
-      args: [callHash],
+      args: [callHash, validator],
     }),
   };
 }
@@ -62,10 +66,14 @@ export function entryCall(
 }
 
 /** `[authorizeCall, entry]` for `execPayload` on `executor`: the one shape the SDK signs. */
-export function authorizeThenEntry(executor: Hex, execPayload: Hex): Call[] {
+export function authorizeThenEntry(
+  executor: Hex,
+  execPayload: Hex,
+  validator: Hex = cat_validator_v2,
+): Call[] {
   return [
-    authorizeCall(executor, keccak256(execPayload)),
-    entryCall(executor, execPayload),
+    authorizeCall(executor, keccak256(execPayload), validator),
+    entryCall(executor, execPayload, validator),
   ];
 }
 

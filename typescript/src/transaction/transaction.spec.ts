@@ -1,4 +1,4 @@
-import { createPublicClient, createWalletClient, http, keccak256 } from "viem";
+import { createPublicClient, createWalletClient, http } from "viem";
 import { ExecutionMode, type Call } from "../types/types";
 import { random } from "../utils/helpers";
 import { BaseTransaction } from "./transaction";
@@ -9,9 +9,7 @@ import { privateKeyToAccount } from "viem/accounts";
 import CATAPULTAR_ABI from "../abi/catapultar";
 import { ExecutorAuthorizationError } from "../errors";
 import {
-  authorizeCall,
   authorizeThenEntry,
-  entryCall,
   executeAndSweepPayload,
 } from "../../test/authorization";
 
@@ -183,10 +181,7 @@ describe("Base Transaction", () => {
         const tx = new BaseTransaction({
           mode: ExecutionMode.RaiseRevert,
           nonce: 1n,
-          calls: [
-            authorizeCall(executor, keccak256(payload)),
-            entryCall(executor, payload, validator),
-          ],
+          calls: authorizeThenEntry(executor, payload, validator),
         });
         expect(() => tx.asDigest()).toThrow(ExecutorAuthorizationError);
         expect(() => tx.asDigest({ validators: [validator] })).not.toThrow();

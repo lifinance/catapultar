@@ -19,30 +19,32 @@ import { isMultichainMode } from "./calls";
 /**
  * Batch-shape guard for IntentExecutor authorizations.
  *
- * `IntentExecutor.authorizeCall(h)` adds one transient authorization in its own
- * frame; the validator `entry` that consumes it runs in a later frame. If that
- * `entry` fails inside a batch that skips failures, only the consumption is
- * rolled back and the authorization stays live for the rest of the transaction,
- * where any later code can run the authorized payload. The executor cannot see
- * the batch mode, so the signer must refuse every shape in which `entry` can fail
- * without taking its `authorizeCall` down with it.
+ * `IntentExecutor.authorizeCall(h, validator)` adds one transient authorization
+ * in its own frame; the validator `entry` that consumes it runs in a later
+ * frame. If that `entry` fails inside a batch that skips failures, only the
+ * consumption is rolled back and the authorization stays live for the rest of
+ * the transaction, where any later code can run the authorized payload. The
+ * executor cannot see the batch mode, so the signer must refuse every shape in
+ * which `entry` can fail without taking its `authorizeCall` down with it.
  *
- * The only accepted shape: `authorizeCall(h)` immediately followed, in the same
- * chain-specific {@link ExecutionMode.RaiseRevert} batch or sub-batch, by a direct
- * `entry` call to a known CAT validator whose `execTarget` is the executor that
- * was authorized and whose `keccak256(execPayload)` is `h`. Sub-batches
- * (`execute` self-calls to the account running the batch) are checked with their
- * own mode, so the pair may sit in a RaiseRevert sub-batch of a SkipRevert meta
- * transaction. An `execute` call to any other contract is opaque: its failure
- * handling is that contract's own. A sub-batch has no signature of its own, so
- * "chain-specific" covers every enclosing frame up to the signed root: a
- * multichain outer batch is rejected even when the pair's own sub-batch is
- * RaiseRevert.
+ * The only accepted shape: `authorizeCall(h, validator)` immediately followed, in
+ * the same chain-specific {@link ExecutionMode.RaiseRevert} batch or sub-batch, by
+ * a direct `entry` call to `validator`, a known CAT validator, whose `execTarget`
+ * is the executor that was authorized and whose `keccak256(execPayload)` is `h`.
+ * Sub-batches (`execute` self-calls to the account running the batch) are
+ * checked with their own mode, so the pair may sit in a RaiseRevert sub-batch of
+ * a SkipRevert meta transaction. An `execute` call to any other contract is
+ * opaque: its failure handling is that contract's own. A sub-batch has no
+ * signature of its own, so "chain-specific" covers every enclosing frame up to
+ * the signed root: a multichain outer batch is rejected even when the pair's own
+ * sub-batch is RaiseRevert.
  *
  * The validator must be known because any other contract with an `entry`
  * function could return success without calling the executor, which leaves the
- * authorization live even in a RaiseRevert batch. The SDK cannot check code
- * offline: a listed address with no code on the target chain also "succeeds".
+ * authorization live even in a RaiseRevert batch. A known address with no code on
+ * the target chain also "succeeds", and the SDK cannot check code offline, so
+ * `authorizeCall` reverts on-chain when `validator` holds no code. That check
+ * covers `entry` only because the guard requires `entry` to call that `validator`.
  *
  * Any other call whose calldata carries the `authorizeCall` selector (a
  * multicall, a router, a packed forwarder, or the paired `entry`'s own payload)
@@ -125,6 +127,7 @@ function assertPair(
   insideMultichain: boolean,
   authorize: Call,
   callHash: Hex,
+  authorizedValidator: Address,
   next: Call | undefined,
   validators: readonly Address[],
 ): asserts next is Call {
@@ -154,6 +157,11 @@ function assertPair(
   if (!validators.some((validator) => isAddressEqual(validator, next.to)))
     throw new ExecutorAuthorizationError(
       `entry must call a known CAT validator, not ${next.to}.`,
+    );
+  // authorizeCall checks code only at the validator it names.
+  if (!isAddressEqual(authorizedValidator, next.to))
+    throw new ExecutorAuthorizationError(
+      `authorizeCall names validator ${authorizedValidator}, but entry calls ${next.to}.`,
     );
   if (!isAddressEqual(execTarget, authorize.to))
     throw new ExecutorAuthorizationError(
@@ -215,6 +223,7 @@ function assertFrame(
         insideMultichain,
         call,
         executorCall.args[0],
+        executorCall.args[1],
         entry,
         validators,
       );

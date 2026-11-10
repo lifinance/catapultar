@@ -402,7 +402,7 @@ $ CONTRACT=IntentExecutor INTENT_EXECUTOR_OWNER=0x... INTENT_EXECUTOR_SOLVERS=0x
     ERPC_SECRET=... ./script/deploy-composer.sh --account deployer --broadcast
 ```
 
-The IntentExecutor only runs a call that one of its solvers authorized earlier in the same transaction (`authorizeCall(keccak256(execPayload))`). `INTENT_EXECUTOR_OWNER` manages the solver set; use a multisig. `INTENT_EXECUTOR_SOLVERS` lists the accounts that call the validator's `entry`. Both fold into the CREATE2 init code, so every chain must get the same owner and the same solver list in the same order to share one address. The executor keeps authorizations in transient storage, so the deploy reverts `ChainLacksCancun` on a chain without Cancun.
+The IntentExecutor only runs a call that one of its solvers authorized earlier in the same transaction (`authorizeCall(keccak256(execPayload), validator)`). `authorizeCall` reverts `ValidatorHasNoCode` when `validator` holds no code on the chain, because an `entry` sent to an empty address succeeds without consuming the authorization; the solver's `entry` must call that same `validator`. `INTENT_EXECUTOR_OWNER` manages the solver set; use a multisig. `INTENT_EXECUTOR_SOLVERS` lists the accounts that call the validator's `entry`. Both fold into the CREATE2 init code, so every chain must get the same owner and the same solver list in the same order to share one address. The executor keeps authorizations in transient storage, so the deploy reverts `ChainLacksCancun` on a chain without Cancun.
 
 ## License Notice
 

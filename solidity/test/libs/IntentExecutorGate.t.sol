@@ -294,8 +294,17 @@ contract IntentExecutorGateTest is Test {
         bytes memory payload,
         Fill memory fill
     ) internal view returns (ERC7821.Call memory) {
+        return entryCall(payload, fill, address(validator));
+    }
+
+    /// @dev As above, sent to `to` instead of the validator.
+    function entryCall(
+        bytes memory payload,
+        Fill memory fill,
+        address to
+    ) internal view returns (ERC7821.Call memory) {
         return ERC7821.Call({
-            to: address(validator),
+            to: to,
             value: 0,
             data: abi.encodeCall(
                 IValidatorV2.entry,
@@ -318,8 +327,18 @@ contract IntentExecutorGateTest is Test {
     function authorizeCall(
         bytes memory payload
     ) internal view returns (ERC7821.Call memory) {
+        return authorizeCall(payload, address(validator));
+    }
+
+    /// @dev As above, naming `entryValidator` as the validator whose `entry` follows.
+    function authorizeCall(
+        bytes memory payload,
+        address entryValidator
+    ) internal view returns (ERC7821.Call memory) {
         return ERC7821.Call({
-            to: address(executor), value: 0, data: abi.encodeCall(IntentExecutor.authorizeCall, (keccak256(payload)))
+            to: address(executor),
+            value: 0,
+            data: abi.encodeCall(IntentExecutor.authorizeCall, (keccak256(payload), entryValidator))
         });
     }
 
@@ -445,7 +464,7 @@ contract IntentExecutorGateTest is Test {
     function test_attacker_differentEncodingOfAuthorizedCall_reverts() external {
         bytes memory payload = fillPayload(address(validator));
         vm.prank(worker);
-        executor.authorizeCall(keccak256(payload));
+        executor.authorizeCall(keccak256(payload), address(validator));
 
         (bool ok, bytes memory ret) = callThroughProxy(abi.encodePacked(payload, uint256(0)));
         assertFalse(ok);
@@ -533,8 +552,8 @@ contract IntentExecutorGateTest is Test {
 
         // Two authorizations: the guard, not a missing authorization, must stop the replay.
         vm.startPrank(worker);
-        executor.authorizeCall(keccak256(payload));
-        executor.authorizeCall(keccak256(payload));
+        executor.authorizeCall(keccak256(payload), address(validator));
+        executor.authorizeCall(keccak256(payload), address(validator));
         vm.stopPrank();
 
         (bool ok,) = callThroughProxy(payload);
@@ -551,8 +570,8 @@ contract IntentExecutorGateTest is Test {
         usdc.mint(address(composeProxy), POSITION);
 
         vm.startPrank(worker);
-        executor.authorizeCall(keccak256(payload));
-        executor.authorizeCall(keccak256(payload));
+        executor.authorizeCall(keccak256(payload), address(validator));
+        executor.authorizeCall(keccak256(payload), address(validator));
         vm.stopPrank();
 
         (bool ok,) = callThroughProxy(payload);
@@ -585,6 +604,42 @@ contract IntentExecutorGateTest is Test {
         assertFalse(ok);
         assertEq(ret, notAuthorized());
         assertEq(usdc.balanceOf(address(composeProxy)), POSITION);
+    }
+
+    /// @dev A CALL to an address without code succeeds, so an `entry` sent to a
+    /// validator that is not deployed on this chain would return without consuming.
+    /// authorizeCall refuses such a validator, which reverts the atomic batch.
+    function test_atomicBatch_validatorWithoutCode_reverts() external {
+        bytes memory payload = fillPayload(address(validator));
+        Fill memory fill = signFill(address(inToken), POSITION, payload);
+        address undeployed = makeAddr("undeployedValidator");
+
+        ERC7821.Call[] memory calls = new ERC7821.Call[](2);
+        calls[0] = authorizeCall(payload, undeployed);
+        calls[1] = entryCall(payload, fill, undeployed);
+        runWorkerBatch(ATOMIC_MODE, calls, abi.encodeWithSelector(IntentExecutor.ValidatorHasNoCode.selector));
+
+        assertEq(executor.authorizations(keccak256(payload)), 0);
+        attackerEntry(payload, notAuthorized());
+        assertEq(usdc.balanceOf(address(composeProxy)), POSITION);
+    }
+
+    /// @dev Why the signer must pass the address its `entry` calls: the executor checks
+    /// only the validator it is given, so an `entry` sent elsewhere to an empty address
+    /// still leaves the authorization live in an atomic batch.
+    function test_atomicBatch_entryToOtherThanAuthorizedValidatorLeaksPosition() external {
+        bytes memory payload = fillPayload(address(validator));
+        Fill memory fill = signFill(address(inToken), POSITION, payload);
+
+        ERC7821.Call[] memory calls = new ERC7821.Call[](2);
+        calls[0] = authorizeCall(payload);
+        calls[1] = entryCall(payload, fill, makeAddr("undeployedValidator"));
+        runWorkerBatch(ATOMIC_MODE, calls);
+        assertEq(executor.authorizations(keccak256(payload)), 1);
+
+        attackerEntry(payload, "");
+        assertEq(usdc.balanceOf(attacker), POSITION);
+        assertEq(usdc.balanceOf(address(composeProxy)), 0);
     }
 
     /// @dev Why authorizeCall and `entry` must share an atomic batch. In a batch that
@@ -854,7 +909,7 @@ contract IntentExecutorGateTest is Test {
     function test_admin_nonSolverCannotAuthorize() external {
         vm.prank(owner);
         vm.expectRevert(IntentExecutor.NotSolver.selector);
-        executor.authorizeCall(keccak256("x"));
+        executor.authorizeCall(keccak256("x"), address(validator));
     }
 
     function test_admin_onlyOwnerSetsSolver() external {
@@ -876,10 +931,10 @@ contract IntentExecutorGateTest is Test {
 
         vm.prank(worker);
         vm.expectRevert(IntentExecutor.NotSolver.selector);
-        executor.authorizeCall(keccak256("x"));
+        executor.authorizeCall(keccak256("x"), address(validator));
 
         vm.prank(newWorker);
-        executor.authorizeCall(keccak256("x"));
+        executor.authorizeCall(keccak256("x"), address(validator));
         assertEq(executor.authorizations(keccak256("x")), 1);
     }
 

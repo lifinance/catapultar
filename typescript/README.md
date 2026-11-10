@@ -310,16 +310,16 @@ await walletClient.sendTransaction({ ...(await signedTx.asCall()), gas });
 
 ### IntentExecutor authorizations
 
-`IntentExecutor.authorizeCall(h)` adds one authorization in its own call. The
-validator `entry` that uses it runs in a later call, so if that `entry` fails
-inside a batch that skips failures, the authorization stays live for the rest of
-the transaction and any later code can run the authorized payload. The executor
-cannot see the batch mode, so the classes refuse to sign (`CatapultarTx.sign`,
-`execute`, `getSignerData`), embed (`asDigest`, `asAccount`) or build
-(`MetaCatapultarTx.asCatapultarTx`, `estimateGas`) any batch in which an
-`authorizeCall` is not:
+`IntentExecutor.authorizeCall(h, validator)` adds one authorization in its own
+call. The validator `entry` that uses it runs in a later call, so if that
+`entry` fails inside a batch that skips failures, the authorization stays live
+for the rest of the transaction and any later code can run the authorized
+payload. The executor cannot see the batch mode, so the classes refuse to sign
+(`CatapultarTx.sign`, `execute`, `getSignerData`), embed (`asDigest`,
+`asAccount`) or build (`MetaCatapultarTx.asCatapultarTx`, `estimateGas`) any
+batch in which an `authorizeCall` is not:
 
-- immediately followed by a direct validator `entry` call,
+- immediately followed by a direct `entry` call to the `validator` it names,
 - whose `execTarget` is the authorized executor and whose
   `keccak256(execPayload)` is the authorized hash,
 - inside one chain-specific `ExecutionMode.RaiseRevert` batch or sub-batch.
@@ -351,12 +351,12 @@ new MetaCatapultarTx({ account }).addCalls(
 await tx.sign(signFn, { validators: [myValidator] });
 ```
 
-The SDK cannot see which contracts are deployed on the target chain, so every
-address in `validators` must hold the validator on that chain. A call to an
-address with no code succeeds without reaching the executor, so on a chain
-without the validator the accepted pair leaves the authorization live, which is
-the same leak the check exists to prevent. `cat_validator_v2` is only safe on
-chains where `CATValidatorV2` is deployed.
+The SDK cannot see which contracts are deployed on the target chain. A call to
+an address with no code succeeds without reaching the executor, which would
+leave the authorization live, so `authorizeCall` reverts on-chain when
+`validator` holds no code; the RaiseRevert batch reverts with it. The check
+covers only the address `authorizeCall` names, which is why `entry` must call
+that same address.
 
 The protocol primitives (`callsTypedData`, `callsDigest`, `callsStructHash`)
 stay pure encoders and do not run the check. A signer that builds typed data

@@ -24,9 +24,10 @@ import { SafeTransferLib } from "solady/src/utils/SafeTransferLib.sol";
 ///      account that calls the CAT validator's `entry`. The validator then reaches this
 ///      contract through its CALL_PROXY, a permissionless forwarder, so `msg.sender`
 ///      cannot identify the solver. The solver therefore calls
-///      authorizeCall(keccak256(execPayload)) first, and each execution consumes one
-///      authorization of keccak256(msg.data). The authorization lives in transient
-///      storage, so it ends with the transaction and rolls back with a reverted frame.
+///      authorizeCall(keccak256(execPayload), validator) first, and each execution
+///      consumes one authorization of keccak256(msg.data). The authorization lives in
+///      transient storage, so it ends with the transaction and rolls back with a
+///      reverted frame.
 ///
 ///      The solver MUST call authorizeCall() in the same atomic batch as the validator
 ///      `entry` it authorizes (ERC-7821 revert flag 0x00, which bubbles any failed call,
@@ -38,6 +39,12 @@ import { SafeTransferLib } from "solady/src/utils/SafeTransferLib.sol";
 ///      with a self-signed constraint, so a skipping batch leaks the fill. The failure
 ///      need not be accidental: anyone can relay the signed batch with too little gas
 ///      for `entry`, or replay a multichain batch on a chain where `entry` fails.
+///
+///      A call to an address without code succeeds, so an `entry` sent to a validator
+///      that is not deployed on the chain would return without consuming the
+///      authorization, even in an atomic batch. authorizeCall() therefore takes the
+///      validator whose `entry` follows and reverts ValidatorHasNoCode when that address
+///      holds no code. The solver MUST pass the address its `entry` calls.
 ///
 ///      An authorization admits the exact calldata only, so its approvals, calls and
 ///      sweep recipients are those the solver chose. One exception: native value sent
@@ -112,6 +119,8 @@ contract IntentExecutor is Ownable, ReentrancyGuardTransient {
     error OwnershipTransferDisabled();
     /// @dev The VM does not support transient storage (TSTORE/TLOAD).
     error TransientStorageUnsupported();
+    /// @dev The validator passed to authorizeCall() holds no code on this chain.
+    error ValidatorHasNoCode();
 
     /// Events ///
 
@@ -196,10 +205,14 @@ contract IntentExecutor is Ownable, ReentrancyGuardTransient {
     /// @dev `callHash` is keccak256 of the calldata this contract will receive, which is
     /// the validator's `execPayload` and the V2 binding's `payloadHash`. Authorizing the
     /// same hash twice admits two executions.
+    /// @param validator The validator whose `entry` consumes the authorization. Must hold
+    /// code: an `entry` sent to an empty address succeeds without consuming it.
     function authorizeCall(
-        bytes32 callHash
+        bytes32 callHash,
+        address validator
     ) external {
         if (!isSolver[msg.sender]) revert NotSolver();
+        if (validator.code.length == 0) revert ValidatorHasNoCode();
         bytes32 slot = _authorizationSlot(callHash);
         assembly ("memory-safe") {
             tstore(slot, add(tload(slot), 1))

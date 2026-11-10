@@ -54,6 +54,11 @@ export const INTENT_EXECUTOR_ABI = [
         type: "bytes32",
         internalType: "bytes32",
       },
+      {
+        name: "validator",
+        type: "address",
+        internalType: "address",
+      },
     ],
     outputs: [],
     stateMutability: "nonpayable",
@@ -499,6 +504,11 @@ export const INTENT_EXECUTOR_ABI = [
   {
     type: "error",
     name: "Unauthorized",
+    inputs: [],
+  },
+  {
+    type: "error",
+    name: "ValidatorHasNoCode",
     inputs: [],
   },
   {

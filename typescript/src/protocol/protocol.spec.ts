@@ -50,7 +50,7 @@ import {
   type ExecutionConstraintV2,
 } from "../types/types";
 import { ExecutorAuthorizationError, ValidationError } from "../errors";
-import { defaultFactory } from "../config";
+import { cat_validator_v2, defaultFactory } from "../config";
 import { assertExecutorAuthorizations } from "./authorization";
 import { INTENT_EXECUTOR_ABI } from "../abi/IntentExecutor";
 import { CAT_VALIDATOR_ABI } from "../abi/CATValidator";
@@ -568,7 +568,10 @@ describe("protocol/authorization", () => {
         args: [executor, payload, random(20), 1n, [], [], "0x"],
       }),
     };
-    const calls = [authorizeCall(executor, keccak256(payload)), v1Entry];
+    const calls = [
+      authorizeCall(executor, keccak256(payload), v1Validator),
+      v1Entry,
+    ];
     expect(() =>
       assertExecutorAuthorizations(ExecutionMode.RaiseRevert, calls, {
         validators: [v1Validator],
@@ -679,15 +682,28 @@ describe("protocol/authorization", () => {
     ).toThrow("known CAT validator");
   });
 
-  it("accepts a caller-supplied validator list in place of the default", () => {
+  // authorizeCall checks only the validator it names for code, so an entry sent
+  // to another (possibly empty) address would escape that check.
+  it("rejects an entry to a validator other than the one authorizeCall names", () => {
     const other = random(20);
     expect(() =>
       assertExecutorAuthorizations(
         ExecutionMode.RaiseRevert,
         [
-          authorizeCall(executor, keccak256(payload)),
-          entryCall(executor, payload, other),
+          authorizeCall(executor, keccak256(payload), other),
+          entryCall(executor, payload),
         ],
+        { validators: [cat_validator_v2, other] },
+      ),
+    ).toThrow("but entry calls");
+  });
+
+  it("accepts a caller-supplied validator list in place of the default", () => {
+    const other = random(20);
+    expect(() =>
+      assertExecutorAuthorizations(
+        ExecutionMode.RaiseRevert,
+        authorizeThenEntry(executor, payload, other),
         { validators: [other] },
       ),
     ).not.toThrow();

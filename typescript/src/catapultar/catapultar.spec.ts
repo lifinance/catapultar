@@ -444,10 +444,7 @@ describe("Catapultar", () => {
         const executor = random(20);
         const payload = executeAndSweepPayload();
         const validator = random(20);
-        const pair = [
-          authorizeCall(executor, keccak256(payload)),
-          entryCall(executor, payload, validator),
-        ];
+        const pair = authorizeThenEntry(executor, payload, validator);
 
         const tx = new CatapultarTx({ account })
           .setMode(ExecutionMode.RaiseRevert)

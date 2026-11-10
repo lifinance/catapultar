@@ -198,11 +198,12 @@ contract IntentExecutorTronTest is Test {
 
     // -- Helpers --
 
-    /// @dev This test contract is a solver: authorize one execution of `data`.
+    /// @dev This test contract is a solver: authorize one execution of `data`. These tests
+    /// call the executor directly, so any address with code stands in for the validator.
     function authorize(
         bytes memory data
     ) internal {
-        executor.authorizeCall(keccak256(data));
+        executor.authorizeCall(keccak256(data), address(this));
     }
 
     receive() external payable { }
