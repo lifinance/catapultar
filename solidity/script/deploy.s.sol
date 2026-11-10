@@ -13,6 +13,7 @@ contract deploy is multichain {
     error NotExpectedAddress(address expected, address deployedTo);
     error CanonicalVmMissing(address virtualMachine);
     error ChainLacksCancun();
+    error SolverIsCallProxy(address solver);
 
     /// @dev The v1.2 LI.FI VirtualMachine, at one CREATE2 address on every chain it
     /// supports. CATValidatorV2 staticcalls it to run committed validation programs,
@@ -91,9 +92,26 @@ contract deploy is multichain {
         return CatapultarFactory(expectedFactoryAddress);
     }
 
+    function expectedCATValidatorAddress() internal pure returns (address) {
+        return getExpectedCreate2Address(bytes32(0), type(CATValidator).creationCode, hex"");
+    }
+
+    function expectedCATValidatorV2Address() internal pure returns (address) {
+        return getExpectedCreate2Address(bytes32(0), type(CATValidatorV2).creationCode, abi.encode(CANONICAL_VM));
+    }
+
+    /// @dev A validator's CALL_PROXY is the first contract its constructor creates
+    /// (CATValidator's constructor runs before Tstorish's in CATValidatorV2), so it sits at
+    /// CREATE nonce 1 of the validator. Computing it covers chains where the validator is
+    /// not deployed yet.
+    function callProxyOf(
+        address validator
+    ) internal pure returns (address) {
+        return vm.computeCreateAddress(validator, 1);
+    }
+
     function deployCATValidator() internal returns (CATValidator validator) {
-        address payable expectedAddress =
-            payable(getExpectedCreate2Address(bytes32(0), type(CATValidator).creationCode, hex""));
+        address payable expectedAddress = payable(expectedCATValidatorAddress());
         if (expectedAddress.code.length == 0) {
             validator = new CATValidator{ salt: bytes32(0) }();
             if (expectedAddress != address(validator)) revert NotExpectedAddress(expectedAddress, address(validator));
@@ -105,9 +123,7 @@ contract deploy is multichain {
         requireCancun();
         if (CANONICAL_VM.code.length == 0) revert CanonicalVmMissing(CANONICAL_VM);
 
-        address payable expectedAddress = payable(getExpectedCreate2Address(
-                bytes32(0), type(CATValidatorV2).creationCode, abi.encode(CANONICAL_VM)
-            ));
+        address payable expectedAddress = payable(expectedCATValidatorV2Address());
         if (expectedAddress.code.length == 0) {
             validatorV2 = new CATValidatorV2{ salt: bytes32(0) }(CANONICAL_VM);
             if (expectedAddress != address(validatorV2)) {
@@ -150,11 +166,16 @@ contract deploy is multichain {
     /// must support TSTORE. A chain without Cancun reverts ChainLacksCancun: the executor
     /// has no storage fallback, because a stored authorization that a failed fill never
     /// consumed would outlive its transaction.
+    ///
+    /// A validator's CALL_PROXY forwards any caller's call, so as a solver it would let
+    /// anyone authorize any payload. Reverts SolverIsCallProxy when a solver is the
+    /// CALL_PROXY of the v1 or V2 validator.
     function deployIntentExecutor(
         address owner,
         address[] memory solvers
     ) internal returns (IntentExecutor intentExecutor) {
         requireCancun();
+        requireNoCallProxySolver(solvers);
 
         bytes memory initArgs = abi.encode(owner, solvers);
         address payable expectedAddress =
@@ -166,6 +187,16 @@ contract deploy is multichain {
             }
         }
         return IntentExecutor(expectedAddress);
+    }
+
+    function requireNoCallProxySolver(
+        address[] memory solvers
+    ) internal pure {
+        address callProxy = callProxyOf(expectedCATValidatorAddress());
+        address callProxyV2 = callProxyOf(expectedCATValidatorV2Address());
+        for (uint256 i = 0; i < solvers.length; ++i) {
+            if (solvers[i] == callProxy || solvers[i] == callProxyV2) revert SolverIsCallProxy(solvers[i]);
+        }
     }
 
     function account(

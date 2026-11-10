@@ -32,7 +32,8 @@
 #   INTENT_EXECUTOR_SOLVERS  IntentExecutor only: comma-separated initial solver accounts, the
 #                   accounts that call the validator's `entry`. Required. The owner and the solver
 #                   list fold into the init code, so every chain must get the same values in the
-#                   same order to share one address.
+#                   same order to share one address. deploy.s.sol reverts SolverIsCallProxy when a
+#                   solver is a validator's CALL_PROXY.
 #   FORGE_TEMPO     forge for Tempo (default: ~/.foundry-tempo/bin/forge). Tempo has no native gas
 #                   coin: each transaction names a TIP-20 fee token, which stock forge cannot send.
 #   LOG_DIR         Per-chain forge logs (default: cache/deploy-composer/<contract>-<timestamp>).
