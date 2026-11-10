@@ -31,6 +31,13 @@ export class ModeUnsetError extends ValidationError {}
 /** At least one call was required but none was added. */
 export class CallsUnsetError extends ValidationError {}
 
+/**
+ * An IntentExecutor `authorizeCall` is not paired with its validator `entry`
+ * inside one RaiseRevert batch, so a failed `entry` could leave the authorization
+ * live for the rest of the transaction.
+ */
+export class ExecutorAuthorizationError extends ValidationError {}
+
 /** A requested nonce has already been spent on-chain. */
 export class NonceCollisionError extends CatapultarError {}
 

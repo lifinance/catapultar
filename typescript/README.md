@@ -31,7 +31,7 @@ context:
 Beneath both sit the pure protocol primitives (`src/protocol`) — encoders such as
 `callsDigest`, `constraintDigest`, `predictCloneAddress`, `factorySalt`,
 `buildOpData`, and the signature/owner codecs — plus the contract ABIs
-(`catapultarAbi`, `catapultarFactoryAbi`, `catValidatorAbi`, `catValidatorV2Abi`). Use these directly
+(`catapultarAbi`, `catapultarFactoryAbi`, `catValidatorAbi`, `catValidatorV2Abi`, `intentExecutorAbi`). Use these directly
 to integrate without any of the classes.
 
 Dependency direction:
@@ -308,6 +308,61 @@ const signedTx = await (await metaTx.asCatapultarTx()).sign(signFn);
 await walletClient.sendTransaction({ ...(await signedTx.asCall()), gas });
 ```
 
+### IntentExecutor authorizations
+
+`IntentExecutor.authorizeCall(h)` adds one authorization in its own call. The
+validator `entry` that uses it runs in a later call, so if that `entry` fails
+inside a batch that skips failures, the authorization stays live for the rest of
+the transaction and any later code can run the authorized payload. The executor
+cannot see the batch mode, so the classes refuse to sign (`CatapultarTx.sign`,
+`execute`, `getSignerData`), embed (`asDigest`, `asAccount`) or build
+(`MetaCatapultarTx.asCatapultarTx`, `estimateGas`) any batch in which an
+`authorizeCall` is not:
+
+- immediately followed by a direct validator `entry` call,
+- whose `execTarget` is the authorized executor and whose
+  `keccak256(execPayload)` is the authorized hash,
+- inside one chain-specific `ExecutionMode.RaiseRevert` batch or sub-batch.
+
+Skip, estimation and multichain modes are rejected for the pair. A sub-batch
+has no signature of its own, so a multichain outer batch is rejected too, even
+when the pair's sub-batch is RaiseRevert: its signature replays the whole batch
+on chains where the validator may have no code. A sub-batch is
+an `execute` self-call to the same account; an `authorizeCall` the SDK cannot see
+directly (inside a multicall, a router, a packed forwarder, an `execute` call to
+another contract, or the paired `entry`'s payload) is rejected as well, since the
+SDK cannot tell how that contract handles a failure. `asDigest` has no account,
+so it treats every `execute` call that way. In a `MetaCatapultarTx`, keep both
+calls in the same sub-batch:
+
+```typescript
+new MetaCatapultarTx({ account }).addCalls(
+  { calls: [authorizeCall, entryCall] }, // RaiseRevert by default: accepted
+);
+// Split across sub-batches: throws ExecutorAuthorizationError.
+```
+
+`entry` must target one of `validators`, which defaults to
+`DEFAULT_AUTHORIZED_VALIDATORS` (`cat_validator_v2`), and its payload must call
+`executeAndSweep` or `executeAndSweepNative`. Each method above takes the same
+`validators` option for other deployments:
+
+```typescript
+await tx.sign(signFn, { validators: [myValidator] });
+```
+
+The SDK cannot see which contracts are deployed on the target chain, so every
+address in `validators` must hold the validator on that chain. A call to an
+address with no code succeeds without reaching the executor, so on a chain
+without the validator the accepted pair leaves the authorization live, which is
+the same leak the check exists to prevent. `cat_validator_v2` is only safe on
+chains where `CATValidatorV2` is deployed.
+
+The protocol primitives (`callsTypedData`, `callsDigest`, `callsStructHash`)
+stay pure encoders and do not run the check. A signer that builds typed data
+with them directly must call
+`assertExecutorAuthorizations(mode, calls, { validators })` itself.
+
 ### Embed
 
 In some cases, you may want to execute an action on behalf of another user — they are the primary custodian but a pre-approved call has been configured.
@@ -446,8 +501,9 @@ integrate without any of the classes:
 - Signatures: `normalizeSignature`, `compactSignature`, `toCompactSignature`, `fromCompactSignature`, `encodeWebAuthnAuth`, `normalizeP256`.
 - Owners: `ownerToKeyArray`, `keyArrayToOwner`, `ownersEqual`, `ownerTypeToEnum`, `enumToOwnerType`, `keyTypeLength`.
 - Constraints: `constraintDigest`, `constraintTypedData`, `constraintDomain`; for `CATValidatorV2`, `constraintV2Digest`, `constraintV2TypedData`, `constraintV2Domain`, `ExecutionConstraintV2Typed`, the bindings `UNBOUND_EXECUTION` and `refundBinding`, and the commitment hashes `hashValidationProgram`, `hashValidationParams`.
+- IntentExecutor authorizations: `assertExecutorAuthorizations`, `DEFAULT_AUTHORIZED_VALIDATORS`.
 
-Contract ABIs are exported as `catapultarAbi`, `catapultarFactoryAbi`, `catValidatorAbi`, and `catValidatorV2Abi`; deployment addresses as `factories`, `templates`, and `cat_validator`.
+Contract ABIs are exported as `catapultarAbi`, `catapultarFactoryAbi`, `catValidatorAbi`, `catValidatorV2Abi`, and `intentExecutorAbi`; deployment addresses as `factories`, `templates`, `cat_validator`, and `cat_validator_v2`.
 
 ## Project Layout
 

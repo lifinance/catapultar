@@ -627,18 +627,24 @@ contract IntentExecutorGateTest is Test {
     function starvingGas(
         bytes memory payload,
         Fill memory fill
-    ) internal returns (uint256) {
+    ) internal returns (uint256 gas) {
         uint256 nonce = workerNonce;
-        bytes memory executionData = signBatch(SKIP_FAILURES_MODE, authorizeThenEntry(payload, fill));
+        gas = starvingGas(signBatch(SKIP_FAILURES_MODE, authorizeThenEntry(payload, fill)), payload);
+        workerNonce = nonce;
+    }
+
+    /// @dev As above for an already signed skipping batch, which can still be relayed
+    /// afterwards.
+    function starvingGas(
+        bytes memory executionData,
+        bytes memory payload
+    ) internal returns (uint256) {
         for (uint256 gas = 50_000; gas < 2_000_000; gas += 5000) {
             uint256 snapshot = vm.snapshotState();
             bool starved = relayWithGas(SKIP_FAILURES_MODE, executionData, gas)
                 && executor.authorizations(keccak256(payload)) == 1 && usdc.balanceOf(destination) == 0;
             vm.revertToState(snapshot);
-            if (starved) {
-                workerNonce = nonce;
-                return gas;
-            }
+            if (starved) return gas;
         }
         revert("no starving gas found");
     }
@@ -669,6 +675,123 @@ contract IntentExecutorGateTest is Test {
         assertFalse(relayWithGas(ATOMIC_MODE, executionData, gas));
         assertEq(executor.authorizations(keccak256(payload)), 0);
         assertEq(usdc.balanceOf(address(composeProxy)), POSITION);
+    }
+
+    /* ─────────────────────────── meta transactions (sub-batches)
+    ─────────────────────────── */
+
+    /// @dev A sub-batch as the SDK's MetaCatapultarTx encodes it: a self-call to the
+    /// worker's `execute` with a 32-byte opData (its own nonce, no signature), which the
+    /// account accepts because msg.sender is itself.
+    function subBatch(
+        bytes32 mode,
+        ERC7821.Call[] memory calls
+    ) internal returns (ERC7821.Call memory) {
+        return ERC7821.Call({
+            to: worker,
+            value: 0,
+            data: abi.encodeWithSignature(
+                "execute(bytes32,bytes)", mode, abi.encode(calls, abi.encodePacked(++workerNonce))
+            )
+        });
+    }
+
+    /// @dev The split shape: atomic sub-batches [authorizeCall] and [entry]. Meant for a
+    /// SkipRevert outer batch, MetaCatapultarTx's default.
+    function splitSubBatches(
+        bytes memory payload,
+        Fill memory fill
+    ) internal returns (ERC7821.Call[] memory outer) {
+        ERC7821.Call[] memory first = new ERC7821.Call[](1);
+        first[0] = authorizeCall(payload);
+        ERC7821.Call[] memory second = new ERC7821.Call[](1);
+        second[0] = entryCall(payload, fill);
+        outer = new ERC7821.Call[](2);
+        outer[0] = subBatch(ATOMIC_MODE, first);
+        outer[1] = subBatch(ATOMIC_MODE, second);
+    }
+
+    /// @dev The shared shape: one atomic sub-batch [authorizeCall, entry].
+    function sharedSubBatch(
+        bytes memory payload,
+        Fill memory fill
+    ) internal returns (ERC7821.Call[] memory outer) {
+        outer = new ERC7821.Call[](1);
+        outer[0] = subBatch(ATOMIC_MODE, authorizeThenEntry(payload, fill));
+    }
+
+    /// @dev Why authorizeCall and `entry` must share a sub-batch. Each sub-batch is
+    /// atomic, but the [authorizeCall] sub-batch has already succeeded when the [entry]
+    /// sub-batch fails, and the SkipRevert outer batch skips the failure. The
+    /// authorization survives and the position leaks as in a flat skipping batch.
+    function test_skipFailuresMeta_splitSubBatches_failedEntryLeaksPosition() external {
+        bytes memory payload = fillPayload(address(validator));
+        Fill memory fill = signFill(address(inToken), POSITION + 1, payload);
+
+        runWorkerBatch(SKIP_FAILURES_MODE, splitSubBatches(payload, fill));
+        assertEq(executor.authorizations(keccak256(payload)), 1);
+
+        attackerEntry(payload, "");
+        assertEq(usdc.balanceOf(attacker), POSITION);
+        assertEq(usdc.balanceOf(address(composeProxy)), 0);
+        assertEq(executor.authorizations(keccak256(payload)), 0);
+    }
+
+    /// @dev The split shape is open to the gas-starvation relay as well.
+    function test_skipFailuresMeta_splitSubBatches_attackerStarvesEntry() external {
+        bytes memory payload = fillPayload(address(validator));
+        Fill memory fill = signFill(address(inToken), POSITION, payload);
+        bytes memory executionData = signBatch(SKIP_FAILURES_MODE, splitSubBatches(payload, fill));
+        uint256 gas = starvingGas(executionData, payload);
+
+        assertTrue(relayWithGas(SKIP_FAILURES_MODE, executionData, gas));
+        assertEq(executor.authorizations(keccak256(payload)), 1);
+        assertEq(usdc.balanceOf(destination), 0);
+
+        attackerEntry(payload, "");
+        assertEq(usdc.balanceOf(attacker), POSITION);
+    }
+
+    /// @dev With both calls in one atomic sub-batch, a failed `entry` reverts the
+    /// sub-batch as a unit, authorization included. The outer batch skips a frame that
+    /// left nothing behind.
+    function test_skipFailuresMeta_sharedSubBatch_failedEntryRollsBackAuthorization() external {
+        bytes memory payload = fillPayload(address(validator));
+        Fill memory fill = signFill(address(inToken), POSITION + 1, payload);
+
+        runWorkerBatch(SKIP_FAILURES_MODE, sharedSubBatch(payload, fill));
+        assertEq(executor.authorizations(keccak256(payload)), 0);
+
+        attackerEntry(payload, notAuthorized());
+        assertEq(usdc.balanceOf(attacker), 0);
+        assertEq(usdc.balanceOf(address(composeProxy)), POSITION);
+    }
+
+    /// @dev No relay gas leaves the shared sub-batch's authorization live. The sweep runs
+    /// from 50k up to the lowest gas that completes the fill, and must pass a gas at
+    /// which the outer batch succeeded but skipped the starved sub-batch, or it proves
+    /// nothing.
+    function test_skipFailuresMeta_sharedSubBatch_noGasLeaksAuthorization() external {
+        bytes memory payload = fillPayload(address(validator));
+        Fill memory fill = signFill(address(inToken), POSITION, payload);
+        bytes memory executionData = signBatch(SKIP_FAILURES_MODE, sharedSubBatch(payload, fill));
+
+        bool sawSkippedFill;
+        bool sawFill;
+        for (uint256 gas = 50_000; gas < 2_000_000 && !sawFill; gas += 1000) {
+            uint256 snapshot = vm.snapshotState();
+            bool ok = relayWithGas(SKIP_FAILURES_MODE, executionData, gas);
+            assertEq(
+                executor.authorizations(keccak256(payload)),
+                0,
+                string.concat("authorization leaked at relay gas ", vm.toString(gas))
+            );
+            sawFill = usdc.balanceOf(destination) == POSITION;
+            if (ok && !sawFill) sawSkippedFill = true;
+            vm.revertToState(snapshot);
+        }
+        assertTrue(sawFill, "fill never completed");
+        assertTrue(sawSkippedFill, "no gas skipped the fill");
     }
 
     /// forge-config: default.isolate = true

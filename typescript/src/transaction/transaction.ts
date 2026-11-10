@@ -18,6 +18,10 @@ import {
   assertMode,
   assertNonce,
 } from "../protocol/validation";
+import {
+  assertExecutorAuthorizations,
+  type ExecutorAuthorizationOptions,
+} from "../protocol/authorization";
 import { NonceZeroError, ValidationError } from "../errors";
 import CATAPULTAR_FACTORY_ABI from "../abi/catapultarFactory";
 import CATAPULTAR_ABI from "../abi/catapultar";
@@ -192,18 +196,35 @@ export class BaseTransaction {
     };
   }
 
-  /** Return the calls as an approval digest. This can be used to "embed" the calls into an account */
-  asDigest() {
+  /**
+   * Return the calls as an approval digest. This can be used to "embed" the calls into an account
+   * @param options.validators Validators a paired IntentExecutor `entry` may target.
+   *   Default {@link DEFAULT_AUTHORIZED_VALIDATORS}. A batch here has no account,
+   *   so an `execute` sub-batch carrying `authorizeCall` is refused as opaque.
+   * @throws {ExecutorAuthorizationError} If an IntentExecutor `authorizeCall` is not
+   *   immediately followed by its validator `entry` in a RaiseRevert batch or sub-batch.
+   */
+  asDigest(options?: ExecutorAuthorizationOptions) {
     const { nonce, mode, calls } = this;
     assertNonce(nonce);
     assertMode(mode);
     assertCalls(calls);
+    assertExecutorAuthorizations(mode, calls, options);
     return callsStructHash({ nonce, mode, calls });
   }
 
-  /** Generate an account with this action embedded. */
-  asAccount(opt: { salt: `0x${string}`; owner: Owner; factory?: Factory }) {
-    const callDigest = this.asDigest();
+  /**
+   * Generate an account with this action embedded.
+   * @param opt.validators As {@link asDigest}.
+   */
+  asAccount(
+    opt: {
+      salt: `0x${string}`;
+      owner: Owner;
+      factory?: Factory;
+    } & ExecutorAuthorizationOptions,
+  ) {
+    const callDigest = this.asDigest(opt);
     const { factory } = _factory(opt);
     const address = CatapultarAccount.predict({
       ...opt,

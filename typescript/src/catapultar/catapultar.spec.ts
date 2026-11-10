@@ -1,7 +1,12 @@
 import { privateKeyToAccount } from "viem/accounts";
 import { random, asHex } from "../utils/helpers";
 import { CatapultarTx, MetaCatapultarTx } from "./catapultar";
-import { ExecutionMode, type Owner, type OwnerType } from "../types/types";
+import {
+  ExecutionMode,
+  type Call,
+  type Owner,
+  type OwnerType,
+} from "../types/types";
 import { anvil } from "viem/chains";
 import {
   createPublicClient,
@@ -9,6 +14,7 @@ import {
   decodeAbiParameters,
   decodeFunctionData,
   http,
+  keccak256,
   parseAbiParameters,
   type PublicClient,
 } from "viem";
@@ -20,6 +26,13 @@ import { PUBLIC_DEFAULT_ANVIL_ACCOUNT_0 } from "../../test/fixtures";
 import CATAPULTAR_ABI from "../abi/catapultar";
 import { CATAPULTAR_ACCOUNT_RUNTIME_CODE } from "../bytecode/catapultar";
 import { applyCodeOverrideMargin } from "./gas";
+import { ExecutorAuthorizationError } from "../errors";
+import {
+  authorizeCall,
+  authorizeThenEntry,
+  entryCall,
+  executeAndSweepPayload,
+} from "../../test/authorization";
 
 const chainId = 31337;
 const anvilAccountVersion = "0.1.0";
@@ -369,6 +382,122 @@ describe("Catapultar", () => {
         );
       },
     );
+
+    it.concurrent(
+      "refuses to sign a skipping batch with an IntentExecutor authorization",
+      async () => {
+        let signerCalled = false;
+        const tx = new CatapultarTx({
+          account: {
+            address: random(20),
+            chainId: 1,
+            owner: { type: "ecdsa", address: random(20) },
+          },
+        })
+          .setMode(ExecutionMode.SkipRevert)
+          .setRandomNonce()
+          .addCall(...authorizeThenEntry(random(20), executeAndSweepPayload()));
+        await expect(
+          tx.sign(async () => {
+            signerCalled = true;
+            return "0x";
+          }),
+        ).rejects.toThrow(ExecutorAuthorizationError);
+        expect(signerCalled).toBe(false);
+      },
+    );
+
+    it.concurrent(
+      "refuses a hand-built sub-batch shape that splits authorizeCall from entry",
+      async () => {
+        const account = new CatapultarAccount({
+          address: random(20),
+          chainId: 1,
+          owner: { type: "ecdsa", address: random(20) },
+        });
+        const [authorize, entry] = authorizeThenEntry(
+          random(20),
+          executeAndSweepPayload(),
+        );
+        const sub = (call: Call) =>
+          new CatapultarTx({ account })
+            .setMode(ExecutionMode.RaiseRevert)
+            .setRandomNonce()
+            .addCall(call)
+            .asCall();
+        const tx = new CatapultarTx({ account })
+          .setMode(ExecutionMode.SkipRevert)
+          .setRandomNonce()
+          .addCall(await sub(authorize!), await sub(entry!));
+        expect(() => tx.getSignerData()).toThrow(ExecutorAuthorizationError);
+      },
+    );
+
+    it.concurrent(
+      "signs a pair to a caller-supplied validator only when that validator is passed",
+      async () => {
+        const account = new CatapultarAccount({
+          address: random(20),
+          chainId: 1,
+          owner: { type: "ecdsa", address: random(20) },
+        });
+        const executor = random(20);
+        const payload = executeAndSweepPayload();
+        const validator = random(20);
+        const pair = [
+          authorizeCall(executor, keccak256(payload)),
+          entryCall(executor, payload, validator),
+        ];
+
+        const tx = new CatapultarTx({ account })
+          .setMode(ExecutionMode.RaiseRevert)
+          .setRandomNonce()
+          .addCall(...pair);
+        expect(() => tx.getSignerData()).toThrow(ExecutorAuthorizationError);
+        expect(() =>
+          tx.getSignerData({ validators: [validator] }),
+        ).not.toThrow();
+
+        const mTx = new MetaCatapultarTx({ account }).addCalls({ calls: pair });
+        await expect(mTx.asCatapultarTx()).rejects.toThrow(
+          ExecutorAuthorizationError,
+        );
+        const outer = await mTx.asCatapultarTx({ validators: [validator] });
+        expect(() =>
+          outer.getSignerData({ validators: [validator] }),
+        ).not.toThrow();
+      },
+    );
+
+    it.concurrent(
+      "estimates a meta tx by the shape it signs, not the estimation twin",
+      async () => {
+        const account = new CatapultarAccount({
+          address: random(20),
+          chainId: 1,
+          owner: { type: "ecdsa", address: random(20) },
+        }).connect({
+          estimateGas: async () => 123n,
+        } as unknown as PublicClient);
+        const executor = random(20);
+        const payload = executeAndSweepPayload();
+
+        // The twin turns the RaiseRevert sub-batch into RaiseRevertEstimate;
+        // the shape that will be signed is safe, so it must still estimate.
+        const shared = new MetaCatapultarTx({ account }).addCalls({
+          calls: authorizeThenEntry(executor, payload),
+        });
+        expect(await shared.estimateGas()).toBe(123n);
+
+        const split = new MetaCatapultarTx({ account }).addCalls(
+          { calls: [authorizeCall(executor, keccak256(payload))] },
+          { calls: [entryCall(executor, payload)] },
+        );
+        await expect(split.estimateGas()).rejects.toThrow(
+          ExecutorAuthorizationError,
+        );
+      },
+    );
   });
 
   describe("Meta Transactions", () => {
@@ -432,6 +561,75 @@ describe("Catapultar", () => {
         "Duplicate nonces were found: 5,5",
       );
     });
+
+    it.concurrent(
+      "rejects authorizeCall and its entry in separate sub-batches",
+      async () => {
+        const address = "0x1111111111111111111111111111111111111111";
+        const executor = random(20);
+        const payload = executeAndSweepPayload();
+        const mTx = new MetaCatapultarTx({
+          account: { address, chainId: 1, owner: { type: "ecdsa", address } },
+        }).addCalls(
+          { calls: [authorizeCall(executor, keccak256(payload))] },
+          { calls: [entryCall(executor, payload)] },
+        );
+        await expect(mTx.asCatapultarTx()).rejects.toThrow(
+          ExecutorAuthorizationError,
+        );
+      },
+    );
+
+    it.concurrent(
+      "rejects authorizeCall and its entry in a SkipRevert sub-batch",
+      async () => {
+        const address = "0x1111111111111111111111111111111111111111";
+        const mTx = new MetaCatapultarTx({
+          account: { address, chainId: 1, owner: { type: "ecdsa", address } },
+        }).addCalls({
+          calls: authorizeThenEntry(random(20), executeAndSweepPayload()),
+          mode: ExecutionMode.SkipRevert,
+        });
+        await expect(mTx.asCatapultarTx()).rejects.toThrow(
+          ExecutorAuthorizationError,
+        );
+      },
+    );
+
+    it.concurrent(
+      "accepts authorizeCall and its entry in one RaiseRevert sub-batch of a SkipRevert outer batch",
+      async () => {
+        const address = "0x1111111111111111111111111111111111111111";
+        const batchTx = await new MetaCatapultarTx({
+          account: { address, chainId: 1, owner: { type: "ecdsa", address } },
+        })
+          .addCalls(
+            { calls: [{ to: address, value: 0n, data: "0x" }] },
+            { calls: authorizeThenEntry(random(20), executeAndSweepPayload()) },
+          )
+          .asCatapultarTx();
+        expect(batchTx.mode).toBe(ExecutionMode.SkipRevert);
+        // The signer re-checks the nested sub-batches and accepts them too.
+        expect(() => batchTx.getSignerData()).not.toThrow();
+      },
+    );
+
+    it.concurrent(
+      "rejects authorizeCall and its entry under a multichain outer batch",
+      async () => {
+        const address = "0x1111111111111111111111111111111111111111";
+        const mTx = new MetaCatapultarTx({
+          account: { address, chainId: 1, owner: { type: "ecdsa", address } },
+        })
+          .setMode(ExecutionMode.SkipRevertMultiChain)
+          .addCalls({
+            calls: authorizeThenEntry(random(20), executeAndSweepPayload()),
+          });
+        await expect(mTx.asCatapultarTx()).rejects.toThrow(
+          ExecutorAuthorizationError,
+        );
+      },
+    );
   });
 
   const integrationTest = (ownerType: OwnerType) =>

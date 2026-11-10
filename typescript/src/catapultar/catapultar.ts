@@ -10,6 +10,10 @@ import {
 import { callsDigest, callsTypedData } from "../protocol/calls";
 import { assertCalls, assertMode, assertNonce } from "../protocol/validation";
 import {
+  assertExecutorAuthorizations,
+  type ExecutorAuthorizationOptions,
+} from "../protocol/authorization";
+import {
   DuplicateNonceError,
   InvalidSignatureError,
   ValidationError,
@@ -118,12 +122,13 @@ export class CatapultarTx<
    * Sign the transaction using a Ethers compatible signer function.
    * @dev The callback function will be called with a typeset compatible with ether.Signer._signTypedData.
    * An alternative way to sign this function is to set it manually as .signature.
+   * @param options As {@link getSignerData}.
    */
   async sign(
     callback: (
       options: ReturnType<typeof this.getSignerData>,
     ) => Promise<KeyedSignature<O>>,
-    options?: { ignoreNoCalls?: boolean },
+    options?: { ignoreNoCalls?: boolean } & ExecutorAuthorizationOptions,
   ) {
     const signerData = this.getSignerData(options);
 
@@ -191,13 +196,23 @@ export class CatapultarTx<
   /**
    * Returns an Ethers compatible typed dict.
    * @param options.ignoreNoCalls Do not throw an error if no calls have been configured. Default: false
+   * @param options.validators Validators a paired IntentExecutor `entry` may target.
+   *   Default {@link DEFAULT_AUTHORIZED_VALIDATORS}.
+   * @throws {ExecutorAuthorizationError} If an IntentExecutor `authorizeCall` is not
+   *   immediately followed by its validator `entry` in a RaiseRevert batch or sub-batch.
    */
-  getSignerData(options?: { ignoreNoCalls?: boolean }) {
-    const { ignoreNoCalls = false } = options ?? {};
+  getSignerData(
+    options?: { ignoreNoCalls?: boolean } & ExecutorAuthorizationOptions,
+  ) {
+    const { ignoreNoCalls = false, validators } = options ?? {};
     const { nonce, mode, calls } = this;
     assertNonce(nonce);
     assertMode(mode);
     if (!ignoreNoCalls) assertCalls(calls);
+    assertExecutorAuthorizations(mode, calls, {
+      validators,
+      account: this.account.address,
+    });
 
     return callsTypedData(
       this.account.getDomainSeparator({
@@ -210,9 +225,11 @@ export class CatapultarTx<
   /**
    * The full EIP-712 digest the owner signs for this batch (domain-wrapped
    * `Calls` hash). This is the value recovered against in {@link hasValidSignature}.
-   * @param options.ignoreNoCalls Do not throw if no calls have been added. Default false.
+   * @param options As {@link getSignerData}.
    */
-  getTypeHashDigest(options?: { ignoreNoCalls?: boolean }) {
+  getTypeHashDigest(
+    options?: { ignoreNoCalls?: boolean } & ExecutorAuthorizationOptions,
+  ) {
     const signerData = this.getSignerData(options);
     return callsDigest(signerData.domain, signerData.message);
   }
@@ -239,7 +256,10 @@ export class CatapultarTx<
    */
   async execute(
     walletClient: WalletClient,
-    options?: { account?: Account | Hex; ignoreNoCalls?: boolean },
+    options?: {
+      account?: Account | Hex;
+      ignoreNoCalls?: boolean;
+    } & ExecutorAuthorizationOptions,
   ): Promise<Hex> {
     const account = options?.account ?? walletClient.account;
     if (!account)
@@ -251,6 +271,7 @@ export class CatapultarTx<
       // ECDSA/EOA owners. The signature is normalized for the account's owner.
       const data = this.getSignerData({
         ignoreNoCalls: options?.ignoreNoCalls,
+        validators: options?.validators,
       });
       const signature = await walletClient.signTypedData({
         account,
@@ -498,12 +519,31 @@ export class MetaCatapultarTx<
    * sub-batch is skipped). Validates nonces first. The returned transaction is
    * unsigned — sign and send it like any other {@link CatapultarTx}.
    *
+   * An IntentExecutor `authorizeCall` must sit in the same RaiseRevert
+   * sub-batch as, and directly before, the validator `entry` it authorizes:
+   * split across sub-batches, a skipped `entry` would leave the authorization
+   * live for the rest of the transaction.
+   *
    * Always `await` this: it is asynchronous (sub-batches are encoded via the
    * async {@link CatapultarTx.asCall}), and the nonce check surfaces as a
    * rejected promise.
+   * @param options.validators Validators a paired IntentExecutor `entry` may target.
+   *   Default {@link DEFAULT_AUTHORIZED_VALIDATORS}.
    * @throws {DuplicateNonceError} If two sub-batches resolve to the same nonce.
+   * @throws {ExecutorAuthorizationError} If an `authorizeCall` is not paired
+   *   with its `entry` inside one RaiseRevert sub-batch.
    */
-  async asCatapultarTx() {
+  async asCatapultarTx(options?: ExecutorAuthorizationOptions) {
+    const tx = await this.buildOuterTx();
+    assertExecutorAuthorizations(tx.mode, tx.calls, {
+      validators: options?.validators,
+      account: this.account.address,
+    });
+    return tx;
+  }
+
+  /** {@link asCatapultarTx} without the authorization check, for the estimation twin. */
+  private async buildOuterTx() {
     this.checkNonces();
     return new CatapultarTx({
       account: this.account,
@@ -558,12 +598,15 @@ export class MetaCatapultarTx<
    * be estimated this way: the estimate answers "at what limit does the batch
    * complete with failures isolated", which only describes a skip-policy
    * outer frame.
+   * @param options.validators As {@link asCatapultarTx}.
    * @throws {ValidationError} If the outer execution mode is not SkipRevert.
    * @throws {DuplicateNonceError} If two sub-batches resolve to the same nonce.
+   * @throws {ExecutorAuthorizationError} If an `authorizeCall` is not paired
+   *   with its `entry` inside one RaiseRevert sub-batch.
    */
   async estimateGas(
     this: MetaCatapultarTx<O, true>,
-    options: CatapultarEstimateGasOptions = {},
+    options: CatapultarEstimateGasOptions & ExecutorAuthorizationOptions = {},
   ): Promise<bigint> {
     const outerMode = this.mode ?? ExecutionMode.SkipRevert;
     if (
@@ -573,6 +616,10 @@ export class MetaCatapultarTx<
       throw new ValidationError(
         "estimateGas requires a SkipRevert outer mode: the estimate describes a batch that isolates failures.",
       );
+
+    // The twin swaps RaiseRevert sub-batches for RaiseRevertEstimate, which the
+    // authorization check rejects, so check the transaction that will be signed.
+    await this.asCatapultarTx(options);
 
     const twin = new MetaCatapultarTx<O, true>({
       account: this.account,
@@ -584,6 +631,6 @@ export class MetaCatapultarTx<
       ...this.calls.map((c) => ({ ...c, mode: estimateModeFor(c.mode) })),
     );
 
-    return estimateUnsignedWithOverride(await twin.asCatapultarTx(), options);
+    return estimateUnsignedWithOverride(await twin.buildOuterTx(), options);
   }
 }
