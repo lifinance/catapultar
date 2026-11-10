@@ -404,6 +404,8 @@ $ CONTRACT=IntentExecutor INTENT_EXECUTOR_OWNER=0x... INTENT_EXECUTOR_SOLVERS=0x
 
 The IntentExecutor only runs a call that one of its solvers authorized earlier in the same transaction (`authorizeCall(keccak256(execPayload), validator)`). `authorizeCall` reverts `ValidatorHasNoCode` when `validator` holds no code on the chain, because an `entry` sent to an empty address succeeds without consuming the authorization; the solver's `entry` must call that same `validator`. `INTENT_EXECUTOR_OWNER` manages the solver set; use a multisig. `INTENT_EXECUTOR_SOLVERS` lists the accounts that call the validator's `entry`. Both fold into the CREATE2 init code, so every chain must get the same owner and the same solver list in the same order to share one address. The executor keeps authorizations in transient storage, so the deploy reverts `ChainLacksCancun` on a chain without Cancun.
 
+Each `Approval` pair the executor max-approves is reset to zero after the calls, before the sweep, so a spender can pull the executor's tokens only during the call that approved it. A token whose `approve(0)` reverts cannot be listed in `approvals`. An allowance granted inside `calls` (a direct `token.approve`, Permit2) is not reset and lets its spender pull whatever the executor holds during any later call. After removing a compromised solver with `setSolver(solver, false)`, the owner lists every non-zero allowance of the executor (the tokens' `Approval` events with the executor as owner) and clears them with `revokeApprovals`. Revoking a token's allowance to Permit2 also disables every Permit2 allowance of that token.
+
 ## License Notice
 
 This project is licensed under the **[GNU Lesser General Public License v3.0 only (LGPL-3.0-only)](/LICENSE)**.
