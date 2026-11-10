@@ -290,7 +290,11 @@ contract IntentExecutor is Ownable, ReentrancyGuardTransient {
     ///
     ///      Reverts CallNotAuthorized unless a solver authorized keccak256(msg.data)
     ///      earlier in this transaction. Consumes that authorization before any call.
-    ///      msg.value is not part of the authorization.
+    ///      msg.value is not part of the authorization: one authorization admits any value.
+    ///      Value above what `calls` spend is swept to nativeSweepRecipient; value below it
+    ///      is made up from this contract's balance, which only holds stray ETH because
+    ///      every native call sweeps it. Through a validator, msg.value is 0 (V2) or the
+    ///      v1 validator's stray balance. It is never another party's funds.
     /// @param approvals Token+spender pairs to max-approve for the duration of the calls
     /// @param calls Array of calls with value to execute
     /// @param sweepTargets ERC20 token+recipient pairs to sweep after execution
