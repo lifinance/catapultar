@@ -14,10 +14,11 @@ contract DeployIntentExecutorHarness is deploy {
         return callProxyOf(validator);
     }
 
-    function exposed_requireNoCallProxySolver(
-        address[] memory solvers
+    function exposed_requireNoForwarderSolver(
+        address[] memory solvers,
+        address[] memory forwarders
     ) external pure {
-        requireNoCallProxySolver(solvers);
+        requireNoForwarderSolver(solvers, forwarders);
     }
 
     function exposed_expectedCATValidatorAddress() external pure returns (address) {
@@ -31,8 +32,7 @@ contract DeployIntentExecutorHarness is deploy {
 
 /**
  * @notice The deploy script refuses an IntentExecutor solver list that contains a
- * validator's CALL_PROXY, a permissionless forwarder that would let anyone authorize
- * any payload.
+ * permissionless forwarder, which would let anyone call fill() with any payload.
  */
 contract DeployIntentExecutorTest is Test {
     DeployIntentExecutorHarness harness;
@@ -51,22 +51,30 @@ contract DeployIntentExecutorTest is Test {
         assertEq(harness.exposed_callProxyOf(address(validatorV2)), validatorV2.CALL_PROXY());
     }
 
-    function test_requireNoCallProxySolver_rejectsValidatorCallProxies() public {
-        address callProxy = harness.exposed_callProxyOf(harness.exposed_expectedCATValidatorAddress());
-        address callProxyV2 = harness.exposed_callProxyOf(harness.exposed_expectedCATValidatorV2Address());
+    /// @dev Each known forwarder is refused wherever it sits in the solver list; an
+    /// ordinary solver passes.
+    function test_requireNoForwarderSolver_rejectsForwarders() public {
+        address listedForwarder = makeAddr("listedForwarder");
+        address[] memory forwarders = new address[](1);
+        forwarders[0] = listedForwarder;
+
+        address[] memory rejected = new address[](5);
+        rejected[0] = harness.exposed_callProxyOf(harness.exposed_expectedCATValidatorAddress());
+        rejected[1] = harness.exposed_callProxyOf(harness.exposed_expectedCATValidatorV2Address());
+        rejected[2] = 0xcA11bde05977b3631167028862bE2a173976CA11; // Multicall3
+        rejected[3] = 0x72aB1B98b60a9251Cc00ab1C3bBe9F48CdFdCA40; // legacy IntentExecutor
+        rejected[4] = listedForwarder;
 
         address[] memory solvers = new address[](2);
         solvers[0] = makeAddr("solver");
-
-        solvers[1] = callProxy;
-        vm.expectRevert(abi.encodeWithSelector(deploy.SolverIsCallProxy.selector, callProxy));
-        harness.exposed_requireNoCallProxySolver(solvers);
-
-        solvers[1] = callProxyV2;
-        vm.expectRevert(abi.encodeWithSelector(deploy.SolverIsCallProxy.selector, callProxyV2));
-        harness.exposed_requireNoCallProxySolver(solvers);
+        for (uint256 i = 0; i < rejected.length; ++i) {
+            solvers[1] = rejected[i];
+            vm.expectRevert(abi.encodeWithSelector(deploy.SolverIsForwarder.selector, rejected[i]));
+            harness.exposed_requireNoForwarderSolver(solvers, forwarders);
+        }
 
         solvers[1] = makeAddr("otherSolver");
-        harness.exposed_requireNoCallProxySolver(solvers);
+        harness.exposed_requireNoForwarderSolver(solvers, forwarders);
+        harness.exposed_requireNoForwarderSolver(solvers, new address[](0));
     }
 }

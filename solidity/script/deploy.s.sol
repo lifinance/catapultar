@@ -13,13 +13,21 @@ contract deploy is multichain {
     error NotExpectedAddress(address expected, address deployedTo);
     error CanonicalVmMissing(address virtualMachine);
     error ChainLacksCancun();
-    error SolverIsCallProxy(address solver);
+    error SolverIsForwarder(address solver);
 
     /// @dev The v1.2 LI.FI VirtualMachine, at one CREATE2 address on every chain it
     /// supports. CATValidatorV2 staticcalls it to run committed validation programs,
     /// so it must exist on the target chain. The address is the only constructor
     /// argument and folds into the CREATE2 init code: changing it moves the validator.
     address internal constant CANONICAL_VM = 0xA9f22b951d5A9CBBD0eC8d2741EA44BFDD2D11fd;
+
+    /// @dev Multicall3, at one address on every chain it supports. Its aggregate functions
+    /// forward any caller's calls.
+    address internal constant MULTICALL3 = 0xcA11bde05977b3631167028862bE2a173976CA11;
+
+    /// @dev The legacy (v2) IntentExecutor, at one address on every chain. Its
+    /// executeAndSweep runs any caller's calls.
+    address internal constant LEGACY_INTENT_EXECUTOR = 0x72aB1B98b60a9251Cc00ab1C3bBe9F48CdFdCA40;
 
     /// @dev Code that executes Cancun's TSTORE and MCOPY, then returns the 32-byte word 1:
     /// PUSH0 PUSH0 TSTORE, PUSH0 PUSH0 PUSH0 MCOPY, PUSH1 1 PUSH0 MSTORE, PUSH1 32 PUSH0
@@ -75,6 +83,13 @@ contract deploy is multichain {
 
     function intentExecutorSolvers() internal view returns (address[] memory) {
         return vm.envAddress("INTENT_EXECUTOR_SOLVERS", ",");
+    }
+
+    /// @dev Further permissionless forwarders this script cannot derive, comma-separated:
+    /// the CALL_PROXY of every deployed validator other than the v1 and V2 ones this
+    /// script deploys. Optional.
+    function intentExecutorForwarders() internal view returns (address[] memory) {
+        return vm.envOr("INTENT_EXECUTOR_FORWARDERS", ",", new address[](0));
     }
 
     function deployFactory() internal returns (CatapultarFactory factory) {
@@ -166,15 +181,16 @@ contract deploy is multichain {
     /// storage, so the chain must support TSTORE. A chain without Cancun reverts
     /// ChainLacksCancun instead of deploying an executor that cannot run.
     ///
-    /// A validator's CALL_PROXY forwards any caller's call, so as a solver it would let
-    /// anyone call fill() with any payload. Reverts SolverIsCallProxy when a solver is the
-    /// CALL_PROXY of the v1 or V2 validator.
+    /// A forwarder that runs any caller's call would, as a solver, let anyone call fill()
+    /// with any payload. Reverts SolverIsForwarder when a solver is the CALL_PROXY of the
+    /// v1 or V2 validator, Multicall3, the legacy IntentExecutor, or listed in
+    /// INTENT_EXECUTOR_FORWARDERS.
     function deployIntentExecutor(
         address owner,
         address[] memory solvers
     ) internal returns (IntentExecutor intentExecutor) {
         requireCancun();
-        requireNoCallProxySolver(solvers);
+        requireNoForwarderSolver(solvers, intentExecutorForwarders());
 
         bytes memory initArgs = abi.encode(owner, solvers);
         address payable expectedAddress =
@@ -188,13 +204,20 @@ contract deploy is multichain {
         return IntentExecutor(expectedAddress);
     }
 
-    function requireNoCallProxySolver(
-        address[] memory solvers
+    function requireNoForwarderSolver(
+        address[] memory solvers,
+        address[] memory forwarders
     ) internal pure {
         address callProxy = callProxyOf(expectedCATValidatorAddress());
         address callProxyV2 = callProxyOf(expectedCATValidatorV2Address());
         for (uint256 i = 0; i < solvers.length; ++i) {
-            if (solvers[i] == callProxy || solvers[i] == callProxyV2) revert SolverIsCallProxy(solvers[i]);
+            address solver = solvers[i];
+            if (
+                solver == callProxy || solver == callProxyV2 || solver == MULTICALL3 || solver == LEGACY_INTENT_EXECUTOR
+            ) revert SolverIsForwarder(solver);
+            for (uint256 j = 0; j < forwarders.length; ++j) {
+                if (solver == forwarders[j]) revert SolverIsForwarder(solver);
+            }
         }
     }
 
