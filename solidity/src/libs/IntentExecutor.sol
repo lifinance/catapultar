@@ -14,9 +14,9 @@ import { SafeTransferLib } from "solady/src/utils/SafeTransferLib.sol";
 ///      1. Approvals — safeApproveWithRetry(type(uint256).max) for each token+spender pair,
 ///         handling USDT-style tokens that revert on non-zero-to-non-zero approve.
 ///      2. Call execution — arbitrary batched calls (swap, fee transfer, etc.)
-///      3. Revocation — each pair's allowance is set back to zero, so a spender can pull
-///         this contract's tokens only during the call that approved it. A token that
-///         reverts on approve(0) cannot be approved.
+///      3. Revocation — each pair's allowance is set back to zero (one wei for a token that
+///         reverts on approve(0), such as BNB on Ethereum), so a spender can pull this
+///         contract's tokens only during the call that approved it.
 ///      4. Balance sweep — reads balanceOf(this) for each output token and transfers
 ///         the full remaining balance to the specified recipient.
 ///
@@ -363,14 +363,42 @@ contract IntentExecutor is Ownable, ReentrancyGuardTransient {
         }
     }
 
-    /// @dev Set each token+spender allowance to zero. Reverts on a token whose approve(0)
-    ///      fails, so no allowance from the call survives it.
+    /// @dev Set each token+spender allowance to zero, so no allowance from the call survives
+    ///      it. Some tokens (BNB on Ethereum) revert on approve(0); for those the allowance
+    ///      is set to one wei instead. That still ends the max allowance, and it lets such a
+    ///      token be listed in `approvals` at all: reverting instead would make every call
+    ///      that approves it fail. The leftover is dust, since its spender can pull at most
+    ///      one wei per transferFrom. It does not block the next max approval: the 1-wei
+    ///      approve just succeeded over a max allowance, so the token accepts non-zero to
+    ///      non-zero approvals. Reverts ApproveFailed when both approvals fail.
     function _safeRevokeAll(
         Approval[] calldata approvals
     ) private {
         uint256 len = approvals.length;
         for (uint256 i = 0; i < len; ++i) {
-            SafeTransferLib.safeApprove(approvals[i].token, approvals[i].spender, 0);
+            address token = approvals[i].token;
+            address spender = approvals[i].spender;
+            if (!_tryApprove(token, spender, 0)) SafeTransferLib.safeApprove(token, spender, 1);
+        }
+    }
+
+    /// @dev SafeTransferLib.safeApprove that returns false instead of reverting. Success
+    ///      means the call succeeded and returned true, or returned nothing from a token
+    ///      with code (USDT-style).
+    function _tryApprove(
+        address token,
+        address spender,
+        uint256 amount
+    ) private returns (bool success) {
+        assembly ("memory-safe") {
+            mstore(0x14, spender)
+            mstore(0x34, amount)
+            mstore(0x00, 0x095ea7b3000000000000000000000000) // `approve(address,uint256)`.
+            success := call(gas(), token, 0, 0x10, 0x44, 0x00, 0x20)
+            if iszero(and(eq(mload(0x00), 1), success)) {
+                success := lt(or(iszero(extcodesize(token)), returndatasize()), success)
+            }
+            mstore(0x34, 0) // Restore the part of the free memory pointer that was overwritten.
         }
     }
 

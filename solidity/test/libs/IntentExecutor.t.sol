@@ -38,6 +38,20 @@ contract MockZeroApproveReverts is MockERC20 {
     }
 }
 
+/// @dev Token whose allowance can only be set to the maximum: neither approve(0) nor the
+///      one-wei fallback can end it.
+contract MockOnlyMaxApprove is MockERC20 {
+    constructor() MockERC20("MAX", "MAX", 18) { }
+
+    function approve(
+        address spender,
+        uint256 amount
+    ) public override returns (bool) {
+        if (amount != type(uint256).max) revert("MAX: only max");
+        return super.approve(spender, amount);
+    }
+}
+
 contract IntentExecutorTest is Test {
     event Approval(address indexed owner, address indexed spender, uint256 amount);
     IntentExecutor executor;
@@ -446,18 +460,34 @@ contract IntentExecutorTest is Test {
         assertEq(usdt.allowance(address(executor), address(this)), 0);
     }
 
-    /// @dev A token that rejects approve(0) cannot be approved: the allowance could not be
-    ///      revoked, so the call reverts instead of leaving it behind.
-    function test_approval_revertsWhenRevocationFails() external {
+    /// @dev A token that rejects approve(0) is left at one wei instead of reverting, and a
+    ///      later call approves it to max again over that wei.
+    function test_approval_zeroApproveRevertingToken_revokedToOneWei() external {
         MockZeroApproveReverts bnb = new MockZeroApproveReverts();
         IntentExecutor.Approval[] memory approvals = oneApproval(address(bnb), address(this));
+        IntentExecutor.Call3[] memory calls = new IntentExecutor.Call3[](0);
+        IntentExecutor.SweepTarget[] memory sweeps = new IntentExecutor.SweepTarget[](0);
+        bytes memory data = abi.encodeCall(IntentExecutor.executeAndSweep, (approvals, calls, sweeps));
+
+        run(data);
+        assertEq(bnb.allowance(address(executor), address(this)), 1);
+
+        run(data);
+        assertEq(bnb.allowance(address(executor), address(this)), 1);
+    }
+
+    /// @dev When neither approve(0) nor the one-wei fallback succeeds, the call reverts
+    ///      instead of leaving the max allowance behind.
+    function test_approval_revertsWhenRevocationFails() external {
+        MockOnlyMaxApprove token = new MockOnlyMaxApprove();
+        IntentExecutor.Approval[] memory approvals = oneApproval(address(token), address(this));
         IntentExecutor.Call3[] memory calls = new IntentExecutor.Call3[](0);
         IntentExecutor.SweepTarget[] memory sweeps = new IntentExecutor.SweepTarget[](0);
 
         vm.expectRevert(SafeTransferLib.ApproveFailed.selector);
         run(abi.encodeCall(IntentExecutor.executeAndSweep, (approvals, calls, sweeps)));
 
-        assertEq(bnb.allowance(address(executor), address(this)), 0);
+        assertEq(token.allowance(address(executor), address(this)), 0);
     }
 
     // -- revokeApprovals --
