@@ -14,7 +14,15 @@
  *      - INTENT_EXECUTOR_OWNER (required to deploy IntentExecutorTron): owner of the
  *        solver set (a multisig), base58 (T...) or hex
  *      - INTENT_EXECUTOR_SOLVERS (required to deploy IntentExecutorTron): comma-separated
- *        accounts that call the validator's `entry`, base58 or hex
+ *        accounts that call the executor's `fill`, base58 or hex
+ *      - INTENT_EXECUTOR_FORWARDERS (optional): comma-separated permissionless forwarders,
+ *        base58 or hex, that must not be solvers: the CALL_PROXY of every deployed
+ *        validator not covered below
+ *
+ * A forwarder that runs any caller's call would, as a solver, let anyone call fill()
+ * with any payload. Deploying IntentExecutorTron throws when a solver is in
+ * INTENT_EXECUTOR_FORWARDERS, is one of TRON_MAINNET_FORWARDERS on mainnet, or is the
+ * CALL_PROXY of a CATValidatorTron deployed in the same run.
  *
  * IntentExecutorTron keeps solver authorizations in transient storage, so it needs
  * TVM Cancun (TLOAD/TSTORE, chain parameter getAllowTvmCancun = 1).
@@ -76,6 +84,21 @@ const ALL_CONTRACTS = [...DEFAULT_CONTRACTS, ...OPTIONAL_CONTRACTS] as const
 
 type DeployStepName = (typeof ALL_CONTRACTS)[number]
 
+/**
+ * Permissionless forwarders on Tron mainnet, keyed by 0x hex body. Tron's CREATE2
+ * uses a 0x41 prefix and no deterministic deployer, so deploy.s.sol's EVM addresses
+ * (Multicall3, the legacy IntentExecutor, the validators' CALL_PROXY) exist on none of
+ * them. Tron has no Multicall3.
+ */
+const TRON_MAINNET_FORWARDERS: Readonly<Record<string, string>> = {
+  // TH5ysvD4VbUzKRQoFPXbMZpcetGcdHo2Q9: its executeAndSweep runs any caller's calls.
+  '0x4e10d66c72f3184b83fe9d611f96e7eca1d8fc85': 'legacy IntentExecutorTron',
+  // TT8Y3hwAx15zW1viwmskwno3WwgtrknPPT, read from CALL_PROXY() on
+  // CATValidatorTron TYjEq9DdArEAtsdRY9S65Y2GbqmM4myuzw.
+  '0xbc3dc7cdf6c90a2e6c484ace018c7c2ce19720f6':
+    'CALL_PROXY of CATValidatorTron',
+}
+
 /** Constructor arguments per contract; contracts without arguments return []. */
 function constructorParams(
   contractName: DeployStepName,
@@ -90,14 +113,23 @@ function constructorParams(
     )
   const tronWeb = getTronWebCodecOnlyForNetwork(network)
   const ownerHex = parseTronAccount(tronWeb, 'INTENT_EXECUTOR_OWNER', owner)
-  const solverHexes = solvers
-    .split(',')
-    .filter((solver) => solver.trim() !== '')
-    .map((solver) =>
-      parseTronAccount(tronWeb, 'INTENT_EXECUTOR_SOLVERS', solver)
-    )
+  const solverHexes = parseTronAccountList(
+    tronWeb,
+    'INTENT_EXECUTOR_SOLVERS',
+    solvers
+  )
   if (solverHexes.length === 0)
     throw new Error('INTENT_EXECUTOR_SOLVERS: lists no solver address')
+  const forwarders = new Map<string, string>(
+    network === 'tron' ? Object.entries(TRON_MAINNET_FORWARDERS) : []
+  )
+  for (const forwarder of parseTronAccountList(
+    tronWeb,
+    'INTENT_EXECUTOR_FORWARDERS',
+    process.env.INTENT_EXECUTOR_FORWARDERS ?? ''
+  ))
+    forwarders.set(forwarder, 'listed in INTENT_EXECUTOR_FORWARDERS')
+  requireNoForwarderSolver(tronWeb, solverHexes, forwarders)
   consola.info('IntentExecutorTron constructor:', {
     owner: `${tronWeb.address.fromHex(ownerHex)} (${ownerHex})`,
     solvers: solverHexes.map(
@@ -105,6 +137,37 @@ function constructorParams(
     ),
   })
   return [ownerHex, solverHexes]
+}
+
+/** Parses a comma-separated list with {@link parseTronAccount}, lowercased. */
+function parseTronAccountList(
+  tronWeb: TronWeb,
+  variable: string,
+  raw: string
+): string[] {
+  return raw
+    .split(',')
+    .filter((account) => account.trim() !== '')
+    .map((account) =>
+      parseTronAccount(tronWeb, variable, account).toLowerCase()
+    )
+}
+
+/**
+ * Throws when a solver is one of `forwarders` (lowercase 0x hex body → description).
+ */
+function requireNoForwarderSolver(
+  tronWeb: TronWeb,
+  solverHexes: string[],
+  forwarders: ReadonlyMap<string, string>
+): void {
+  for (const solver of solverHexes) {
+    const forwarder = forwarders.get(solver.toLowerCase())
+    if (forwarder)
+      throw new Error(
+        `SolverIsForwarder: ${tronWeb.address.fromHex(solver)} (${solver}) is a forwarder: ${forwarder}`
+      )
+  }
 }
 
 /**
@@ -259,6 +322,37 @@ async function requireTvmCancun(
   consola.info('TVM Cancun enabled (getAllowTvmCancun = 1)')
 }
 
+/** Reads CALL_PROXY() of a deployed CATValidatorTron, as a lowercase 0x hex body. */
+async function readCallProxy(
+  rpcUrl: string,
+  headers: Record<string, string>,
+  validator: string
+): Promise<string> {
+  const response = await fetch(`${rpcUrl}/wallet/triggerconstantcontract`, {
+    method: 'POST',
+    headers: { ...headers, 'content-type': 'application/json' },
+    body: JSON.stringify({
+      owner_address: validator,
+      contract_address: validator,
+      function_selector: 'CALL_PROXY()',
+      visible: true,
+    }),
+  })
+  if (!response.ok)
+    throw new Error(
+      `CALL_PROXY() on ${validator} failed: HTTP ${response.status}`
+    )
+  const { constant_result: constantResult, result } =
+    (await response.json()) as {
+      constant_result?: string[]
+      result?: { result?: boolean }
+    }
+  const word = constantResult?.[0]
+  if (!result?.result || !word || !/^0{24}[0-9a-fA-F]{40}$/.test(word))
+    throw new Error(`CALL_PROXY() on ${validator} returned no address`)
+  return `0x${word.slice(24).toLowerCase()}`
+}
+
 async function main() {
   const {
     dryRun,
@@ -346,6 +440,39 @@ async function main() {
       consola.info(`  Address: ${result.contractAddress}`)
       consola.info(`  TX: ${tronScanTransactionUrl(network, result.transactionId)}`)
       consola.info(`  Cost: ${result.actualCost.trxCost} TRX`)
+
+      // No one can know a new validator's CALL_PROXY before it exists, so the run's
+      // IntentExecutorTron solvers are checked against it here, before the executor step.
+      const executorParams = params.get('IntentExecutorTron')
+      if (contractName === 'CATValidatorTron' && executorParams) {
+        if (dryRun) {
+          consola.warn(
+            'DRY RUN: the new CATValidatorTron CALL_PROXY is not checked against INTENT_EXECUTOR_SOLVERS'
+          )
+        } else {
+          try {
+            const callProxy = await readCallProxy(
+              rpcUrl,
+              headers,
+              result.contractAddress
+            )
+            requireNoForwarderSolver(
+              getTronWebCodecOnlyForNetwork(network),
+              executorParams[1] as string[],
+              new Map([
+                [callProxy, 'CALL_PROXY of the CATValidatorTron just deployed'],
+              ])
+            )
+          } catch (error: any) {
+            // The validator is live: record it before refusing the executor.
+            await saveDeployments(deployments)
+            consola.error(
+              `Refusing to deploy IntentExecutorTron: ${error.message}`
+            )
+            process.exit(1)
+          }
+        }
+      }
     } catch (error: any) {
       if (dryRun && /insufficient balance/i.test(error.message)) {
         consola.warn(`${contractName}: ${error.message}`)
