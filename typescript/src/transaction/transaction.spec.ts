@@ -7,11 +7,6 @@ import { anvil } from "viem/chains";
 import { PUBLIC_DEFAULT_ANVIL_ACCOUNT_0 } from "../../test/fixtures";
 import { privateKeyToAccount } from "viem/accounts";
 import CATAPULTAR_ABI from "../abi/catapultar";
-import { ExecutorAuthorizationError } from "../errors";
-import {
-  authorizeThenEntry,
-  executeAndSweepPayload,
-} from "../../test/authorization";
 
 async function waitForTransaction(hash: `0x${string}`) {
   await new Promise((resolve) => setTimeout(resolve, 50));
@@ -159,34 +154,6 @@ describe("Base Transaction", () => {
       tx.nonce = 0n;
       expect(() => tx.getOpData()).toThrow(nonce0Error);
     });
-
-    it.concurrent(
-      "should refuse to embed a skipping batch with an IntentExecutor authorization",
-      () => {
-        const tx = new BaseTransaction({
-          mode: ExecutionMode.SkipRevert,
-          nonce: 1n,
-          calls: authorizeThenEntry(random(20), executeAndSweepPayload()),
-        });
-        expect(() => tx.asDigest()).toThrow(ExecutorAuthorizationError);
-      },
-    );
-
-    it.concurrent(
-      "should embed a pair to a caller-supplied validator only when that validator is passed",
-      () => {
-        const executor = random(20);
-        const payload = executeAndSweepPayload();
-        const validator = random(20);
-        const tx = new BaseTransaction({
-          mode: ExecutionMode.RaiseRevert,
-          nonce: 1n,
-          calls: authorizeThenEntry(executor, payload, validator),
-        });
-        expect(() => tx.asDigest()).toThrow(ExecutorAuthorizationError);
-        expect(() => tx.asDigest({ validators: [validator] })).not.toThrow();
-      },
-    );
   });
 
   describe("integration", () => {

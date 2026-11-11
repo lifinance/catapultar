@@ -21,38 +21,25 @@ import { SafeTransferLib } from "solady/src/utils/SafeTransferLib.sol";
 ///         the full remaining balance to the specified recipient.
 ///
 ///      Access control: executeAndSweep() and executeAndSweepNative() only run a call
-///      that a solver authorized earlier in the same transaction. The solver is the
-///      account that calls the CAT validator's `entry`. The validator then reaches this
-///      contract through its CALL_PROXY, a permissionless forwarder, so `msg.sender`
-///      cannot identify the solver. The solver therefore calls
-///      authorizeCall(keccak256(execPayload), validator) first, and each execution
-///      consumes one authorization of keccak256(msg.data). The authorization lives in
-///      transient storage, so it ends with the transaction and rolls back with a
-///      reverted frame.
+///      that a solver authorized. The solver calls fill(validator, entryData): this
+///      contract authorizes one execution of the `execPayload` in entryData, calls the
+///      CAT validator's `entry` with entryData, and reverts CallNotConsumed unless that
+///      `entry` spent the authorization. The validator reaches this contract through its
+///      CALL_PROXY, a permissionless forwarder, so `msg.sender` cannot identify the
+///      solver, and each execution consumes one authorization of keccak256(msg.data)
+///      instead. The authorization lives in transient storage and never outlives
+///      fill(): a failed `entry`, or one that returns without reaching this contract,
+///      reverts fill() with it, whatever batch the solver runs fill() in.
 ///
-///      The solver MUST call authorizeCall() in the same atomic batch as the validator
-///      `entry` it authorizes (ERC-7821 revert flag 0x00, which bubbles any failed call,
-///      and no multichain replay), directly before that `entry`. If `entry` fails inside
-///      a batch that skips failures (flag 0x01, or 0x02 for logical failures), the
-///      authorization stays live until the transaction ends, and any code that runs
-///      later in that transaction can execute the authorized payload. That payload
-///      delivers the fill's proceeds to the validator, where any account can take them
-///      with a self-signed constraint, so a skipping batch leaks the fill. The failure
-///      need not be accidental: anyone can relay the signed batch with too little gas
-///      for `entry`, or replay a multichain batch on a chain where `entry` fails.
-///
-///      A call to an address without code succeeds, so an `entry` sent to a validator
-///      that is not deployed on the chain would return without consuming the
-///      authorization, even in an atomic batch. authorizeCall() therefore takes the
-///      validator whose `entry` follows and reverts ValidatorHasNoCode when that address
-///      holds no code. The solver MUST pass the address its `entry` calls.
+///      The validator checks its constraint against its caller, so a constraint filled
+///      through fill() names this contract as its executor.
 ///
 ///      An authorization admits the exact calldata only, so its approvals, calls and
 ///      sweep recipients are those the solver chose. One exception: native value sent
 ///      with executeAndSweepNative() is not part of the authorization.
 ///
 ///      A solver must be an account only its key controls. Adding a forwarder (such as
-///      a validator's CALL_PROXY) as a solver lets anyone authorize any call.
+///      a validator's CALL_PROXY) as a solver lets anyone call fill().
 ///
 ///      The owner manages the solver set and transfers ownership only through solady's
 ///      two-step handover. The gate cannot be disabled.
@@ -116,9 +103,11 @@ contract IntentExecutor is Ownable, ReentrancyGuardTransient {
     /// Errors ///
 
     error ZeroRecipient();
-    /// @dev No authorization from a solver covers this calldata in the current transaction.
+    /// @dev No authorization from a solver covers this calldata.
     error CallNotAuthorized();
-    /// @dev The caller of authorizeCall() is not in the solver set.
+    /// @dev The `entry` that fill() called returned without spending its authorization.
+    error CallNotConsumed();
+    /// @dev The caller of fill() is not in the solver set.
     error NotSolver();
     /// @dev The zero address cannot be a solver.
     error ZeroSolver();
@@ -126,8 +115,6 @@ contract IntentExecutor is Ownable, ReentrancyGuardTransient {
     error OwnershipTransferDisabled();
     /// @dev The VM does not support transient storage (TSTORE/TLOAD).
     error TransientStorageUnsupported();
-    /// @dev The validator passed to authorizeCall() holds no code on this chain.
-    error ValidatorHasNoCode();
 
     /// Events ///
 
@@ -140,7 +127,7 @@ contract IntentExecutor is Ownable, ReentrancyGuardTransient {
     /// @dev Seed of the transient authorization slots: keccak256("IntentExecutor.authorization").
     uint256 private constant _AUTHORIZATION_SEED = 0x019bc4d42441a5967a54f65a55b6922eab59e08350d9747659b3c06bbbe4f3fa;
 
-    /// @notice Accounts allowed to authorize calls.
+    /// @notice Accounts allowed to call fill().
     mapping(address solver => bool allowed) public isSolver;
 
     /// @param owner_ Manages the solver set. Must not be zero.
@@ -216,33 +203,40 @@ contract IntentExecutor is Ownable, ReentrancyGuardTransient {
 
     /// Solver Methods ///
 
-    /// @notice Authorize one execution of the call whose complete calldata hashes to
-    /// `callHash`, for the rest of the current transaction.
-    /// @dev `callHash` is keccak256 of the calldata this contract will receive, which is
-    /// the validator's `execPayload` and the V2 binding's `payloadHash`. Authorizing the
-    /// same hash twice admits two executions.
-    /// @param validator The validator whose `entry` consumes the authorization. Must hold
-    /// code: an `entry` sent to an empty address succeeds without consuming it.
-    function authorizeCall(
-        bytes32 callHash,
-        address validator
+    /// @notice Run a CAT validator `entry`, such as a fill whose `execPayload` calls this
+    /// contract or a refund.
+    /// @dev Authorizes one execution of `execPayload`, the second argument of every
+    /// `entry` overload, calls `validator` with `entryData`, and reverts CallNotConsumed
+    /// unless that call spent the authorization. An `entry` that fails, or returns
+    /// without reaching this contract (a validator without code, another execTarget),
+    /// therefore leaves no authorization behind. An empty `execPayload` (a refund) is
+    /// not authorized: the validator makes no call for it.
+    /// @param validator The CAT validator to call. It checks its constraint against
+    /// `msg.sender`, so the constraint names this contract as its executor.
+    /// @param entryData Complete calldata of the validator's `entry`.
+    function fill(
+        address validator,
+        bytes calldata entryData
     ) external {
         if (!isSolver[msg.sender]) revert NotSolver();
-        if (validator.code.length == 0) revert ValidatorHasNoCode();
-        bytes32 slot = _authorizationSlot(callHash);
-        assembly ("memory-safe") {
-            tstore(slot, add(tload(slot), 1))
+        (, bytes memory execPayload) = abi.decode(entryData[4:], (address, bytes));
+        bytes32 slot = _authorizationSlot(keccak256(execPayload));
+        if (execPayload.length != 0) {
+            assembly ("memory-safe") {
+                tstore(slot, add(tload(slot), 1))
+            }
         }
-    }
-
-    /// @notice Number of executions of `callHash` still authorized in this transaction.
-    function authorizations(
-        bytes32 callHash
-    ) external view returns (uint256 count) {
-        bytes32 slot = _authorizationSlot(callHash);
-        assembly ("memory-safe") {
-            count := tload(slot)
+        (bool success, bytes memory ret) = validator.call(entryData);
+        if (!success) {
+            assembly ("memory-safe") {
+                revert(add(ret, 0x20), mload(ret))
+            }
         }
+        bool consumed;
+        assembly ("memory-safe") {
+            consumed := iszero(tload(slot))
+        }
+        if (!consumed) revert CallNotConsumed();
     }
 
     /// External Methods ///
@@ -260,8 +254,8 @@ contract IntentExecutor is Ownable, ReentrancyGuardTransient {
     ///      next authorized call. Use executeAndSweepNative() instead whenever
     ///      the output may include native ETH.
     ///
-    ///      Reverts CallNotAuthorized unless a solver authorized keccak256(msg.data)
-    ///      earlier in this transaction. Consumes that authorization before any call.
+    ///      Reverts CallNotAuthorized unless it runs inside a solver's fill() whose
+    ///      `execPayload` is this calldata. Consumes that authorization before any call.
     /// @param approvals Token+spender pairs to max-approve for the duration of the calls
     /// @param calls Array of calls to execute (swap, fee transfer, etc.)
     /// @param sweepTargets Token+recipient pairs to sweep after execution
@@ -288,13 +282,13 @@ contract IntentExecutor is Ownable, ReentrancyGuardTransient {
     ///      ETH could land in this contract. If you use executeAndSweep() in that scenario the
     ///      ETH will be left in the contract until the next authorized call.
     ///
-    ///      Reverts CallNotAuthorized unless a solver authorized keccak256(msg.data)
-    ///      earlier in this transaction. Consumes that authorization before any call.
-    ///      msg.value is not part of the authorization: one authorization admits any value.
-    ///      Value above what `calls` spend is swept to nativeSweepRecipient; value below it
-    ///      is made up from this contract's balance, which only holds stray ETH because
-    ///      every native call sweeps it. Through a validator, msg.value is 0 (V2) or the
-    ///      v1 validator's stray balance. It is never another party's funds.
+    ///      Reverts CallNotAuthorized unless it runs inside a solver's fill() whose
+    ///      `execPayload` is this calldata. Consumes that authorization before any call.
+    ///      msg.value is not part of the authorization: it is what the validator forwards,
+    ///      0 for V2 and the v1 validator's stray balance for v1, never another party's
+    ///      funds. Value above what `calls` spend is swept to nativeSweepRecipient; value
+    ///      below it is made up from this contract's balance, which only holds stray ETH
+    ///      because every native call sweeps it.
     /// @param approvals Token+spender pairs to max-approve for the duration of the calls
     /// @param calls Array of calls with value to execute
     /// @param sweepTargets ERC20 token+recipient pairs to sweep after execution

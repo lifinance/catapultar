@@ -162,13 +162,12 @@ contract deploy is multichain {
         }
     }
 
-    /// @dev The executor keeps solver authorizations in transient storage, so the chain
-    /// must support TSTORE. A chain without Cancun reverts ChainLacksCancun: the executor
-    /// has no storage fallback, because a stored authorization that a failed fill never
-    /// consumed would outlive its transaction.
+    /// @dev The executor keeps solver authorizations and its reentrancy guard in transient
+    /// storage, so the chain must support TSTORE. A chain without Cancun reverts
+    /// ChainLacksCancun instead of deploying an executor that cannot run.
     ///
     /// A validator's CALL_PROXY forwards any caller's call, so as a solver it would let
-    /// anyone authorize any payload. Reverts SolverIsCallProxy when a solver is the
+    /// anyone call fill() with any payload. Reverts SolverIsCallProxy when a solver is the
     /// CALL_PROXY of the v1 or V2 validator.
     function deployIntentExecutor(
         address owner,

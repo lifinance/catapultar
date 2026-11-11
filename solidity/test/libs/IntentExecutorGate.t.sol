@@ -101,13 +101,12 @@ contract HookToken is MockERC20 {
     }
 }
 
-/// @dev Called from inside an authorized execution. Reads the remaining authorization
-/// and replays the same calldata through the validator's call proxy.
+/// @dev Called from inside an authorized execution. Replays the same calldata through
+/// the validator's call proxy.
 contract Reenterer {
     IntentExecutor public immutable executor;
     address public immutable callProxy;
     bytes public payload;
-    uint256 public authorizationsDuringCall;
     bool public replaySucceeded;
     bytes public replayReturn;
 
@@ -126,8 +125,33 @@ contract Reenterer {
     }
 
     function reenter() external {
-        authorizationsDuringCall = executor.authorizations(keccak256(payload));
         (replaySucceeded, replayReturn) = callProxy.call(proxyCalldata(executor, payload));
+    }
+}
+
+/// @dev Stands in for a validator whose `entry` runs `execPayload` on `execTarget` a set
+/// number of times: 1 like a validator, 0 for an `entry` that never reaches the executor.
+contract EntryStub {
+    uint256 public runs = 1;
+
+    function setRuns(
+        uint256 runs_
+    ) external {
+        runs = runs_;
+    }
+
+    function entry(
+        address execTarget,
+        bytes calldata execPayload
+    ) external {
+        for (uint256 i = 0; i < runs; ++i) {
+            (bool ok, bytes memory ret) = execTarget.call(execPayload);
+            if (!ok) {
+                assembly ("memory-safe") {
+                    revert(add(ret, 0x20), mload(ret))
+                }
+            }
+        }
     }
 }
 
@@ -144,6 +168,7 @@ contract IntentExecutorGateTest is Test {
     MockComposeProxy composeProxy;
     MockERC20 usdc;
     MockERC20 inToken;
+    EntryStub entryStub;
 
     address owner;
     address payable worker;
@@ -160,6 +185,7 @@ contract IntentExecutorGateTest is Test {
         validator = new CATValidatorV2(makeAddr("vm"));
         callProxy = validator.CALL_PROXY();
         factory = new CatapultarFactory();
+        entryStub = new EntryStub();
 
         address workerSigner;
         (workerSigner, workerKey) = makeAddrAndKey("workerKey");
@@ -250,16 +276,6 @@ contract IntentExecutorGateTest is Test {
         return abi.encodeCall(MockComposeProxy.withdrawTo, (usdc, to, POSITION));
     }
 
-    /// @dev withdrawCall(to) as the single call of an executeAndSweepNative() payload.
-    function withdrawCallsWithValue(
-        address to
-    ) internal view returns (IntentExecutor.Call3Value[] memory calls) {
-        calls = new IntentExecutor.Call3Value[](1);
-        calls[0] = IntentExecutor.Call3Value({
-            target: address(composeProxy), allowFailure: false, value: 0, callData: withdrawCall(to)
-        });
-    }
-
     struct Fill {
         AllowanceSpend[] allowances;
         Outcome[] outcomes;
@@ -268,7 +284,7 @@ contract IntentExecutorGateTest is Test {
     }
 
     /// @dev The user's signed V2 constraint for `payload`, bound to the executor and the
-    /// payload hash, with the worker as the constraint's executor.
+    /// payload hash, with the executor as the constraint's executor.
     function signFill(
         address allowanceToken,
         uint256 outcomeAmount,
@@ -284,71 +300,61 @@ contract IntentExecutorGateTest is Test {
         fill.outcomes[0] = Outcome({ token: address(usdc), amount: outcomeAmount, destination: destination });
         fill.binding = ExecutionBinding({ executionTarget: address(executor), payloadHash: keccak256(payload) });
         bytes32 digest = V2ConstraintDigest.digest(
-            validator.DOMAIN_SEPARATOR(), fill.allowances, fill.outcomes, worker, 1, fill.binding, 0, 0
+            validator.DOMAIN_SEPARATOR(), fill.allowances, fill.outcomes, address(executor), 1, fill.binding, 0, 0
         );
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(userKey, digest);
         fill.signature = abi.encodePacked(r, s, v);
     }
 
-    function entryCall(
+    /// @dev The validator `entry` calldata for the user's constraint.
+    function entryData(
         bytes memory payload,
         Fill memory fill
-    ) internal view returns (ERC7821.Call memory) {
-        return entryCall(payload, fill, address(validator));
-    }
-
-    /// @dev As above, sent to `to` instead of the validator.
-    function entryCall(
-        bytes memory payload,
-        Fill memory fill,
-        address to
-    ) internal view returns (ERC7821.Call memory) {
-        return ERC7821.Call({
-            to: to,
-            value: 0,
-            data: abi.encodeCall(
-                IValidatorV2.entry,
-                (
-                    address(executor),
-                    payload,
-                    user,
-                    1,
-                    fill.allowances,
-                    fill.outcomes,
-                    fill.binding,
-                    new VMCommand[](0),
-                    new bytes32[](0),
-                    fill.signature
-                )
+    ) internal view returns (bytes memory) {
+        return abi.encodeCall(
+            IValidatorV2.entry,
+            (
+                address(executor),
+                payload,
+                user,
+                1,
+                fill.allowances,
+                fill.outcomes,
+                fill.binding,
+                new VMCommand[](0),
+                new bytes32[](0),
+                fill.signature
             )
-        });
+        );
     }
 
-    function authorizeCall(
-        bytes memory payload
-    ) internal view returns (ERC7821.Call memory) {
-        return authorizeCall(payload, address(validator));
-    }
-
-    /// @dev As above, naming `entryValidator` as the validator whose `entry` follows.
-    function authorizeCall(
-        bytes memory payload,
-        address entryValidator
-    ) internal view returns (ERC7821.Call memory) {
-        return ERC7821.Call({
-            to: address(executor),
-            value: 0,
-            data: abi.encodeCall(IntentExecutor.authorizeCall, (keccak256(payload), entryValidator))
-        });
-    }
-
-    function authorizeThenEntry(
+    /// @dev The worker's batch call: fill() with the validator's `entry`.
+    function fillCall(
         bytes memory payload,
         Fill memory fill
     ) internal view returns (ERC7821.Call[] memory calls) {
-        calls = new ERC7821.Call[](2);
-        calls[0] = authorizeCall(payload);
-        calls[1] = entryCall(payload, fill);
+        calls = new ERC7821.Call[](1);
+        calls[0] = ERC7821.Call({
+            to: address(executor),
+            value: 0,
+            data: abi.encodeCall(IntentExecutor.fill, (address(validator), entryData(payload, fill)))
+        });
+    }
+
+    /// @dev The worker fills `payload` through the entry stub.
+    function stubFill(
+        bytes memory payload
+    ) internal {
+        vm.prank(worker);
+        executor.fill(address(entryStub), abi.encodeCall(EntryStub.entry, (address(executor), payload)));
+    }
+
+    /// @dev An executeAndSweep() payload that makes no call and sweeps nothing.
+    function emptyPayload() internal pure returns (bytes memory) {
+        return abi.encodeCall(
+            IntentExecutor.executeAndSweep,
+            (new IntentExecutor.Approval[](0), new IntentExecutor.Call3[](0), new IntentExecutor.SweepTarget[](0))
+        );
     }
 
     /// @dev Calls the executor with `payload` through the validator's call proxy.
@@ -362,30 +368,75 @@ contract IntentExecutorGateTest is Test {
         return abi.encodeWithSelector(IntentExecutor.CallNotAuthorized.selector);
     }
 
+    function notConsumed() internal pure returns (bytes memory) {
+        return abi.encodeWithSelector(IntentExecutor.CallNotConsumed.selector);
+    }
+
     /* ─────────────────────────── legitimate fill
     ─────────────────────────── */
 
-    /// @dev worker batch [authorizeCall, entry] -> validator -> CALL_PROXY -> executor ->
+    /// @dev worker batch [fill] -> executor -> validator -> CALL_PROXY -> executor ->
     /// compose proxy, end to end.
     function test_fill_workerBatchDrivesProxy() external {
         bytes memory payload = fillPayload(address(validator));
         Fill memory fill = signFill(address(inToken), POSITION, payload);
 
-        runWorkerBatch(ATOMIC_MODE, authorizeThenEntry(payload, fill));
+        runWorkerBatch(ATOMIC_MODE, fillCall(payload, fill));
 
         assertEq(usdc.balanceOf(destination), POSITION);
         assertEq(usdc.balanceOf(address(composeProxy)), 0);
         assertEq(inToken.balanceOf(solverTreasury), INPUT);
-        assertEq(executor.authorizations(keccak256(payload)), 0);
     }
 
-    function test_fill_withoutAuthorizationReverts() external {
+    /// @dev The constraint names the executor, so only fill() can submit it: the solver
+    /// calling `entry` itself fails the validator's signature check.
+    function test_fill_constraintOnlyThroughExecutor() external {
         bytes memory payload = fillPayload(address(validator));
         Fill memory fill = signFill(address(inToken), POSITION, payload);
 
-        ERC7821.Call[] memory calls = new ERC7821.Call[](1);
-        calls[0] = entryCall(payload, fill);
-        runWorkerBatch(ATOMIC_MODE, calls, notAuthorized());
+        vm.prank(worker);
+        (bool ok, bytes memory ret) = address(validator).call(entryData(payload, fill));
+        assertFalse(ok);
+        assertEq(ret, abi.encodeWithSelector(CATValidator.BadSignature.selector));
+        assertEq(usdc.balanceOf(address(composeProxy)), POSITION);
+    }
+
+    /// @dev A refund constraint names the same executor and carries an empty payload, so
+    /// the validator makes no call: fill() runs it without an authorization.
+    function test_fill_refundWithoutPayload() external {
+        address refundWallet = makeAddr("refundWallet");
+        inToken.mint(user, INPUT);
+        vm.prank(user);
+        inToken.approve(address(validator), type(uint256).max);
+
+        AllowanceSpend[] memory allowances = new AllowanceSpend[](1);
+        allowances[0] = AllowanceSpend({ token: address(inToken), allocated: INPUT, spend: INPUT });
+        ExecutionBinding memory binding =
+            ExecutionBinding({ executionTarget: refundWallet, payloadHash: keccak256("") });
+        bytes32 digest = V2ConstraintDigest.digest(
+            validator.DOMAIN_SEPARATOR(), allowances, new Outcome[](0), address(executor), 1, binding, 0, 0
+        );
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(userKey, digest);
+
+        bytes memory refundEntry = abi.encodeCall(
+            IValidatorV2.entry,
+            (
+                refundWallet,
+                "",
+                user,
+                1,
+                allowances,
+                new Outcome[](0),
+                binding,
+                new VMCommand[](0),
+                new bytes32[](0),
+                abi.encodePacked(r, s, v)
+            )
+        );
+        vm.prank(worker);
+        executor.fill(address(validator), refundEntry);
+
+        assertEq(inToken.balanceOf(refundWallet), INPUT);
     }
 
     /* ─────────────────────────── attacker paths
@@ -399,7 +450,10 @@ contract IntentExecutorGateTest is Test {
         assertFalse(ok);
         assertEq(ret, notAuthorized());
 
-        IntentExecutor.Call3Value[] memory calls = withdrawCallsWithValue(attacker);
+        IntentExecutor.Call3Value[] memory calls = new IntentExecutor.Call3Value[](1);
+        calls[0] = IntentExecutor.Call3Value({
+            target: address(composeProxy), allowFailure: false, value: 0, callData: withdrawCall(attacker)
+        });
         vm.prank(attacker);
         vm.expectRevert(notAuthorized());
         executor.executeAndSweepNative(
@@ -459,38 +513,27 @@ contract IntentExecutorGateTest is Test {
         );
     }
 
-    /// @dev The key is the exact calldata: the same arguments under the other entry
-    /// point, or with trailing bytes the ABI decoder ignores, are not authorized.
+    /// @dev The key is the exact calldata: code running inside the fill (an allowance
+    /// token hook) cannot run the authorized arguments with trailing bytes the ABI
+    /// decoder ignores.
     function test_attacker_differentEncodingOfAuthorizedCall_reverts() external {
+        HookToken hookToken = new HookToken();
         bytes memory payload = fillPayload(address(validator));
-        vm.prank(worker);
-        executor.authorizeCall(keccak256(payload), address(validator));
+        Fill memory fill = signFill(address(hookToken), POSITION, payload);
+        hookToken.setHook(callProxy, proxyCalldata(executor, abi.encodePacked(payload, uint256(0))));
 
-        (bool ok, bytes memory ret) = callThroughProxy(abi.encodePacked(payload, uint256(0)));
-        assertFalse(ok);
-        assertEq(ret, notAuthorized());
+        runWorkerBatch(ATOMIC_MODE, fillCall(payload, fill));
 
-        IntentExecutor.Call3Value[] memory calls = withdrawCallsWithValue(address(validator));
-        IntentExecutor.SweepTarget[] memory sweeps = new IntentExecutor.SweepTarget[](1);
-        sweeps[0] = IntentExecutor.SweepTarget({ token: address(inToken), recipient: solverTreasury });
-        (ok, ret) = callThroughProxy(
-            abi.encodeCall(
-                IntentExecutor.executeAndSweepNative,
-                (new IntentExecutor.Approval[](0), calls, sweeps, payable(solverTreasury))
-            )
-        );
-        assertFalse(ok);
-        assertEq(ret, notAuthorized());
-
-        assertEq(executor.authorizations(keccak256(payload)), 1);
-        assertEq(usdc.balanceOf(address(composeProxy)), POSITION);
+        assertFalse(hookToken.hookSucceeded());
+        assertEq(hookToken.hookReturn(), notAuthorized());
+        assertEq(usdc.balanceOf(destination), POSITION);
     }
 
     /// @dev A consumed authorization cannot be replayed later in the same transaction.
     function test_attacker_replayAfterFill_reverts() external {
         bytes memory payload = fillPayload(address(validator));
         Fill memory fill = signFill(address(inToken), POSITION, payload);
-        runWorkerBatch(ATOMIC_MODE, authorizeThenEntry(payload, fill));
+        runWorkerBatch(ATOMIC_MODE, fillCall(payload, fill));
 
         usdc.mint(address(composeProxy), POSITION);
         vm.prank(attacker, attacker);
@@ -508,7 +551,7 @@ contract IntentExecutorGateTest is Test {
         Fill memory fill = signFill(address(hookToken), POSITION, payload);
         hookToken.setHook(callProxy, proxyCalldata(executor, fillPayload(attacker)));
 
-        runWorkerBatch(ATOMIC_MODE, authorizeThenEntry(payload, fill));
+        runWorkerBatch(ATOMIC_MODE, fillCall(payload, fill));
 
         assertFalse(hookToken.hookSucceeded());
         assertEq(hookToken.hookReturn(), notAuthorized());
@@ -517,20 +560,18 @@ contract IntentExecutorGateTest is Test {
     }
 
     /// @dev If the hook spends the authorization on the authorized payload itself, the
-    /// legitimate call finds none left, `entry` reverts, and the atomic batch reverts
-    /// with it: nothing moves.
-    function test_attacker_hookSpendsAuthorization_batchReverts() external {
+    /// legitimate call finds none left, `entry` reverts, and fill() reverts with it:
+    /// nothing moves.
+    function test_attacker_hookSpendsAuthorization_fillReverts() external {
         HookToken hookToken = new HookToken();
         bytes memory payload = fillPayload(address(validator));
         Fill memory fill = signFill(address(hookToken), POSITION, payload);
         hookToken.setHook(callProxy, proxyCalldata(executor, payload));
 
-        ERC7821.Call[] memory calls = authorizeThenEntry(payload, fill);
-        runWorkerBatch(ATOMIC_MODE, calls, notAuthorized());
+        runWorkerBatch(ATOMIC_MODE, fillCall(payload, fill), notAuthorized());
 
         assertEq(usdc.balanceOf(address(composeProxy)), POSITION);
         assertEq(usdc.balanceOf(address(validator)), 0);
-        assertEq(executor.authorizations(keccak256(payload)), 0);
     }
 
     /* ─────────────────────────── consumption
@@ -550,120 +591,74 @@ contract IntentExecutorGateTest is Test {
         );
         reenterer.setPayload(payload);
 
-        // Two authorizations: the guard, not a missing authorization, must stop the replay.
-        vm.startPrank(worker);
-        executor.authorizeCall(keccak256(payload), address(validator));
-        executor.authorizeCall(keccak256(payload), address(validator));
-        vm.stopPrank();
+        stubFill(payload);
 
-        (bool ok,) = callThroughProxy(payload);
-        assertTrue(ok);
-
-        assertEq(reenterer.authorizationsDuringCall(), 1);
         assertFalse(reenterer.replaySucceeded());
         assertEq(reenterer.replayReturn(), abi.encodeWithSelector(ReentrancyGuardTransient.Reentrancy.selector));
-        assertEq(executor.authorizations(keccak256(payload)), 1);
     }
 
-    function test_consumption_countsAuthorizations() external {
-        bytes memory payload = fillPayload(address(validator));
-        usdc.mint(address(composeProxy), POSITION);
-
-        vm.startPrank(worker);
-        executor.authorizeCall(keccak256(payload), address(validator));
-        executor.authorizeCall(keccak256(payload), address(validator));
-        vm.stopPrank();
-
-        (bool ok,) = callThroughProxy(payload);
-        assertTrue(ok);
-        (ok,) = callThroughProxy(payload);
-        assertTrue(ok);
-        (bool third, bytes memory ret) = callThroughProxy(payload);
-        assertFalse(third);
-        assertEq(ret, notAuthorized());
-        assertEq(usdc.balanceOf(address(validator)), 2 * POSITION);
+    /// @dev One fill() admits one execution: an `entry` that runs the payload twice
+    /// reverts the fill.
+    function test_consumption_oneExecutionPerFill() external {
+        entryStub.setRuns(2);
+        vm.prank(worker);
+        vm.expectRevert(notAuthorized());
+        executor.fill(address(entryStub), abi.encodeCall(EntryStub.entry, (address(executor), emptyPayload())));
     }
 
-    /* ─────────────────────────── batch atomicity
+    /* ─────────────────────────── unconsumed authorizations
     ─────────────────────────── */
 
-    /// @dev A failed `entry` in an atomic batch rolls the authorization back with it.
-    function test_atomicBatch_failedEntryRollsBackAuthorization() external {
+    /// @dev A failed `entry` reverts fill() and its authorization with it.
+    function test_fill_failedEntryRevertsAuthorization() external {
         bytes memory payload = fillPayload(address(validator));
         // The outcome asks for more than the payload delivers, so `entry` reverts.
         Fill memory fill = signFill(address(inToken), POSITION + 1, payload);
 
-        ERC7821.Call[] memory calls = authorizeThenEntry(payload, fill);
         runWorkerBatch(
-            ATOMIC_MODE, calls, abi.encodeWithSelector(CATValidator.InvalidTokenAmount.selector, POSITION + 1, POSITION)
+            ATOMIC_MODE,
+            fillCall(payload, fill),
+            abi.encodeWithSelector(CATValidator.InvalidTokenAmount.selector, POSITION + 1, POSITION)
         );
 
-        assertEq(executor.authorizations(keccak256(payload)), 0);
-        vm.prank(attacker, attacker);
-        (bool ok, bytes memory ret) = callThroughProxy(payload);
-        assertFalse(ok);
-        assertEq(ret, notAuthorized());
-        assertEq(usdc.balanceOf(address(composeProxy)), POSITION);
-    }
-
-    /// @dev A CALL to an address without code succeeds, so an `entry` sent to a
-    /// validator that is not deployed on this chain would return without consuming.
-    /// authorizeCall refuses such a validator, which reverts the atomic batch.
-    function test_atomicBatch_validatorWithoutCode_reverts() external {
-        bytes memory payload = fillPayload(address(validator));
-        Fill memory fill = signFill(address(inToken), POSITION, payload);
-        address undeployed = makeAddr("undeployedValidator");
-
-        ERC7821.Call[] memory calls = new ERC7821.Call[](2);
-        calls[0] = authorizeCall(payload, undeployed);
-        calls[1] = entryCall(payload, fill, undeployed);
-        runWorkerBatch(ATOMIC_MODE, calls, abi.encodeWithSelector(IntentExecutor.ValidatorHasNoCode.selector));
-
-        assertEq(executor.authorizations(keccak256(payload)), 0);
         attackerEntry(payload, notAuthorized());
         assertEq(usdc.balanceOf(address(composeProxy)), POSITION);
     }
 
-    /// @dev Why the signer must pass the address its `entry` calls: the executor checks
-    /// only the validator it is given, so an `entry` sent elsewhere to an empty address
-    /// still leaves the authorization live in an atomic batch.
-    function test_atomicBatch_entryToOtherThanAuthorizedValidatorLeaksPosition() external {
+    /// @dev A CALL to an address without code succeeds, so an `entry` sent to a
+    /// validator that is not deployed on this chain returns without consuming. fill()
+    /// reverts instead of leaving the authorization live.
+    function test_fill_validatorWithoutCode_reverts() external {
         bytes memory payload = fillPayload(address(validator));
         Fill memory fill = signFill(address(inToken), POSITION, payload);
 
-        ERC7821.Call[] memory calls = new ERC7821.Call[](2);
-        calls[0] = authorizeCall(payload);
-        calls[1] = entryCall(payload, fill, makeAddr("undeployedValidator"));
-        runWorkerBatch(ATOMIC_MODE, calls);
-        assertEq(executor.authorizations(keccak256(payload)), 1);
+        vm.prank(worker);
+        vm.expectRevert(notConsumed());
+        executor.fill(makeAddr("undeployedValidator"), entryData(payload, fill));
 
-        attackerEntry(payload, "");
-        assertEq(usdc.balanceOf(attacker), POSITION);
-        assertEq(usdc.balanceOf(address(composeProxy)), 0);
+        attackerEntry(payload, notAuthorized());
+        assertEq(usdc.balanceOf(address(composeProxy)), POSITION);
     }
 
-    /// @dev Why authorizeCall and `entry` must share an atomic batch. In a batch that
-    /// skips failures, a failed `entry` leaves the authorization live for the rest of
-    /// the transaction. Any later code can then run the authorized payload, which
-    /// parks the position on the validator, and any account can take a validator
-    /// balance with a self-signed constraint.
-    function test_skipFailuresBatch_failedEntryLeaksPosition() external {
+    /// @dev An `entry` that returns without reaching the executor reverts fill().
+    function test_fill_entryNotReachingExecutor_reverts() external {
+        entryStub.setRuns(0);
+        vm.prank(worker);
+        vm.expectRevert(notConsumed());
+        executor.fill(address(entryStub), abi.encodeCall(EntryStub.entry, (address(executor), emptyPayload())));
+    }
+
+    /// @dev A batch that skips failures skips a fill() that left nothing behind: the
+    /// authorized payload cannot run later in the transaction.
+    function test_skipFailuresBatch_failedFillLeavesNoAuthorization() external {
         bytes memory payload = fillPayload(address(validator));
         Fill memory fill = signFill(address(inToken), POSITION + 1, payload);
 
-        runWorkerBatch(SKIP_FAILURES_MODE, authorizeThenEntry(payload, fill));
-        assertEq(executor.authorizations(keccak256(payload)), 1);
+        runWorkerBatch(SKIP_FAILURES_MODE, fillCall(payload, fill));
 
-        // Only the authorized calldata runs...
-        (bool ok, bytes memory ret) = callThroughProxy(fillPayload(attacker));
-        assertFalse(ok);
-        assertEq(ret, notAuthorized());
-
-        // ...but the authorized calldata runs for anyone, later in the same transaction.
-        attackerEntry(payload, "");
-        assertEq(usdc.balanceOf(attacker), POSITION);
-        assertEq(usdc.balanceOf(address(composeProxy)), 0);
-        assertEq(executor.authorizations(keccak256(payload)), 0);
+        attackerEntry(payload, notAuthorized());
+        assertEq(usdc.balanceOf(attacker), 0);
+        assertEq(usdc.balanceOf(address(composeProxy)), POSITION);
     }
 
     /// @dev Relays the worker's signed batch from the attacker with `gas` gas.
@@ -676,192 +671,27 @@ contract IntentExecutorGateTest is Test {
         (ok,) = worker.call{ gas: gas }(abi.encodeWithSignature("execute(bytes32,bytes)", mode, executionData));
     }
 
-    /// @dev The lowest relay gas at which a skipping batch runs authorizeCall but `entry`
-    /// runs out of gas. Searched rather than fixed, because the window moves with the
-    /// compiler settings (coverage builds are unoptimized). Leaves the state untouched.
-    function starvingGas(
-        bytes memory payload,
-        Fill memory fill
-    ) internal returns (uint256 gas) {
-        uint256 nonce = workerNonce;
-        gas = starvingGas(signBatch(SKIP_FAILURES_MODE, authorizeThenEntry(payload, fill)), payload);
-        workerNonce = nonce;
-    }
-
-    /// @dev As above for an already signed skipping batch, which can still be relayed
-    /// afterwards.
-    function starvingGas(
-        bytes memory executionData,
-        bytes memory payload
-    ) internal returns (uint256) {
-        for (uint256 gas = 50_000; gas < 2_000_000; gas += 5000) {
-            uint256 snapshot = vm.snapshotState();
-            bool starved = relayWithGas(SKIP_FAILURES_MODE, executionData, gas)
-                && executor.authorizations(keccak256(payload)) == 1 && usdc.balanceOf(destination) == 0;
-            vm.revertToState(snapshot);
-            if (starved) return gas;
-        }
-        revert("no starving gas found");
-    }
-
-    /// @dev The skipping-batch leak needs no accidental failure: anyone can relay the
-    /// worker's signed batch with enough gas for authorizeCall but not for `entry`.
-    function test_skipFailuresBatch_attackerStarvesEntry() external {
+    /// @dev No relay gas leaves an authorization live in a skipping batch. The sweep
+    /// runs from 50k up to the lowest gas that completes the fill, and must pass a gas
+    /// at which the batch succeeded but skipped the starved fill, or it proves nothing.
+    function test_skipFailuresBatch_noRelayGasLeaksAuthorization() external {
         bytes memory payload = fillPayload(address(validator));
         Fill memory fill = signFill(address(inToken), POSITION, payload);
-        uint256 gas = starvingGas(payload, fill);
-        bytes memory executionData = signBatch(SKIP_FAILURES_MODE, authorizeThenEntry(payload, fill));
-
-        assertTrue(relayWithGas(SKIP_FAILURES_MODE, executionData, gas));
-        assertEq(executor.authorizations(keccak256(payload)), 1);
-        assertEq(usdc.balanceOf(destination), 0);
-
-        attackerEntry(payload, "");
-        assertEq(usdc.balanceOf(attacker), POSITION);
-    }
-
-    /// @dev The same relay against an atomic batch reverts as a whole.
-    function test_atomicBatch_attackerStarvesEntry_reverts() external {
-        bytes memory payload = fillPayload(address(validator));
-        Fill memory fill = signFill(address(inToken), POSITION, payload);
-        uint256 gas = starvingGas(payload, fill);
-        bytes memory executionData = signBatch(ATOMIC_MODE, authorizeThenEntry(payload, fill));
-
-        assertFalse(relayWithGas(ATOMIC_MODE, executionData, gas));
-        assertEq(executor.authorizations(keccak256(payload)), 0);
-        assertEq(usdc.balanceOf(address(composeProxy)), POSITION);
-    }
-
-    /* ─────────────────────────── meta transactions (sub-batches)
-    ─────────────────────────── */
-
-    /// @dev A sub-batch as the SDK's MetaCatapultarTx encodes it: a self-call to the
-    /// worker's `execute` with a 32-byte opData (its own nonce, no signature), which the
-    /// account accepts because msg.sender is itself.
-    function subBatch(
-        bytes32 mode,
-        ERC7821.Call[] memory calls
-    ) internal returns (ERC7821.Call memory) {
-        return ERC7821.Call({
-            to: worker,
-            value: 0,
-            data: abi.encodeWithSignature(
-                "execute(bytes32,bytes)", mode, abi.encode(calls, abi.encodePacked(++workerNonce))
-            )
-        });
-    }
-
-    /// @dev The split shape: atomic sub-batches [authorizeCall] and [entry]. Meant for a
-    /// SkipRevert outer batch, MetaCatapultarTx's default.
-    function splitSubBatches(
-        bytes memory payload,
-        Fill memory fill
-    ) internal returns (ERC7821.Call[] memory outer) {
-        ERC7821.Call[] memory first = new ERC7821.Call[](1);
-        first[0] = authorizeCall(payload);
-        ERC7821.Call[] memory second = new ERC7821.Call[](1);
-        second[0] = entryCall(payload, fill);
-        outer = new ERC7821.Call[](2);
-        outer[0] = subBatch(ATOMIC_MODE, first);
-        outer[1] = subBatch(ATOMIC_MODE, second);
-    }
-
-    /// @dev The shared shape: one atomic sub-batch [authorizeCall, entry].
-    function sharedSubBatch(
-        bytes memory payload,
-        Fill memory fill
-    ) internal returns (ERC7821.Call[] memory outer) {
-        outer = new ERC7821.Call[](1);
-        outer[0] = subBatch(ATOMIC_MODE, authorizeThenEntry(payload, fill));
-    }
-
-    /// @dev Why authorizeCall and `entry` must share a sub-batch. Each sub-batch is
-    /// atomic, but the [authorizeCall] sub-batch has already succeeded when the [entry]
-    /// sub-batch fails, and the SkipRevert outer batch skips the failure. The
-    /// authorization survives and the position leaks as in a flat skipping batch.
-    function test_skipFailuresMeta_splitSubBatches_failedEntryLeaksPosition() external {
-        bytes memory payload = fillPayload(address(validator));
-        Fill memory fill = signFill(address(inToken), POSITION + 1, payload);
-
-        runWorkerBatch(SKIP_FAILURES_MODE, splitSubBatches(payload, fill));
-        assertEq(executor.authorizations(keccak256(payload)), 1);
-
-        attackerEntry(payload, "");
-        assertEq(usdc.balanceOf(attacker), POSITION);
-        assertEq(usdc.balanceOf(address(composeProxy)), 0);
-        assertEq(executor.authorizations(keccak256(payload)), 0);
-    }
-
-    /// @dev The split shape is open to the gas-starvation relay as well.
-    function test_skipFailuresMeta_splitSubBatches_attackerStarvesEntry() external {
-        bytes memory payload = fillPayload(address(validator));
-        Fill memory fill = signFill(address(inToken), POSITION, payload);
-        bytes memory executionData = signBatch(SKIP_FAILURES_MODE, splitSubBatches(payload, fill));
-        uint256 gas = starvingGas(executionData, payload);
-
-        assertTrue(relayWithGas(SKIP_FAILURES_MODE, executionData, gas));
-        assertEq(executor.authorizations(keccak256(payload)), 1);
-        assertEq(usdc.balanceOf(destination), 0);
-
-        attackerEntry(payload, "");
-        assertEq(usdc.balanceOf(attacker), POSITION);
-    }
-
-    /// @dev With both calls in one atomic sub-batch, a failed `entry` reverts the
-    /// sub-batch as a unit, authorization included. The outer batch skips a frame that
-    /// left nothing behind.
-    function test_skipFailuresMeta_sharedSubBatch_failedEntryRollsBackAuthorization() external {
-        bytes memory payload = fillPayload(address(validator));
-        Fill memory fill = signFill(address(inToken), POSITION + 1, payload);
-
-        runWorkerBatch(SKIP_FAILURES_MODE, sharedSubBatch(payload, fill));
-        assertEq(executor.authorizations(keccak256(payload)), 0);
-
-        attackerEntry(payload, notAuthorized());
-        assertEq(usdc.balanceOf(attacker), 0);
-        assertEq(usdc.balanceOf(address(composeProxy)), POSITION);
-    }
-
-    /// @dev No relay gas leaves the shared sub-batch's authorization live. The sweep runs
-    /// from 50k up to the lowest gas that completes the fill, and must pass a gas at
-    /// which the outer batch succeeded but skipped the starved sub-batch, or it proves
-    /// nothing.
-    function test_skipFailuresMeta_sharedSubBatch_noGasLeaksAuthorization() external {
-        bytes memory payload = fillPayload(address(validator));
-        Fill memory fill = signFill(address(inToken), POSITION, payload);
-        bytes memory executionData = signBatch(SKIP_FAILURES_MODE, sharedSubBatch(payload, fill));
+        bytes memory executionData = signBatch(SKIP_FAILURES_MODE, fillCall(payload, fill));
 
         bool sawSkippedFill;
         bool sawFill;
         for (uint256 gas = 50_000; gas < 2_000_000 && !sawFill; gas += 1000) {
             uint256 snapshot = vm.snapshotState();
             bool ok = relayWithGas(SKIP_FAILURES_MODE, executionData, gas);
-            assertEq(
-                executor.authorizations(keccak256(payload)),
-                0,
-                string.concat("authorization leaked at relay gas ", vm.toString(gas))
-            );
+            (bool leaked,) = callThroughProxy(payload);
+            assertFalse(leaked, string.concat("authorization leaked at relay gas ", vm.toString(gas)));
             sawFill = usdc.balanceOf(destination) == POSITION;
             if (ok && !sawFill) sawSkippedFill = true;
             vm.revertToState(snapshot);
         }
         assertTrue(sawFill, "fill never completed");
         assertTrue(sawSkippedFill, "no gas skipped the fill");
-    }
-
-    /// forge-config: default.isolate = true
-    function test_authorizationEndsWithTransaction() external {
-        bytes memory payload = fillPayload(address(validator));
-        ERC7821.Call[] memory calls = new ERC7821.Call[](1);
-        calls[0] = authorizeCall(payload);
-        runWorkerBatch(ATOMIC_MODE, calls);
-
-        // isolate mode runs each top-level call as its own transaction.
-        vm.prank(attacker, attacker);
-        (bool ok, bytes memory ret) = callThroughProxy(payload);
-        assertFalse(ok);
-        assertEq(ret, notAuthorized());
-        assertEq(usdc.balanceOf(address(composeProxy)), POSITION);
     }
 
     /* ─────────────────────────── admin
@@ -906,10 +736,10 @@ contract IntentExecutorGateTest is Test {
         assertFalse(executor.isSolver(address(0)));
     }
 
-    function test_admin_nonSolverCannotAuthorize() external {
+    function test_admin_nonSolverCannotFill() external {
         vm.prank(owner);
         vm.expectRevert(IntentExecutor.NotSolver.selector);
-        executor.authorizeCall(keccak256("x"), address(validator));
+        executor.fill(address(entryStub), abi.encodeCall(EntryStub.entry, (address(executor), emptyPayload())));
     }
 
     function test_admin_onlyOwnerSetsSolver() external {
@@ -929,13 +759,13 @@ contract IntentExecutorGateTest is Test {
         executor.setSolver(worker, false);
         vm.stopPrank();
 
+        bytes memory data = abi.encodeCall(EntryStub.entry, (address(executor), emptyPayload()));
         vm.prank(worker);
         vm.expectRevert(IntentExecutor.NotSolver.selector);
-        executor.authorizeCall(keccak256("x"), address(validator));
+        executor.fill(address(entryStub), data);
 
         vm.prank(newWorker);
-        executor.authorizeCall(keccak256("x"), address(validator));
-        assertEq(executor.authorizations(keccak256("x")), 1);
+        executor.fill(address(entryStub), data);
     }
 
     function test_admin_singleStepTransferAndRenounceDisabled() external {

@@ -61,7 +61,6 @@ export {
   NonceUnsetError,
   ModeUnsetError,
   CallsUnsetError,
-  ExecutorAuthorizationError,
   NonceCollisionError,
   DuplicateNonceError,
   OwnerMismatchError,
@@ -76,11 +75,10 @@ export { default as catapultarAbi } from "./abi/catapultar";
 export { default as catapultarFactoryAbi } from "./abi/catapultarFactory";
 export { CAT_VALIDATOR_ABI as catValidatorAbi } from "./abi/CATValidator";
 export { CAT_VALIDATOR_V2_ABI as catValidatorV2Abi } from "./abi/CATValidatorV2";
-export { INTENT_EXECUTOR_ABI as intentExecutorAbi } from "./abi/IntentExecutor";
 
 // --- Deployment addresses --- //
 
-export { defaultFactory, cat_validator, cat_validator_v2 } from "./config";
+export { defaultFactory, cat_validator } from "./config";
 
 // --- Unopinionated protocol primitives --- //
 // Pure encoders/decoders that mirror the on-chain libraries. Use these to
@@ -102,10 +100,6 @@ export {
   erc1967CloneInitCode,
 } from "./protocol/factory";
 export { buildOpData, buildExecutionData } from "./protocol/opdata";
-export {
-  assertExecutorAuthorizations,
-  DEFAULT_AUTHORIZED_VALIDATORS,
-} from "./protocol/authorization";
 export {
   toCompactSignature,
   fromCompactSignature,
@@ -183,7 +177,6 @@ export type {
   CatapultarDomain,
 } from "./protocol/calls";
 export type { CatValidatorDomain } from "./protocol/constraint";
-export type { ExecutorAuthorizationOptions } from "./protocol/authorization";
 export type {
   CatExecuteOptions,
   CatRefundOptions,
