@@ -31,7 +31,7 @@ context:
 Beneath both sit the pure protocol primitives (`src/protocol`) — encoders such as
 `callsDigest`, `constraintDigest`, `predictCloneAddress`, `factorySalt`,
 `buildOpData`, and the signature/owner codecs — plus the contract ABIs
-(`catapultarAbi`, `catapultarFactoryAbi`, `catValidatorAbi`, `catValidatorV2Abi`). Use these directly
+(`catapultarAbi`, `catapultarFactoryAbi`, `catValidatorAbi`, `catValidatorV2Abi`, `intentExecutorAbi`). Use these directly
 to integrate without any of the classes.
 
 Dependency direction:
@@ -388,6 +388,27 @@ The constraint digest itself is available via `constraintDigest({ chainId, verif
 
 See `src/transaction/constrainedtransaction.spec.ts::create account and execute contained constraints` for an example.
 
+##### Through an IntentExecutor
+
+When the constraint's `executor` is an IntentExecutor, the validator only accepts the constraint from the IntentExecutor, so a solver sends the entry call through `IntentExecutor.fill`. `cat.asFillCall(entryCall)` wraps the call from `asExecuteCall` or `asRefundCall` in `fill(validator, entryData)` sent to `executor`. `fill` reverts unless the entry's `execPayload` ran on the IntentExecutor; a refund's empty payload runs nothing.
+
+```typescript
+const cat = new ConstrainedAssetTransaction({
+  executor: intentExecutor,
+  chainId,
+});
+// ...
+const fillCall = cat.asFillCall(
+  cat.asExecuteCall({
+    address,
+    executionTarget: intentExecutor,
+    executionPayload,
+    spends,
+    validator,
+  }),
+);
+```
+
 #### Validation programs (CATValidatorV2)
 
 `CATValidatorV2` extends the audited CAT validator (`2026.04.23_Catapultar.pdf`) with a committed validation program: an assert-only LI.FI VirtualMachine program that runs by `staticcall` after the outcome check and can only add conditions to it. The constraint commits the program's hash and the hash of its parameter words, so the account address commits to them too. An empty program commits zero hashes and settles exactly as v1, without calling the VirtualMachine.
@@ -447,7 +468,7 @@ integrate without any of the classes:
 - Owners: `ownerToKeyArray`, `keyArrayToOwner`, `ownersEqual`, `ownerTypeToEnum`, `enumToOwnerType`, `keyTypeLength`.
 - Constraints: `constraintDigest`, `constraintTypedData`, `constraintDomain`; for `CATValidatorV2`, `constraintV2Digest`, `constraintV2TypedData`, `constraintV2Domain`, `ExecutionConstraintV2Typed`, the bindings `UNBOUND_EXECUTION` and `refundBinding`, and the commitment hashes `hashValidationProgram`, `hashValidationParams`.
 
-Contract ABIs are exported as `catapultarAbi`, `catapultarFactoryAbi`, `catValidatorAbi`, and `catValidatorV2Abi`; deployment addresses as `factories`, `templates`, and `cat_validator`.
+Contract ABIs are exported as `catapultarAbi`, `catapultarFactoryAbi`, `catValidatorAbi`, `catValidatorV2Abi`, and `intentExecutorAbi`; deployment addresses as `factories`, `templates`, and `cat_validator`.
 
 ## Project Layout
 
