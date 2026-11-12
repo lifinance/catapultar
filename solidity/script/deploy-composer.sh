@@ -30,7 +30,7 @@
 #   CONTRACT        CATValidatorV2 (default) or IntentExecutor.
 #   INTENT_EXECUTOR_OWNER    IntentExecutor only: owner of the solver set (a multisig). Required.
 #   INTENT_EXECUTOR_SOLVERS  IntentExecutor only: comma-separated initial solver accounts, the
-#                   accounts that call the validator's `entry`. Required. The owner and the solver
+#                   accounts that call the executor's `fill`. Required. The owner and the solver
 #                   list fold into the init code, so every chain must get the same values in the
 #                   same order to share one address.
 #   FORGE_TEMPO     forge for Tempo (default: ~/.foundry-tempo/bin/forge). Tempo has no native gas
