@@ -12,7 +12,7 @@ import {
   sha256,
   signatureToCompactSignature,
 } from "viem";
-import { P256, PublicKey, WebAuthnP256 } from "ox";
+import { Base64, Bytes, P256, PublicKey } from "ox";
 import type { KeyedSignature, WebAuthnSignature } from "../types/types";
 import type { Owner } from "./owner";
 
@@ -68,8 +68,18 @@ export function encodeWebAuthnAuth(sig: WebAuthnSignature): `0x${string}` {
   ]);
 }
 
+/** `WebAuthnAuth` as decoded from the wire: indices and `r`/`s` are `uint256`. */
+export type DecodedWebAuthnAuth = {
+  authenticatorData: `0x${string}`;
+  clientDataJSON: string;
+  challengeIndex: bigint;
+  typeIndex: bigint;
+  r: bigint;
+  s: bigint;
+};
+
 /** Decode `WebAuthnAuth` struct bytes back into its fields (inverse of {@link encodeWebAuthnAuth}). */
-export function decodeWebAuthnAuth(hex: `0x${string}`) {
+export function decodeWebAuthnAuth(hex: `0x${string}`): DecodedWebAuthnAuth {
   return decodeAbiParameters(WEBAUTHN_AUTH_PARAMS, hex)[0];
 }
 
@@ -162,18 +172,66 @@ export async function verifyKeyedSignature(
     });
   }
 
-  // webauthn-p256
-  const auth = decodeWebAuthnAuth(`0x${body}`);
-  return WebAuthnP256.verify({
-    metadata: {
-      authenticatorData: auth.authenticatorData,
-      clientDataJSON: auth.clientDataJSON,
-      challengeIndex: Number(auth.challengeIndex),
-      typeIndex: Number(auth.typeIndex),
-    },
-    // On-chain the challenge is `abi.encode(digest)` (the possibly-prehashed
-    // digest), so SHA-256 the hash when the flag is set.
-    challenge: prehash ? sha256(hash) : hash,
+  // webauthn-p256. Malformed struct bytes fail like Solady's `tryDecodeAuth`.
+  let auth: DecodedWebAuthnAuth;
+  try {
+    auth = decodeWebAuthnAuth(`0x${body}`);
+  } catch {
+    return false;
+  }
+  // On-chain the challenge is `abi.encode(digest)` (the possibly-prehashed
+  // digest), so SHA-256 the hash when the flag is set.
+  return verifyWebAuthn(prehash ? sha256(hash) : hash, auth, publicKey);
+}
+
+const WEBAUTHN_TYPE = Bytes.fromString('"type":"webauthn.get"');
+
+/**
+ * Port of Solady `WebAuthn.verify` (rev `acd959aa`, the pinned submodule) with
+ * `requireUserVerification = false`, as `KeyedOwnable` calls it.
+ *
+ * Deliberately not ox's `WebAuthnP256.verify`: since ox 0.14 that parses
+ * `clientDataJSON` (throwing on non-JSON) and ignores `typeIndex` /
+ * `challengeIndex`, so it accepts signatures the contract rejects. Solady is
+ * byte-index based and never parses JSON; this mirrors it check for check:
+ * - `"type":"webauthn.get"` at `typeIndex`;
+ * - `"challenge":"<base64url(challenge)>"` plus the closing quote at `challengeIndex`;
+ * - `authenticatorData` longer than 32 bytes with the User Present flag set;
+ * - P256 over `sha256(authenticatorData ‖ sha256(clientDataJSON))`, rejecting
+ *   high-s like Solady's `P256.verifySignature`.
+ */
+function verifyWebAuthn(
+  challenge: `0x${string}`,
+  auth: DecodedWebAuthnAuth,
+  publicKey: PublicKey.PublicKey,
+): boolean {
+  const clientData = Bytes.fromString(auth.clientDataJSON);
+  // Bounds-checked in bigint first: the indices are uint256 off the wire.
+  const matchesAt = (index: bigint, expected: Bytes.Bytes) =>
+    index + BigInt(expected.length) <= BigInt(clientData.length) &&
+    Bytes.isEqual(
+      clientData.subarray(Number(index), Number(index) + expected.length),
+      expected,
+    );
+
+  const encodedChallenge = Base64.fromHex(challenge, { url: true, pad: false });
+  if (!matchesAt(auth.typeIndex, WEBAUTHN_TYPE)) return false;
+  if (
+    !matchesAt(
+      auth.challengeIndex,
+      Bytes.fromString(`"challenge":"${encodedChallenge}"`),
+    )
+  )
+    return false;
+
+  const authenticatorData = Bytes.fromHex(auth.authenticatorData);
+  if (authenticatorData.length <= 32 || (authenticatorData[32]! & 0x01) === 0)
+    return false;
+
+  return P256.verify({
+    // `hash: true` SHA-256s the payload: sha256(authData ‖ sha256(clientData)).
+    hash: true,
+    payload: Bytes.concat(authenticatorData, Bytes.fromHex(sha256(clientData))),
     publicKey,
     signature: { r: auth.r, s: auth.s },
   });

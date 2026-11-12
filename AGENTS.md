@@ -19,6 +19,7 @@ Keep changes scoped to the relevant package; avoid editing generated artifacts (
   - `bun run build`: compile library to `dist/`.
   - `bun run test`: run Bun tests with preload setup.
   - `bun run coverage:lcov`: generate LCOV coverage for CI/codecov.
+  - `bun run lint` / `bun run format` (`format:check`): lint with oxlint, format with oxfmt.
 - Solidity package (`cd solidity`):
   - `forge fmt --check`: verify Solidity formatting.
   - `forge build --sizes`: compile contracts and report sizes.
@@ -32,7 +33,7 @@ Keep changes scoped to the relevant package; avoid editing generated artifacts (
   - Types/classes: `PascalCase`
   - Functions/variables: `camelCase`
   - Test files: `*.spec.ts` (TS), `*.t.sol` (Solidity)
-- Run formatting before commits (`typescript/.husky/pre-commit` runs `lint-staged`, build, and tests).
+- Run formatting before commits (`typescript/.husky/pre-commit` runs `lint-staged` (oxfmt), build, and tests).
 
 ## Testing Guidelines
 - Add tests for all behavior changes in the same package as the change.
