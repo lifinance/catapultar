@@ -31,7 +31,7 @@ context:
 Beneath both sit the pure protocol primitives (`src/protocol`) — encoders such as
 `callsDigest`, `constraintDigest`, `predictCloneAddress`, `factorySalt`,
 `buildOpData`, and the signature/owner codecs — plus the contract ABIs
-(`catapultarAbi`, `catapultarFactoryAbi`, `catValidatorAbi`). Use these directly
+(`catapultarAbi`, `catapultarFactoryAbi`, `catValidatorAbi`, `catValidatorV1_1Abi`). Use these directly
 to integrate without any of the classes.
 
 Dependency direction:
@@ -392,7 +392,7 @@ integrate without any of the classes:
 - Owners: `ownerToKeyArray`, `keyArrayToOwner`, `ownersEqual`, `ownerTypeToEnum`, `enumToOwnerType`, `keyTypeLength`.
 - Constraints: `constraintDigest`, `constraintTypedData`, `constraintDomain`.
 
-Contract ABIs are exported as `catapultarAbi`, `catapultarFactoryAbi`, and `catValidatorAbi`; deployment addresses as `factories`, `templates`, and `cat_validator`.
+Contract ABIs are exported as `catapultarAbi`, `catapultarFactoryAbi`, `catValidatorAbi`, and `catValidatorV1_1Abi`; deployment addresses as `factories`, `templates`, and `cat_validator`.
 
 ## Project Layout
 

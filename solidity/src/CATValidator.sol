@@ -50,7 +50,13 @@ contract CATValidator is EIP712, ReentrancyGuard {
 
     receive() external payable { }
 
-    function _domainNameAndVersion() internal pure override returns (string memory name, string memory version) {
+    function _domainNameAndVersion()
+        internal
+        pure
+        virtual
+        override
+        returns (string memory name, string memory version)
+    {
         name = "CAT Validator";
         version = "1";
     }
@@ -75,7 +81,7 @@ contract CATValidator is EIP712, ReentrancyGuard {
         AllowanceSpend[] calldata allowances,
         Outcome[] calldata outcomes,
         bytes calldata signature
-    ) external nonReentrant {
+    ) external virtual nonReentrant {
         if (nonce != 0) _checkNonce(account, nonce);
 
         _validateApproval(account, nonce, allowances, outcomes, signature);
@@ -212,7 +218,7 @@ contract CATValidator is EIP712, ReentrancyGuard {
     function _call(
         address execTarget,
         bytes calldata execPayload
-    ) internal {
+    ) internal virtual {
         address callProxy = CALL_PROXY;
         assembly ("memory-safe") {
             // get the free memory pointer.
