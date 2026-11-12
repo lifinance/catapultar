@@ -26,12 +26,12 @@ at either level.
 context:
 
 - **BaseTransaction** — Minimal transaction interface without validation.
-- **ConstrainedAssetTransaction** — Constrained Asset Transactions (CAT validator).
+- **ConstrainedAssetTransaction** — Constrained Asset Transactions (CAT validator, and CATValidatorV2 with a validation program).
 
 Beneath both sit the pure protocol primitives (`src/protocol`) — encoders such as
 `callsDigest`, `constraintDigest`, `predictCloneAddress`, `factorySalt`,
 `buildOpData`, and the signature/owner codecs — plus the contract ABIs
-(`catapultarAbi`, `catapultarFactoryAbi`, `catValidatorAbi`). Use these directly
+(`catapultarAbi`, `catapultarFactoryAbi`, `catValidatorAbi`, `catValidatorV2Abi`). Use these directly
 to integrate without any of the classes.
 
 Dependency direction:
@@ -368,6 +368,15 @@ const { deployCall, actionCall, entryCall, address } = cat.asExecutionBundle({
 
 For finer control, the lower-level pieces are still available: `cat.asCatapultarAllowanceTransaction()` → `BaseTransaction`, `tx.asAccount({ salt, owner })` for the account context, and `cat.asExecuteCall({ address, ... })` for the entry call.
 
+##### Refunds
+
+`asCatapultarAllowanceTransaction({ refund })` embeds a second, refund constraint next to the execute constraint, and `asRefundCall({ address, refund })` builds the entry call that settles it. What the refund delivers depends on the validator version:
+
+- On v1 `CATValidator` the refund delivers the signed allowance amounts, exactly. The refund constraint signs the same allowances as the execute constraint plus a 1:1 outcome per token to `refund`; the call targets the validator with `allocated = spend = amount`, and the validator forwards the tokens and enforces the outcome as a floor. The call reverts when the account holds less than the signed amount, and leaves any excess on the account. The floor is what pins the destination, since the v1 digest signs no target: an executor passing any other target fails the floor and reverts. A balance sweep needs `CATValidatorV2`.
+- On `CATValidatorV2` the refund is a sweep: the refund constraint signs every allowance token at `maxUint256` and `refundBinding(refund)`, and the call spends `SPEND_FULL_BALANCE` against an `allocated` of `maxUint256` with no outcome, so the account's whole balance of each token moves straight to `refund` whether the account holds less or more than the signed allowance. The validator reverts `TargetNotCommitted()` for any target other than `refund` before an allowance moves. With a `refund`, a v2 bundle's embedded ERC-20 approvals to the validator are `maxUint256` as well, so the sweep can pull a balance above the signed amount; otherwise they stay the signed amount.
+
+The execute and refund constraints share the constraint nonce, so settling one spends the other (nonce 0 is reusable).
+
 Two on-chain sentinels are exported for advanced constraints:
 
 - `SPEND_FULL_BALANCE` (`1 << 255`) — use as a `spend` to pull the signer's full
@@ -375,9 +384,55 @@ Two on-chain sentinels are exported for advanced constraints:
 - `OUTCOME_TO_SIGNER` (`address(0)`) — use as an outcome `destination` to route
   the outcome back to the signer.
 
-The constraint digest itself is available via `constraintDigest({ chainId, verifyingContract }, constraint)`, and `isConstraintNonceSpent(publicClient, { validator, account, nonce })` reads whether a constraint nonce was already consumed.
+The constraint digest itself is available via `constraintDigest({ chainId, verifyingContract }, constraint)`, and `isConstraintNonceSpent(publicClient, { validator, account, nonce })` reads whether a constraint nonce was already consumed (on either validator version).
 
 See `src/transaction/constrainedtransaction.spec.ts::create account and execute contained constraints` for an example.
+
+#### Validation programs (CATValidatorV2)
+
+`CATValidatorV2` extends the audited CAT validator (`2026.04.23_Catapultar.pdf`) with a committed validation program: an assert-only LI.FI VirtualMachine program that runs by `staticcall` after the outcome check and can only add conditions to it. The constraint commits the program's hash and the hash of its parameter words, so the account address commits to them too. An empty program commits zero hashes and settles exactly as v1, without calling the VirtualMachine.
+
+A constraint targets `CATValidatorV2` when it carries a validation commitment. Attach one with `setValidationCommitment({ validationProgramHash, paramsHash })`. The commitment's presence, not its value, selects v2: zero hashes are a v2 constraint without a program. Without a commitment, every output is the v1 output, unchanged.
+
+```typescript
+const validationProgram: ValidationCommand[]; // runVM commands: { op: uint8, data: bytes32 }
+const validationParams: `0x${string}`[]; // 32-byte words
+const validatorV2: `0x${string}`; // your CATValidatorV2 deployment
+
+const cat = new ConstrainedAssetTransaction({ executor, chainId })
+  .addAllowances(...allowances)
+  .addOutcomes(...outcomes)
+  .setValidationCommitment({
+    validationProgramHash: hashValidationProgram(validationProgram),
+    paramsHash: hashValidationParams(validationParams),
+  });
+
+const { deployCall, actionCall, entryCall, address } = cat.asExecutionBundle({
+  salt,
+  owner: { type: "ecdsa", address: ownerAddress },
+  execute: {
+    executionTarget,
+    executionPayload,
+    spends,
+    validator: validatorV2,
+    validationProgram,
+    validationParams,
+  },
+});
+```
+
+With a commitment:
+
+- `validator` is required on every call that touches the validator. The library ships no `CATValidatorV2` address, so building without one throws a `ValidationError`.
+- Digests use EIP-712 domain version `"2"` and the `ExecutionConstraintV2` type (`constraintV2Digest`), and entry calls encode the 10-argument `CATValidatorV2.entry(execTarget, execPayload, account, nonce, allowances, outcomes, binding, validationProgram, validationParams, signature)`, with `binding` as the tuple `(address executionTarget, bytes32 payloadHash)`, `validationProgram` as the VirtualMachine command array `(uint8 op, bytes32 data)[]` and `validationParams` as `bytes32[]`. The constraint signs the binding; the validator reverts `TargetNotCommitted()` unless `execTarget` equals a nonzero `executionTarget`, and `PayloadNotCommitted()` unless `keccak256(execPayload)` equals a nonzero `payloadHash`. The call carries no program hashes: the validator derives `validationProgramHash` (`keccak256(abi.encode(commands))`, zero when empty) and `paramsHash` (`keccak256` of the concatenated words, zero when empty) from the calldata and checks the signature over them. The inherited 7-argument `entry` always reverts `V1EntryDisabled()`.
+- `asExecuteCall` requires `validationProgram` and `validationParams` that hash to the commitment, and throws a `ValidationError` otherwise: the derived hashes would produce a digest the account never approved, so the validator would revert with `BadSignature`. A command whose `op` is not a `uint8` or whose `data` is not 32 bytes throws viem's encoding error, and a param word that is not 32 bytes throws a `ValidationError`: the ABI types cannot encode either. Without a commitment, passing either input throws.
+- The validator itself rejects one malformed input before the signature check: `BadValidationParams()` when params are supplied without a program, or, with a program, when `params.length + allowances.length + outcomes.length` exceeds 121. The ABI decoder enforces the program's shape, so no program-format error exists.
+- The program sees this register file: the committed params, then the account address, then `spent` (the amount the validator pulled from the account per allowance, in allowance order), then `paid` (the validator's balance of each outcome token after the fill, in outcome order), then zeros. The program call forwards all remaining gas; there is no separate gas cap, and any failure, including out of gas, reverts `ValidationFailed(bytes)`.
+- The execute constraint signs `UNBOUND_EXECUTION` (zero target, zero payload hash) by default, so the executor may fill with any target and payload. `setExecutionBinding({ executionTarget, payloadHash })` commits one exact fill instead: the binding is signed into the execute digest (so the account address commits to it) and carried in `entry`'s `binding` argument, and the validator reverts `TargetNotCommitted()` / `PayloadNotCommitted()` for any other target or payload before an allowance moves. Both fields must be non-zero (zero is the unconstrained sentinel), the builder must carry a validation commitment (only the v2 digest signs a binding), and `asExecuteCall` throws a `ValidationError` before building when `executionTarget` or `keccak256(executionPayload)` differs from the binding. The refund constraint is unaffected.
+- The refund constraint (`asCatapultarAllowanceTransaction({ refund })`) and `asRefundCall` commit zero hashes, no program and no outcomes, sign every allowance at `maxUint256` and `refundBinding(refund)`: the refund address as the target and `keccak256("0x")` as the payload hash. The refund call targets the refund address with an empty payload and spends `SPEND_FULL_BALANCE`, so the account's whole balance of each allowance token moves straight to the refund address, and an executor cannot redirect it. A zero refund address throws a `ValidationError`, because a zero target is unconstrained.
+- The executor delivers outcome tokens to the validator during execution; the validator checks its own balance and forwards it to each outcome `destination`.
+
+See `src/transaction/constrainedtransaction.v2.spec.ts` (`integration`) for an end-to-end example against a deployed `CATValidatorV2`.
 
 ## Protocol primitives (unopinionated)
 
@@ -390,9 +445,9 @@ integrate without any of the classes:
 - Execution data: `buildOpData`, `buildExecutionData`.
 - Signatures: `normalizeSignature`, `compactSignature`, `toCompactSignature`, `fromCompactSignature`, `encodeWebAuthnAuth`, `normalizeP256`.
 - Owners: `ownerToKeyArray`, `keyArrayToOwner`, `ownersEqual`, `ownerTypeToEnum`, `enumToOwnerType`, `keyTypeLength`.
-- Constraints: `constraintDigest`, `constraintTypedData`, `constraintDomain`.
+- Constraints: `constraintDigest`, `constraintTypedData`, `constraintDomain`; for `CATValidatorV2`, `constraintV2Digest`, `constraintV2TypedData`, `constraintV2Domain`, `ExecutionConstraintV2Typed`, the bindings `UNBOUND_EXECUTION` and `refundBinding`, and the commitment hashes `hashValidationProgram`, `hashValidationParams`.
 
-Contract ABIs are exported as `catapultarAbi`, `catapultarFactoryAbi`, and `catValidatorAbi`; deployment addresses as `factories`, `templates`, and `cat_validator`.
+Contract ABIs are exported as `catapultarAbi`, `catapultarFactoryAbi`, `catValidatorAbi`, and `catValidatorV2Abi`; deployment addresses as `factories`, `templates`, and `cat_validator`.
 
 ## Project Layout
 
