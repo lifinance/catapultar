@@ -33,12 +33,6 @@
 #                   accounts that call the executor's `fill`. Required. The owner and the solver
 #                   list fold into the init code, so every chain must get the same values in the
 #                   same order to share one address.
-#   INTENT_EXECUTOR_FORWARDERS  IntentExecutor only: comma-separated permissionless forwarders
-#                   deploy.s.sol cannot derive, which must not be solvers: the CALL_PROXY of
-#                   every deployed validator other than the v1 and V2 ones deploy.s.sol deploys.
-#                   Optional. deploy.s.sol reverts SolverIsForwarder when a solver is one of
-#                   them, Multicall3, the legacy IntentExecutor, or the CALL_PROXY of its own v1
-#                   or V2 validator.
 #   FORGE_TEMPO     forge for Tempo (default: ~/.foundry-tempo/bin/forge). Tempo has no native gas
 #                   coin: each transaction names a TIP-20 fee token, which stock forge cannot send.
 #   LOG_DIR         Per-chain forge logs (default: cache/deploy-composer/<contract>-<timestamp>).
