@@ -6,6 +6,7 @@ import { SafeTransferLib } from "solady/src/utils/SafeTransferLib.sol";
 import { SignatureCheckerLib } from "solady/src/utils/SignatureCheckerLib.sol";
 
 import { CATValidator } from "./CATValidator.sol";
+import { ICATValidatorV1_1 } from "./interfaces/ICATValidatorV1_1.sol";
 import { AllowanceSpend, Outcome } from "./libs/LibExecutionConstraint.sol";
 import { LibExecutionConstraintV1_1 } from "./libs/LibExecutionConstraintV1_1.sol";
 
@@ -18,8 +19,11 @@ import { LibExecutionConstraintV1_1 } from "./libs/LibExecutionConstraintV1_1.so
  *
  * `pulled` and the entry id live in transient storage (EIP-1153) only; the constructor reverts on a chain without it.
  * The base's 7-argument `entry` reverts `V1EntryDisabled`.
+ *
+ * Never send assets to this contract directly: anything it holds outside an `entry()` can be claimed by any signer
+ * through an outcome.
  */
-contract CATValidatorV1_1 is CATValidator {
+contract CATValidatorV1_1 is CATValidator, ICATValidatorV1_1 {
     using DynamicArrayLib for uint256[];
 
     error TargetNotCommitted();
@@ -45,17 +49,15 @@ contract CATValidatorV1_1 is CATValidator {
         version = "1.1";
     }
 
-    /// @notice Amount of `token` moved out of the signer by the `entry()` currently executing. Zero outside
-    /// `entry()` and inside the allowance transfers.
+    /// @inheritdoc ICATValidatorV1_1
     function pulled(
         address token
     ) external view returns (uint256) {
         return _tload(_pulledSlot(token));
     }
 
-    /// @notice Id of the 9-argument `entry()` currently executing: 1, 2, 3, ... within a transaction. A settled
-    /// entry's id is not reused; a reverted entry rolls the counter back, so the next entry takes its id. Zero outside
-    /// it. A non-zero id is also the entry's reentrancy lock.
+    /// @inheritdoc ICATValidatorV1_1
+    /// @dev A non-zero id is also the entry's reentrancy lock.
     function entryId() external view returns (uint256) {
         return _tload(ENTRY_ID_SLOT);
     }

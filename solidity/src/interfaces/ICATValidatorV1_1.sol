@@ -30,12 +30,13 @@ interface ICATValidatorV1_1 {
         bytes calldata signature
     ) external;
 
-    /// @notice Amount of `token` the running 9-argument `entry` moved out of its signer. Zero outside it and during
-    /// the allowance transfers.
+    /// @notice Amount of `token` the running 9-argument `entry` moved out of its signer. Zero outside it, during the
+    /// allowance transfers and during the payout.
     function pulled(
         address token
     ) external view returns (uint256);
 
-    /// @notice Id of the running 9-argument `entry`: 1, 2, 3, ... within a transaction. Zero outside it.
+    /// @notice Id of the running 9-argument `entry`: 1, 2, 3, ... within a transaction. A settled entry's id is not
+    /// reused; a reverted entry rolls the counter back, so the next entry takes its id. Zero outside it.
     function entryId() external view returns (uint256);
 }

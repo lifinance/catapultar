@@ -52,13 +52,13 @@ ExecutionConstraint(Allowance[] allowances,Outcome[] outcomes,address executor,u
 Inherited from the base, not introduced here:
 
 - The validator holds funds within a transaction. A stray balance of an outcome token is forwarded with the outcome, and a blocklisted validator blocks settlement.
-- A fee-on-transfer outcome token pays the fee on both legs.
-- Native value sent through `receive()` can strand.
+- A fee-on-transfer outcome token pays the fee on the delivery to the validator and again on the forward, so the recipient can receive less than `outcome.amount`.
+- Anything sent to the validator outside an entry, native value through `receive()` included, can be claimed by any signer through an outcome. The address is not safe for direct transfers.
 - Two outcomes of the same token in one entry are unsupported.
 
 ## Deployment and pins
 
-`script/deployV1_1.s.sol` deploys through the deterministic deployer (`0x4e59b44847b379578588920cA78FbF26c0B4956C`, salt 0), so the address is a function of the creation code and therefore of the compiler. At solc 0.8.35, the default profile, it is `0xA1d38c83e842ebA863238845Dc4fF14F5668041A`. The script does not check the chain for EIP-1153. On a chain without it, forge's local simulation passes and the broadcast deployment reverts on chain, spending its gas.
+`script/deployV1_1.s.sol` deploys through the deterministic deployer (`0x4e59b44847b379578588920cA78FbF26c0B4956C`, salt 0), so the address is a function of the creation code and therefore of the compiler. At solc 0.8.35 and `evm_version` cancun, the default profile, it is `0xA1d38c83e842ebA863238845Dc4fF14F5668041A`. The script reverts unless the creation code hashes to the pin in `snapshots/v1-1-bytecode.json`. It does not check the chain for EIP-1153. On a chain without it, forge's local simulation passes and the broadcast deployment reverts on chain, spending its gas.
 
 `script/check-v1-1-bytecode.sh` pins the creation hashes of `CATValidatorV1_1` and `CATValidatorV1_1Tron` and the git blob id of each v1.1 source file (`snapshots/v1-1-bytecode.json`). A change to the base moves the hashes and fails the check. `script/check-v1-bytecode.sh` pins the creation hashes of `CATValidator` and `CATValidatorTron` (`snapshots/v1-bytecode.json`), so the base's `virtual` keywords are proven bytecode-neutral.
 
