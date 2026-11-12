@@ -107,24 +107,16 @@ contract IntentExecutorTronTest is Test {
 
     // -- Approvals still work --
 
-    /// @dev The spender pulls Tron USDT during the call, and the allowance is revoked after.
-    function test_approval_spenderPullsThenRevoked() external {
-        uint256 amount = 1000e6;
-        tronUsdt.mint(address(executor), amount);
-
+    function test_approval_setsMaxAllowance() external {
         IntentExecutor.Approval[] memory approvals = new IntentExecutor.Approval[](1);
         approvals[0] = IntentExecutor.Approval({ token: address(tronUsdt), spender: address(this) });
 
-        IntentExecutor.Call3[] memory calls = new IntentExecutor.Call3[](1);
-        calls[0] = IntentExecutor.Call3({
-            target: address(this), allowFailure: false, callData: abi.encodeCall(this.pull, (amount))
-        });
+        IntentExecutor.Call3[] memory calls = new IntentExecutor.Call3[](0);
         IntentExecutor.SweepTarget[] memory sweeps = new IntentExecutor.SweepTarget[](0);
 
         run(abi.encodeCall(IntentExecutor.executeAndSweep, (approvals, calls, sweeps)));
 
-        assertEq(tronUsdt.balanceOf(address(this)), amount);
-        assertEq(tronUsdt.allowance(address(executor), address(this)), 0);
+        assertEq(tronUsdt.allowance(address(executor), address(this)), type(uint256).max);
     }
 
     // -- End-to-end: approve, call, sweep with Tron USDT --
@@ -224,13 +216,6 @@ contract IntentExecutorTronTest is Test {
             }
         }
         entryReturnData = ret;
-    }
-
-    /// @dev Stands in for a DEX: spends this contract's Tron USDT allowance on the executor.
-    function pull(
-        uint256 amount
-    ) external {
-        tronUsdt.transferFrom(address(executor), address(this), amount);
     }
 
     receive() external payable { }

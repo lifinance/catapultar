@@ -10,14 +10,13 @@ import { SafeTransferLib } from "solady/src/utils/SafeTransferLib.sol";
 /// @author LI.FI / Intent Factory
 /// @notice Multicall-like execution contract for Intent Factory bundle execution.
 /// @dev Replaces Multicall3 as the execution target for IF solver.
-///      Four-phase execution:
-///      1. Approvals — safeApproveWithRetry(type(uint256).max) for each token+spender pair,
+///      Three-phase execution:
+///      1. Safe approvals — safeApproveWithRetry(type(uint256).max) for each input token,
 ///         handling USDT-style tokens that revert on non-zero-to-non-zero approve.
+///         Allowance is checked first; if already type(uint256).max the approve is skipped
+///         entirely (~1,800+ gas saved per repeat, avoiding the Approval event emission).
 ///      2. Call execution — arbitrary batched calls (swap, fee transfer, etc.)
-///      3. Revocation — each pair's allowance is set back to zero (one wei for a token that
-///         reverts on approve(0), such as BNB on Ethereum), so a spender can pull this
-///         contract's tokens only during the call that approved it.
-///      4. Balance sweep — reads balanceOf(this) for each output token and transfers
+///      3. Balance sweep — reads balanceOf(this) for each output token and transfers
 ///         the full remaining balance to the specified recipient.
 ///
 ///      Access control: executeAndSweep() and executeAndSweepNative() only run a call
@@ -49,14 +48,8 @@ import { SafeTransferLib } from "solady/src/utils/SafeTransferLib.sol";
 ///      transient storage, so deployment fails on any other VM.
 ///
 ///      Tokens or ETH left in this contract after a call stay until a later authorized
-///      call moves them. Do not leave tokens behind.
-///
-///      Allowances from the `approvals` list end with the call, but `calls` can grant
-///      others (token.approve(), Permit2) that outlive it. Such an allowance lets its
-///      spender pull whatever this contract holds during any later call, including the
-///      inputs of an honest fill. revokeApprovals() lets the owner clear them, for
-///      example after removing a compromised solver. Revoking a token's allowance to
-///      Permit2 disables every Permit2 allowance of that token.
+///      call moves them, or until a spender that an earlier call max-approved pulls
+///      them. Do not leave tokens behind.
 ///
 ///      function selection:
 ///      - If the swap/call outputs ERC20 tokens only, use executeAndSweep().
@@ -186,15 +179,6 @@ contract IntentExecutor is Ownable, ReentrancyGuardTransient {
         revert OwnershipTransferDisabled();
     }
 
-    /// @notice Set each token+spender allowance of this contract to zero.
-    /// @dev Clears allowances that outlived the call that granted them, such as ones a
-    /// compromised solver granted through `calls`.
-    function revokeApprovals(
-        Approval[] calldata approvals
-    ) external onlyOwner {
-        _safeRevokeAll(approvals);
-    }
-
     /// @dev The contract already requires TSTORE for its authorizations, so the guard uses
     /// transient storage on every chain, not only on Ethereum mainnet.
     function _useTransientReentrancyGuardOnlyOnMainnet() internal pure override returns (bool) {
@@ -241,12 +225,11 @@ contract IntentExecutor is Ownable, ReentrancyGuardTransient {
 
     /// External Methods ///
 
-    /// @notice Execute with call-scoped approvals, batched calls, and ERC20 balance sweep.
-    /// @dev Four-phase execution:
+    /// @notice Execute with safe approvals, batched calls, and ERC20 balance sweep.
+    /// @dev Three-phase execution:
     ///      1. For each approval: safeApproveWithRetry(token, spender, type(uint256).max)
     ///      2. Execute all calls in order
-    ///      3. For each approval: set the allowance back to zero
-    ///      4. For each sweep target: transfer full balanceOf(this) to recipient
+    ///      3. For each sweep target: transfer full balanceOf(this) to recipient
     ///
     ///      ERC20 outputs only. This function does NOT sweep native ETH.
     ///      If any executed call sends ETH to this contract (e.g. WETH unwrap,
@@ -256,7 +239,7 @@ contract IntentExecutor is Ownable, ReentrancyGuardTransient {
     ///
     ///      Reverts CallNotAuthorized unless it runs inside a solver's fill() whose
     ///      `execPayload` is this calldata. Consumes that authorization before any call.
-    /// @param approvals Token+spender pairs to max-approve for the duration of the calls
+    /// @param approvals Token+spender pairs to max-approve before execution
     /// @param calls Array of calls to execute (swap, fee transfer, etc.)
     /// @param sweepTargets Token+recipient pairs to sweep after execution
     /// @return results Array of call results
@@ -268,11 +251,10 @@ contract IntentExecutor is Ownable, ReentrancyGuardTransient {
         _consumeAuthorization();
         _safeApproveAll(approvals);
         results = _executeCalls(calls);
-        _safeRevokeAll(approvals);
         _sweepAll(sweepTargets);
     }
 
-    /// @notice Execute with call-scoped approvals, batched calls with value, and native + ERC20 balance sweep.
+    /// @notice Execute with safe approvals, batched calls with value, and native + ERC20 balance sweep.
     /// @dev Used for swaps that output native tokens (ETH/MATIC/etc). Extends executeAndSweep()
     ///      with two additional capabilities: calls may forward ETH via the value field, and any
     ///      native balance remaining after execution is swept to nativeSweepRecipient.
@@ -289,7 +271,7 @@ contract IntentExecutor is Ownable, ReentrancyGuardTransient {
     ///      funds. Value above what `calls` spend is swept to nativeSweepRecipient; value
     ///      below it is made up from this contract's balance, which only holds stray ETH
     ///      because every native call sweeps it.
-    /// @param approvals Token+spender pairs to max-approve for the duration of the calls
+    /// @param approvals Token+spender pairs to max-approve before execution
     /// @param calls Array of calls with value to execute
     /// @param sweepTargets ERC20 token+recipient pairs to sweep after execution
     /// @param nativeSweepRecipient Address to receive remaining native balance. Reverts ZeroRecipient
@@ -305,7 +287,6 @@ contract IntentExecutor is Ownable, ReentrancyGuardTransient {
         _consumeAuthorization();
         _safeApproveAll(approvals);
         results = _executeCallsWithValue(calls);
-        _safeRevokeAll(approvals);
         _sweepAll(sweepTargets);
 
         uint256 nativeBalance = address(this).balance;
@@ -351,54 +332,45 @@ contract IntentExecutor is Ownable, ReentrancyGuardTransient {
         }
     }
 
-    /// @dev Max-approve each token to its spender.
-    ///      Uses SafeTransferLib.safeApproveWithRetry, which resets USDT-style tokens to 0
-    ///      first when an allowance from before this version is still non-zero.
+    /// @dev Safe max-approve each token to its spender.
+    ///      Uses SafeTransferLib.safeApproveWithRetry which handles USDT-style tokens
+    ///      by resetting to 0 first if needed.
+    ///      Skips the approve entirely when allowance is already type(uint256).max,
+    ///      avoiding an unnecessary SSTORE + Approval event (~1,800+ gas per pair).
     function _safeApproveAll(
-        Approval[] calldata approvals
-    ) private {
-        uint256 len = approvals.length;
-        for (uint256 i = 0; i < len; ++i) {
-            SafeTransferLib.safeApproveWithRetry(approvals[i].token, approvals[i].spender, type(uint256).max);
-        }
-    }
-
-    /// @dev Set each token+spender allowance to zero, so no allowance from the call survives
-    ///      it. Some tokens (BNB on Ethereum) revert on approve(0); for those the allowance
-    ///      is set to one wei instead. That still ends the max allowance, and it lets such a
-    ///      token be listed in `approvals` at all: reverting instead would make every call
-    ///      that approves it fail. The leftover is dust, since its spender can pull at most
-    ///      one wei per transferFrom. It does not block the next max approval: the 1-wei
-    ///      approve just succeeded over a max allowance, so the token accepts non-zero to
-    ///      non-zero approvals. Reverts ApproveFailed when both approvals fail.
-    function _safeRevokeAll(
         Approval[] calldata approvals
     ) private {
         uint256 len = approvals.length;
         for (uint256 i = 0; i < len; ++i) {
             address token = approvals[i].token;
             address spender = approvals[i].spender;
-            if (!_tryApprove(token, spender, 0)) SafeTransferLib.safeApprove(token, spender, 1);
+            if (_allowance(token, address(this), spender) < type(uint256).max) {
+                SafeTransferLib.safeApproveWithRetry(token, spender, type(uint256).max);
+            }
         }
     }
 
-    /// @dev SafeTransferLib.safeApprove that returns false instead of reverting. Success
-    ///      means the call succeeded and returned true, or returned nothing from a token
-    ///      with code (USDT-style).
-    function _tryApprove(
+    /// @dev Returns the ERC20 allowance of `owner` for `spender`. Returns 0 on failure.
+    /// This contract returns 0 if no contract has been deployed.
+    function _allowance(
         address token,
-        address spender,
-        uint256 amount
-    ) private returns (bool success) {
+        address owner,
+        address spender
+    ) private view returns (uint256 amount) {
         assembly ("memory-safe") {
-            mstore(0x14, spender)
-            mstore(0x34, amount)
-            mstore(0x00, 0x095ea7b3000000000000000000000000) // `approve(address,uint256)`.
-            success := call(gas(), token, 0, 0x10, 0x44, 0x00, 0x20)
-            if iszero(and(eq(mload(0x00), 1), success)) {
-                success := lt(or(iszero(extcodesize(token)), returndatasize()), success)
-            }
-            mstore(0x34, 0) // Restore the part of the free memory pointer that was overwritten.
+            // Save free memory pointer. We will overwrite it.
+            let m := mload(0x40)
+            mstore(0x34, spender) // Spender zero-pad: 0x34-0x3f, address: 0x40-0x53 (corrupts free ptr temporarily).
+            mstore(0x14, owner) // Owner zero-pad: 0x14-0x1f, address: 0x20-0x33.
+            mstore(0x00, 0xdd62ed3e000000000000000000000000) // `allowance(address,address)` selector at 0x10.
+            amount := mul( // The arguments of `mul` are evaluated from right to left.
+                mload(0x00),
+                and( // The arguments of `and` are evaluated from right to left.
+                    gt(returndatasize(), 0x1f), // At least 32 bytes returned.
+                    staticcall(gas(), token, 0x10, 0x44, 0x00, 0x20)
+                )
+            )
+            mstore(0x40, m) // Restore the free memory pointer.
         }
     }
 

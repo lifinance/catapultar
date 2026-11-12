@@ -406,13 +406,14 @@ The IntentExecutor only runs a call that one of its solvers authorized. A solver
 
 An ownership handover changes only the owner: every solver stays, and `isSolver` cannot be enumerated on-chain. The outgoing owner completes the handover and can add a solver in the same transaction, so once the incoming owner owns the executor, it rebuilds the solver set from the executor's `SolverSet` events and removes any solver it does not recognise with `setSolver(solver, false)`.
 
-Each `Approval` pair the executor max-approves is reset to zero after the calls, before the sweep, so a spender can pull the executor's tokens only during the call that approved it. A token whose `approve(0)` reverts (BNB on Ethereum) is reset to one wei instead. An allowance granted inside `calls` (a direct `token.approve`, Permit2) is not reset and lets its spender pull whatever the executor holds during any later call. After removing a compromised solver with `setSolver(solver, false)`, the owner lists every non-zero allowance of the executor (the tokens' `Approval` events with the executor as owner) and clears them with `revokeApprovals`. Revoking a token's allowance to Permit2 also disables every Permit2 allowance of that token.
+The executor max-approves each `Approval` pair and leaves the allowance in place, so a later fill with the same pair skips the approve. The solver gate does not cover `transferFrom`: a spender that holds an allowance can pull whatever the executor holds at any time, even after the solver that approved it is removed. A fill moves its tokens in and out in one transaction, so only tokens left behind are exposed.
 
-Solvers follow three rules that the executor does not enforce:
+Solvers follow two rules that the executor does not enforce:
 
-- Approve only audited, immutable spenders. A spender that can be upgraded, or that has a bug letting anyone call `transferFrom` through it, can pull the executor's tokens whenever it holds an allowance.
-- Keep the executor empty between transactions: list every token a fill can leave behind in `sweepTargets`, and use `executeAndSweepNative` whenever the fill can end with ETH. Every check on spenders and allowances assumes the executor holds nothing between transactions.
-- Grant token allowances through `approvals`, never with a token `approve` inside `calls`, so they are reset after the call. A Permit2 allowance set inside `calls` (`Permit2.approve`) is fine when the token's allowance to Permit2 is in `approvals`: once that is reset, the Permit2 allowance cannot move the token.
+- Approve only audited spenders, and prefer immutable ones. A spender that can be upgraded, or that has a bug letting anyone call `transferFrom` through it, can pull the executor's tokens whenever it holds an allowance.
+- Keep the executor empty between transactions: list every token a fill can leave behind in `sweepTargets`, and use `executeAndSweepNative` whenever the fill can end with ETH.
+
+After removing a compromised solver with `setSolver(solver, false)`, a remaining solver lists every non-zero allowance of the executor (the tokens' `Approval` events with the executor as owner) and clears each one with a fill whose `calls` contain `token.approve(spender, 0)`.
 
 ## License Notice
 

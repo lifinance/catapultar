@@ -180,23 +180,6 @@ export const INTENT_EXECUTOR_ABI = [
   },
   {
     type: "function",
-    name: "revokeApprovals",
-    inputs: [
-      {
-        name: "approvals",
-        type: "tuple[]",
-        internalType: "struct IntentExecutor.Approval[]",
-        components: [
-          { name: "token", type: "address", internalType: "address" },
-          { name: "spender", type: "address", internalType: "address" },
-        ],
-      },
-    ],
-    outputs: [],
-    stateMutability: "nonpayable",
-  },
-  {
-    type: "function",
     name: "setSolver",
     inputs: [
       { name: "solver", type: "address", internalType: "address" },
