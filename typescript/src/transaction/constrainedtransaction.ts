@@ -26,6 +26,7 @@ import { BaseTransaction } from "./transaction";
 import CATAPULTAR_ABI from "../abi/catapultar";
 import { CAT_VALIDATOR_ABI } from "../abi/CATValidator";
 import { CAT_VALIDATOR_V2_ABI } from "../abi/CATValidatorV2";
+import { INTENT_EXECUTOR_ABI } from "../abi/IntentExecutor";
 import { cat_validator } from "../config";
 import {
   assertValidationInputs,
@@ -579,6 +580,27 @@ export class ConstrainedAssetTransaction {
       })),
       outcomes: this.refundOutcomes(opt.refund),
     });
+  }
+
+  /**
+   * Wrap an entry call from {@link asExecuteCall} or {@link asRefundCall} in
+   * `IntentExecutor.fill(validator, entryData)`, sent to {@link executor}. Use it
+   * when the constraint's executor is an IntentExecutor: the validator checks
+   * the constraint against its caller, so only the IntentExecutor can submit
+   * it. `fill` reverts unless the entry's `execPayload` ran on the
+   * IntentExecutor; a refund's empty payload runs nothing and needs no check.
+   * Only the IntentExecutor's solvers can send the call.
+   */
+  asFillCall(entryCall: Call): Call {
+    return {
+      to: this.executor,
+      value: 0n,
+      data: encodeFunctionData({
+        abi: INTENT_EXECUTOR_ABI,
+        functionName: "fill",
+        args: [entryCall.to, entryCall.data],
+      }),
+    };
   }
 
   /**

@@ -14,7 +14,7 @@
  *      - INTENT_EXECUTOR_OWNER (required to deploy IntentExecutorTron): owner of the
  *        solver set (a multisig), base58 (T...) or hex
  *      - INTENT_EXECUTOR_SOLVERS (required to deploy IntentExecutorTron): comma-separated
- *        accounts that call the validator's `entry`, base58 or hex
+ *        accounts that call the executor's `fill`, base58 or hex
  *
  * IntentExecutorTron keeps solver authorizations in transient storage, so it needs
  * TVM Cancun (TLOAD/TSTORE, chain parameter getAllowTvmCancun = 1).

@@ -15,6 +15,8 @@ contract IntentExecutorTronTest is Test {
     MockTronUSDT tronUsdt;
     MockERC20 standardToken;
     address recipient;
+    /// @dev Return data of the executor call entry() made, read back by run().
+    bytes internal entryReturnData;
 
     function setUp() external {
         address[] memory solvers = new address[](1);
@@ -36,11 +38,10 @@ contract IntentExecutorTronTest is Test {
         IntentExecutor.SweepTarget[] memory sweeps = new IntentExecutor.SweepTarget[](1);
         sweeps[0] = IntentExecutor.SweepTarget({ token: address(tronUsdt), recipient: recipient });
 
-        authorize(abi.encodeCall(IntentExecutor.executeAndSweep, (approvals, calls, sweeps)));
         vm.expectEmit(true, true, false, true);
         emit IntentExecutor.Swept(address(tronUsdt), recipient, amount);
 
-        executor.executeAndSweep(approvals, calls, sweeps);
+        run(abi.encodeCall(IntentExecutor.executeAndSweep, (approvals, calls, sweeps)));
 
         assertEq(tronUsdt.balanceOf(recipient), amount);
         assertEq(tronUsdt.balanceOf(address(executor)), 0);
@@ -58,8 +59,7 @@ contract IntentExecutorTronTest is Test {
         sweeps[0] = IntentExecutor.SweepTarget({ token: address(tronUsdt), recipient: recipient });
         sweeps[1] = IntentExecutor.SweepTarget({ token: address(standardToken), recipient: recipient });
 
-        authorize(abi.encodeCall(IntentExecutor.executeAndSweep, (approvals, calls, sweeps)));
-        executor.executeAndSweep(approvals, calls, sweeps);
+        run(abi.encodeCall(IntentExecutor.executeAndSweep, (approvals, calls, sweeps)));
 
         assertEq(tronUsdt.balanceOf(recipient), usdtAmount);
         assertEq(standardToken.balanceOf(recipient), stdAmount);
@@ -78,8 +78,7 @@ contract IntentExecutorTronTest is Test {
         IntentExecutor.SweepTarget[] memory sweeps = new IntentExecutor.SweepTarget[](1);
         sweeps[0] = IntentExecutor.SweepTarget({ token: address(tronUsdt), recipient: recipient });
 
-        authorize(abi.encodeCall(IntentExecutor.executeAndSweep, (approvals, calls, sweeps)));
-        executor.executeAndSweep(approvals, calls, sweeps);
+        run(abi.encodeCall(IntentExecutor.executeAndSweep, (approvals, calls, sweeps)));
 
         assertEq(tronUsdt.balanceOf(recipient), amount);
         assertEq(tronUsdt.balanceOf(address(executor)), 0);
@@ -98,8 +97,7 @@ contract IntentExecutorTronTest is Test {
         IntentExecutor.SweepTarget[] memory sweeps = new IntentExecutor.SweepTarget[](1);
         sweeps[0] = IntentExecutor.SweepTarget({ token: address(tronUsdt), recipient: recipient });
 
-        authorize(abi.encodeCall(IntentExecutor.executeAndSweepNative, (approvals, calls, sweeps, payable(recipient))));
-        executor.executeAndSweepNative(approvals, calls, sweeps, payable(recipient));
+        run(abi.encodeCall(IntentExecutor.executeAndSweepNative, (approvals, calls, sweeps, payable(recipient))));
 
         assertEq(tronUsdt.balanceOf(recipient), tokenAmount);
         assertEq(recipient.balance, nativeAmount);
@@ -116,8 +114,7 @@ contract IntentExecutorTronTest is Test {
         IntentExecutor.Call3[] memory calls = new IntentExecutor.Call3[](0);
         IntentExecutor.SweepTarget[] memory sweeps = new IntentExecutor.SweepTarget[](0);
 
-        authorize(abi.encodeCall(IntentExecutor.executeAndSweep, (approvals, calls, sweeps)));
-        executor.executeAndSweep(approvals, calls, sweeps);
+        run(abi.encodeCall(IntentExecutor.executeAndSweep, (approvals, calls, sweeps)));
 
         assertEq(tronUsdt.allowance(address(executor), address(this)), type(uint256).max);
     }
@@ -143,8 +140,7 @@ contract IntentExecutorTronTest is Test {
         IntentExecutor.SweepTarget[] memory sweeps = new IntentExecutor.SweepTarget[](1);
         sweeps[0] = IntentExecutor.SweepTarget({ token: address(tronUsdt), recipient: recipient });
 
-        authorize(abi.encodeCall(IntentExecutor.executeAndSweep, (approvals, calls, sweeps)));
-        executor.executeAndSweep(approvals, calls, sweeps);
+        run(abi.encodeCall(IntentExecutor.executeAndSweep, (approvals, calls, sweeps)));
 
         assertEq(tronUsdt.balanceOf(feeCollector), feeAmount);
         assertEq(tronUsdt.balanceOf(recipient), inputAmount - feeAmount);
@@ -161,9 +157,8 @@ contract IntentExecutorTronTest is Test {
         IntentExecutor.SweepTarget[] memory sweeps = new IntentExecutor.SweepTarget[](1);
         sweeps[0] = IntentExecutor.SweepTarget({ token: address(tronUsdt), recipient: address(0) });
 
-        authorize(abi.encodeCall(IntentExecutor.executeAndSweep, (approvals, calls, sweeps)));
         vm.expectRevert(abi.encodeWithSelector(IntentExecutor.ZeroRecipient.selector));
-        executor.executeAndSweep(approvals, calls, sweeps);
+        run(abi.encodeCall(IntentExecutor.executeAndSweep, (approvals, calls, sweeps)));
     }
 
     // -- Solver gate --
@@ -190,19 +185,37 @@ contract IntentExecutorTronTest is Test {
         IntentExecutor.SweepTarget[] memory sweeps = new IntentExecutor.SweepTarget[](1);
         sweeps[0] = IntentExecutor.SweepTarget({ token: address(standardToken), recipient: recipient });
 
-        authorize(abi.encodeCall(IntentExecutor.executeAndSweep, (approvals, calls, sweeps)));
-        executor.executeAndSweep(approvals, calls, sweeps);
+        run(abi.encodeCall(IntentExecutor.executeAndSweep, (approvals, calls, sweeps)));
 
         assertEq(standardToken.balanceOf(recipient), amount);
     }
 
     // -- Helpers --
 
-    /// @dev This test contract is a solver: authorize one execution of `data`.
-    function authorize(
+    /// @dev This test contract is both the solver and the validator stand-in: fill()
+    /// authorizes one execution of `data`, calls entry() below, and entry() runs `data`
+    /// against the executor. Returns the executor's return data.
+    function run(
         bytes memory data
-    ) internal {
-        executor.authorizeCall(keccak256(data));
+    ) internal returns (bytes memory ret) {
+        executor.fill(address(this), abi.encodeCall(this.entry, (address(executor), data)));
+        ret = entryReturnData;
+    }
+
+    /// @dev Stands in for a CAT validator's `entry`: calls `execTarget` with `execPayload`
+    /// and bubbles a revert verbatim.
+    function entry(
+        address execTarget,
+        bytes calldata execPayload
+    ) external {
+        require(msg.sender == address(executor), "entry: not executor");
+        (bool success, bytes memory ret) = execTarget.call(execPayload);
+        if (!success) {
+            assembly ("memory-safe") {
+                revert(add(ret, 0x20), mload(ret))
+            }
+        }
+        entryReturnData = ret;
     }
 
     receive() external payable { }

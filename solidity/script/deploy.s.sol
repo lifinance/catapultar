@@ -146,10 +146,9 @@ contract deploy is multichain {
         }
     }
 
-    /// @dev The executor keeps solver authorizations in transient storage, so the chain
-    /// must support TSTORE. A chain without Cancun reverts ChainLacksCancun: the executor
-    /// has no storage fallback, because a stored authorization that a failed fill never
-    /// consumed would outlive its transaction.
+    /// @dev The executor keeps solver authorizations and its reentrancy guard in transient
+    /// storage, so the chain must support TSTORE. A chain without Cancun reverts
+    /// ChainLacksCancun instead of deploying an executor that cannot run.
     function deployIntentExecutor(
         address owner,
         address[] memory solvers
