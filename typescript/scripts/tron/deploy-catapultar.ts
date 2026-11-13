@@ -11,6 +11,13 @@
  *      - PRIVATE_KEY (deployer private key) - can be also passed as --private-key <key>
  *      - RPC_URL_TRON (optional, defaults to https://api.trongrid.io)
  *      - TRONGRID_API_KEY (optional)
+ *      - INTENT_EXECUTOR_OWNER (required to deploy IntentExecutorTron): owner of the
+ *        solver set (a multisig), base58 (T...) or hex
+ *      - INTENT_EXECUTOR_SOLVERS (required to deploy IntentExecutorTron): comma-separated
+ *        accounts that call the executor's `fill`, base58 or hex
+ *
+ * IntentExecutorTron keeps solver authorizations in transient storage, so it needs
+ * TVM Cancun (TLOAD/TSTORE, chain parameter getAllowTvmCancun = 1).
  *
  * Usage (run from catapultar/typescript):
  *   bun run scripts/tron/deploy-catapultar.ts [--dry-run] [--testnet|--network tronshasta] [--private-key 0x...] [--rpc-url <url>] [--trongrid-api-key <key>]
@@ -27,6 +34,7 @@
 import { readFile } from "fs/promises";
 import { resolve } from "path";
 
+import type { TronWeb } from "tronweb";
 import { consola } from "consola";
 
 import {
@@ -41,6 +49,8 @@ import {
   type ITronDeploymentConfig,
   type ITronDeploymentResult,
   type TronTvmNetworkName,
+  getTronWebCodecOnlyForNetwork,
+  tronAddressToHex,
 } from "@lifi/tron-devkit";
 
 // ── Configuration ──────────────────────────────────────────────────────────────
@@ -65,6 +75,61 @@ const OPTIONAL_CONTRACTS = ["McopyTestTron"] as const;
 const ALL_CONTRACTS = [...DEFAULT_CONTRACTS, ...OPTIONAL_CONTRACTS] as const;
 
 type DeployStepName = (typeof ALL_CONTRACTS)[number];
+
+/** Constructor arguments per contract; contracts without arguments return []. */
+function constructorParams(
+  contractName: DeployStepName,
+  network: TronTvmNetworkName,
+): unknown[] {
+  if (contractName !== "IntentExecutorTron") return [];
+  const owner = process.env.INTENT_EXECUTOR_OWNER;
+  const solvers = process.env.INTENT_EXECUTOR_SOLVERS;
+  if (!owner || !solvers)
+    throw new Error(
+      "IntentExecutorTron needs INTENT_EXECUTOR_OWNER and INTENT_EXECUTOR_SOLVERS",
+    );
+  const tronWeb = getTronWebCodecOnlyForNetwork(network);
+  const ownerHex = parseTronAccount(tronWeb, "INTENT_EXECUTOR_OWNER", owner);
+  const solverHexes = solvers
+    .split(",")
+    .filter((solver) => solver.trim() !== "")
+    .map((solver) =>
+      parseTronAccount(tronWeb, "INTENT_EXECUTOR_SOLVERS", solver),
+    );
+  if (solverHexes.length === 0)
+    throw new Error("INTENT_EXECUTOR_SOLVERS: lists no solver address");
+  consola.info("IntentExecutorTron constructor:", {
+    owner: `${tronWeb.address.fromHex(ownerHex)} (${ownerHex})`,
+    solvers: solverHexes.map(
+      (solver) => `${tronWeb.address.fromHex(solver)} (${solver})`,
+    ),
+  });
+  return [ownerHex, solverHexes];
+}
+
+/**
+ * Parses one account as base58 (T...) or 20-byte hex with a 0x or 41 prefix, and
+ * returns its 0x hex form. Anything else, including the zero address, throws: a
+ * mistyped owner would freeze the solver set for good.
+ */
+function parseTronAccount(
+  tronWeb: TronWeb,
+  variable: string,
+  raw: string,
+): string {
+  const value = raw.trim();
+  const wellFormed =
+    /^T[1-9A-HJ-NP-Za-km-z]{33}$/.test(value) ||
+    /^(0x|41)[0-9a-fA-F]{40}$/.test(value);
+  if (!wellFormed || (value.startsWith("T") && !tronWeb.isAddress(value)))
+    throw new Error(`${variable}: not a Tron or 0x address: ${value}`);
+  const hex = tronAddressToHex(tronWeb, value);
+  if (!/^0x[0-9a-fA-F]{40}$/.test(hex) || BigInt(hex) === 0n)
+    throw new Error(
+      `${variable}: resolves to an invalid or zero address: ${value}`,
+    );
+  return hex;
+}
 
 async function loadTronArtifact(
   contractName: DeployStepName,
@@ -175,6 +240,32 @@ async function saveDeployments(
 
 // ── Main ───────────────────────────────────────────────────────────────────────
 
+/**
+ * IntentExecutorTron keeps solver authorizations in transient storage and has no
+ * storage fallback. Refuse to deploy it unless the chain has TLOAD/TSTORE enabled.
+ */
+async function requireTvmCancun(
+  rpcUrl: string,
+  headers: Record<string, string>,
+): Promise<void> {
+  const response = await fetch(`${rpcUrl}/wallet/getchainparameters`, {
+    headers,
+  });
+  if (!response.ok)
+    throw new Error(`getchainparameters failed: HTTP ${response.status}`);
+  const { chainParameter } = (await response.json()) as {
+    chainParameter: Array<{ key: string; value?: number }>;
+  };
+  const allowCancun = chainParameter.find(
+    (parameter) => parameter.key === "getAllowTvmCancun",
+  )?.value;
+  if (allowCancun !== 1)
+    throw new Error(
+      "IntentExecutorTron needs TVM Cancun (getAllowTvmCancun = 1); this chain lacks it",
+    );
+  consola.info("TVM Cancun enabled (getAllowTvmCancun = 1)");
+}
+
 async function main() {
   const {
     dryRun,
@@ -221,6 +312,14 @@ async function main() {
     balance: `${info.balance} TRX`,
   });
 
+  if (contractsToRun.includes("IntentExecutorTron"))
+    await requireTvmCancun(rpcUrl, headers);
+  // Resolve every constructor argument up front: a bad INTENT_EXECUTOR_* value must
+  // fail before the run deploys anything.
+  const params = new Map(
+    contractsToRun.map((name) => [name, constructorParams(name, network)]),
+  );
+
   const deployments = await loadDeployments();
   const results: Array<{
     contract: string;
@@ -232,9 +331,22 @@ async function main() {
 
     try {
       const artifact = await loadTronArtifact(contractName);
-      const result = await deployer.deployContract(artifact);
+      const result = await deployer.deployContract(
+        artifact,
+        params.get(contractName),
+      );
 
       results.push({ contract: contractName, result });
+      // The pre-3.0.0 executor is ungated and stays callable forever: keep its address
+      // on record for the migration instead of overwriting it.
+      const previous = deployments[contractName];
+      if (
+        contractName === "IntentExecutorTron" &&
+        previous &&
+        previous !== result.contractAddress &&
+        !deployments.IntentExecutorTronUngated
+      )
+        deployments.IntentExecutorTronUngated = previous;
       deployments[contractName] = result.contractAddress;
 
       consola.success(`${contractName} deployed:`);

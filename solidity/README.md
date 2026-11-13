@@ -385,20 +385,35 @@ $ forge coverage --ir-minimum --no-match-coverage "(script|test)" [--report lcov
 
 ### Deploy
 
-To deploy the script, provide RPC urls in `.env` in the format of: `RPC_URL_<name>`. The name does not matter but when used in the below script, the name is accessed through the `string[]` array.
+To deploy the script, provide RPC urls in `.env` in the format of: `RPC_URL_<name>`. The name does not matter but when used in the below script, the name is accessed through the `string[]` array. `run` also deploys the IntentExecutor, so it needs `INTENT_EXECUTOR_OWNER` and `INTENT_EXECUTOR_SOLVERS` (see below).
 
 ```shell
 $ forge script deploy --sig "run(string[])" "[<chains>]" --multi --verify --broadcast
 ```
 
-#### CATValidatorV2 on every Composer chain
+#### CATValidatorV2 or IntentExecutor on every Composer chain
 
-`script/deploy-validator-v2.sh` runs `runValidatorV2` on every chain Composer serves, one `forge script` process per chain, all in parallel. Every argument goes to `forge script`; without `--broadcast` forge only simulates. A keystore account gets one password prompt for all chains. Chains without an `RPC_URL_<NAME>` use the develop eRPC, so set `ERPC_SECRET`. Tempo uses the Tempo fork of forge (`FORGE_TEMPO`, default `~/.foundry-tempo/bin/forge`). The header of the script lists every option.
+`script/deploy-composer.sh` runs `runValidatorV2` (default) or, with `CONTRACT=IntentExecutor`, `runIntentExecutor` on every chain Composer serves, one `forge script` process per chain, all in parallel. Every argument goes to `forge script`; without `--broadcast` forge only simulates. A keystore account gets one password prompt for all chains. Chains without an `RPC_URL_<NAME>` use the develop eRPC, so set `ERPC_SECRET`. Tempo uses the Tempo fork of forge (`FORGE_TEMPO`, default `~/.foundry-tempo/bin/forge`). The header of the script lists every option.
 
 ```shell
-$ ERPC_SECRET=... ./script/deploy-validator-v2.sh --account deployer --broadcast
-$ CHAINS="pharos tempo" ERPC_SECRET=... ./script/deploy-validator-v2.sh --account deployer --broadcast
+$ ERPC_SECRET=... ./script/deploy-composer.sh --account deployer --broadcast
+$ CHAINS="pharos tempo" ERPC_SECRET=... ./script/deploy-composer.sh --account deployer --broadcast
+$ CONTRACT=IntentExecutor INTENT_EXECUTOR_OWNER=0x... INTENT_EXECUTOR_SOLVERS=0x...,0x... \
+    ERPC_SECRET=... ./script/deploy-composer.sh --account deployer --broadcast
 ```
+
+The IntentExecutor only runs a call that one of its solvers authorized. A solver calls `fill(validator, entryData)`: the executor authorizes one execution of the `execPayload` in `entryData`, calls the validator's `entry`, and reverts `CallNotConsumed` unless that `entry` spent the authorization, so a failed fill leaves nothing behind whatever batch the solver runs it in. The validator checks its constraint against its caller, so a constraint filled this way names the IntentExecutor as its executor. `INTENT_EXECUTOR_OWNER` manages the solver set; use a multisig. `INTENT_EXECUTOR_SOLVERS` lists the accounts that call `fill`. Both fold into the CREATE2 init code, so every chain must get the same owner and the same solver list in the same order to share one address. The executor keeps authorizations in transient storage, so the deploy reverts `ChainLacksCancun` on a chain without Cancun. A solver must be an account only its key controls: a permissionless forwarder as a solver (a validator's `CALL_PROXY`, Multicall3, the legacy IntentExecutor) lets anyone call `fill` with any payload. Neither the deploy script nor `setSolver` checks the solver, so review `INTENT_EXECUTOR_SOLVERS` before a deploy and watch the executor's `SolverSet` events.
+
+An ownership handover changes only the owner: every solver stays, and `isSolver` cannot be enumerated on-chain. The outgoing owner completes the handover and can add a solver in the same transaction, so once the incoming owner owns the executor, it rebuilds the solver set from the executor's `SolverSet` events and removes any solver it does not recognise with `setSolver(solver, false)`.
+
+The executor max-approves each `Approval` pair and leaves the allowance in place, so a later fill with the same pair skips the approve. The solver gate does not cover `transferFrom`: a spender that holds an allowance can pull whatever the executor holds at any time, even after the solver that approved it is removed. A fill moves its tokens in and out in one transaction, so only tokens left behind are exposed.
+
+Solvers follow two rules that the executor does not enforce:
+
+- Approve only audited spenders, and prefer immutable ones. A spender that can be upgraded, or that has a bug letting anyone call `transferFrom` through it, can pull the executor's tokens whenever it holds an allowance.
+- Keep the executor empty between transactions: list every token a fill can leave behind in `sweepTargets`, and use `executeAndSweepNative` whenever the fill can end with ETH.
+
+After removing a compromised solver with `setSolver(solver, false)`, a remaining solver lists every non-zero allowance of the executor (the tokens' `Approval` events with the executor as owner) and clears each one with a fill whose `calls` contain `token.approve(spender, 0)`.
 
 ## License Notice
 
