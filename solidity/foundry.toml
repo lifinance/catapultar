@@ -9,8 +9,10 @@ optimizer = true
 optimizer_runs = 100_000_000
 bytecode_hash = 'none'
 
-# sca-parity: read by its test; VC_REGEN_SCA_FIXTURE=true rewrites it. snapshots: read by deployV1_1.
+# test/vc/fixtures: hash-parity is read by HashParity.t.sol; sca-parity is read by its test and rewritten under
+# VC_REGEN_SCA_FIXTURE=true. snapshots: read by deployV1_1.
 fs_permissions = [
+    { access = "read", path = "test/vc/fixtures" },
     { access = "read-write", path = "test/vc/fixtures/sca-parity" },
     { access = "read", path = "snapshots" },
 ]

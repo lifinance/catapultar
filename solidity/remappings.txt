@@ -1,3 +1,4 @@
 forge-std/=lib/forge-std/
 solady/=lib/solady/
 stowaway/=lib/stowaway/
+tstorish/=lib/tstorish/

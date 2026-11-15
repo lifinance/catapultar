@@ -7,3 +7,6 @@
 [submodule "solidity/lib/solady"]
 	path = solidity/lib/solady
 	url = https://github.com/Vectorized/solady
+[submodule "solidity/lib/tstorish"]
+	path = solidity/lib/tstorish
+	url = https://github.com/ProjectOpenSea/tstorish

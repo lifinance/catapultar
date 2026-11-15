@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Asserts that the audited v1 validators still compile to the pinned creation
-# bytecode. CATValidatorV1_1 subclasses CATValidator, so v1 carries `virtual`
+# bytecode. CATValidatorV1_1 and CATValidatorV2 subclass CATValidator, so v1 carries `virtual`
 # hooks; this check proves those hooks (and any later v1 edit) leave the
 # deployed bytes, and therefore the CREATE2 address and audit status, unchanged.
 #
