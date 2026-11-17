@@ -31,7 +31,7 @@ context:
 Beneath both sit the pure protocol primitives (`src/protocol`) — encoders such as
 `callsDigest`, `constraintDigest`, `predictCloneAddress`, `factorySalt`,
 `buildOpData`, and the signature/owner codecs — plus the contract ABIs
-(`catapultarAbi`, `catapultarFactoryAbi`, `catValidatorAbi`, `catValidatorV2Abi`). Use these directly
+(`catapultarAbi`, `catapultarFactoryAbi`, `catValidatorAbi`, `catValidatorV1_1Abi`, `catValidatorV2Abi`). Use these directly
 to integrate without any of the classes.
 
 Dependency direction:
@@ -447,7 +447,7 @@ integrate without any of the classes:
 - Owners: `ownerToKeyArray`, `keyArrayToOwner`, `ownersEqual`, `ownerTypeToEnum`, `enumToOwnerType`, `keyTypeLength`.
 - Constraints: `constraintDigest`, `constraintTypedData`, `constraintDomain`; for `CATValidatorV2`, `constraintV2Digest`, `constraintV2TypedData`, `constraintV2Domain`, `ExecutionConstraintV2Typed`, the bindings `UNBOUND_EXECUTION` and `refundBinding`, and the commitment hashes `hashValidationProgram`, `hashValidationParams`.
 
-Contract ABIs are exported as `catapultarAbi`, `catapultarFactoryAbi`, `catValidatorAbi`, and `catValidatorV2Abi`; deployment addresses as `factories`, `templates`, and `cat_validator`.
+Contract ABIs are exported as `catapultarAbi`, `catapultarFactoryAbi`, `catValidatorAbi`, `catValidatorV1_1Abi`, and `catValidatorV2Abi`; deployment addresses as `factories`, `templates`, and `cat_validator`.
 
 ## Project Layout
 

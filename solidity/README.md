@@ -327,6 +327,10 @@ The signed `Outcome`s are validated after the external call: the executor must d
 
 Each outcome is pushed to its destination inside the settlement transaction, so the destination must accept the payment at that moment: a native destination must be payable, and the token must not be paused or blocklist the validator or the destination. An outcome token must also allow a single transfer of the validator's complete balance and must not charge the sender a fee on top of the transferred amount. A token with a per-transfer cap does not meet this: anyone can send that token to the validator until its balance exceeds the cap, and every settlement in that token then reverts. A failed push reverts the whole settlement, so the escrow keeps its funds, the nonce stays unspent, and the signer's refund constraint remains the recovery route.
 
+### CATValidatorV1_1
+
+[`CATValidatorV1_1`](./src/CATValidatorV1_1.sol) extends `CATValidator`, which gains three `virtual` hooks (`entry`, `_domainNameAndVersion`, `_call`); `script/check-v1-bytecode.sh` pins the base's bytecode, which is unchanged. Its nine-argument `entry` signs an `executionTarget` and a `payloadHash` into the constraint (zero means unconstrained) and publishes `pulled(token)`, the amount the running entry moved out of the signer, and `entryId()` for contracts called during the entry. Its EIP-712 domain version is `"1.1"`, so a v1 signature never verifies on it. `CATValidatorV1_1Tron` is the Tron variant. See [design/cat-validator-v1_1.md](./design/cat-validator-v1_1.md).
+
 ### CATValidatorV2: committed validation program
 
 `CATValidatorV2` subclasses `CATValidator` and adds one step after the outcome payment: it runs a validation program, signed into the constraint, on the LI.FI VirtualMachine. The program is the VirtualMachine's `runVM` command array, `VMCommand[]` (`uint8 op`, `bytes32 data`). The constraint commits `keccak256(abi.encode(commands))` (`validationProgramHash`) and `keccak256` of the concatenated 32-byte parameter words (`paramsHash`). Both hashes are derived on-chain from the `validationProgram` and `validationParams` calldata, so the 10-argument `entry` takes the program and params, never the hashes. An empty program commits `bytes32(0)` and settles exactly as v1 without calling the VirtualMachine.
@@ -373,14 +377,15 @@ $ VC_MAINNET_RPC_URL=https://... forge test --match-path 'test/vc/*'
 ```shell
 $ ./script/check-v1-bytecode.sh            # compare CATValidator and CATValidatorTron with the pin
 $ ./script/check-v1-bytecode.sh --update   # deliberate v1 change or toolchain bump only
+$ ./script/check-v1-1-bytecode.sh          # compare CATValidatorV1_1 and CATValidatorV1_1Tron with their pin
 ```
 
 ### Coverage
 
-`CATValidatorV2` needs the IR pipeline, so coverage runs with `--ir-minimum`.
+`CATValidatorV1_1` and `CATValidatorV2` need the IR pipeline, so coverage runs with `--ir-minimum`. The two excluded tests assert the optimized build's creation hash and gas.
 
 ```shell
-$ forge coverage --ir-minimum --no-match-coverage "(script|test)" [--report lcov]
+$ forge coverage --ir-minimum --no-match-coverage "(script|test)" --no-match-test "(test_reference_is_pinned|test_gas_entry_delta_base_to_v1_1)" [--report lcov]
 ```
 
 ### Deploy
@@ -389,6 +394,12 @@ To deploy the script, provide RPC urls in `.env` in the format of: `RPC_URL_<nam
 
 ```shell
 $ forge script deploy --sig "run(string[])" "[<chains>]" --multi --verify --broadcast
+```
+
+`CATValidatorV1_1` is deployed on its own with `deployV1_1`. It needs transient storage (EIP-1153) on the target chain; the script does not check for it, and on a chain without it the broadcast deployment reverts.
+
+```shell
+$ forge script deployV1_1 --sig "run(string[])" "[<chains>]" --multi --verify --broadcast
 ```
 
 #### CATValidatorV2 on every Composer chain
