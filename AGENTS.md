@@ -51,3 +51,7 @@ Keep changes scoped to the relevant package; avoid editing generated artifacts (
   - Affected package(s): `solidity`, `typescript`, or both
   - Test evidence (commands run and result)
   - Linked issue/context when applicable
+
+## Ownership
+
+- Squad: Intents + Solver. Reviewer: Alexander (`@reednaa`).
