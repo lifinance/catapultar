@@ -28,6 +28,7 @@ import { token1, token2 } from "../../test/fixtures";
 import { MOCKERC20_abi } from "../abi/mockerc20";
 import { CAT_VALIDATOR_ABI } from "../abi/CATValidator";
 import { CAT_VALIDATOR_V2_ABI } from "../abi/CATValidatorV2";
+import { INTENT_EXECUTOR_ABI } from "../abi/IntentExecutor";
 import CATAPULTAR_ABI from "../abi/catapultar";
 import {
   constraintV2Digest,
@@ -167,6 +168,19 @@ describe("ConstrainedAssetTransaction v2", () => {
     test.skipIf(!existsSync(artifactPath))("matches the forge artifact", () => {
       const artifact = JSON.parse(readFileSync(artifactPath, "utf8"));
       expect(CAT_VALIDATOR_V2_ABI).toEqual(artifact.abi);
+    });
+  });
+
+  describe("IntentExecutor ABI", () => {
+    // Guards the mirrored ABI against drifting from the contract, like the
+    // CATValidatorV2 ABI. Requires `forge build` output in solidity/out.
+    const artifactPath = join(
+      import.meta.dir,
+      "../../../solidity/out/IntentExecutor.sol/IntentExecutor.json",
+    );
+    test.skipIf(!existsSync(artifactPath))("matches the forge artifact", () => {
+      const artifact = JSON.parse(readFileSync(artifactPath, "utf8"));
+      expect(INTENT_EXECUTOR_ABI).toEqual(artifact.abi);
     });
   });
 
@@ -1133,6 +1147,142 @@ describe("ConstrainedAssetTransaction v2", () => {
         expect(await balanceOf(token1, account.address)).toBe(0n);
       },
     );
+
+    // The constraint names an IntentExecutor deployed from the forge artifact,
+    // with the wallet as its solver, so the entry call must go through fill.
+    describe("through an IntentExecutor", () => {
+      const executorArtifactPath = join(
+        import.meta.dir,
+        "../../../solidity/out/IntentExecutor.sol/IntentExecutor.json",
+      );
+      const hasExecutorArtifact =
+        hasArtifact && existsSync(executorArtifactPath);
+      let intentExecutor: Hex;
+
+      beforeAll(async () => {
+        if (!hasExecutorArtifact) return;
+        const artifact = JSON.parse(readFileSync(executorArtifactPath, "utf8"));
+        const hash = await executor.deployContract({
+          abi: INTENT_EXECUTOR_ABI,
+          bytecode: artifact.bytecode.object,
+          args: [wallet.address, [wallet.address]],
+        });
+        const receipt = await publicClient.waitForTransactionReceipt({ hash });
+        intentExecutor = getAddress(receipt.contractAddress!);
+      });
+
+      /**
+       * Deploy a funded account whose constraint names the IntentExecutor, and
+       * the executeAndSweep payload that mints the outcome to the validator and
+       * sweeps the spent token1 to the wallet.
+       */
+      async function deployAccount(recipient: Hex) {
+        const amount1 = 10n ** 18n;
+        const amount2 = 10n ** 6n;
+        const executionPayload = encodeFunctionData({
+          abi: INTENT_EXECUTOR_ABI,
+          functionName: "executeAndSweep",
+          args: [
+            [],
+            [
+              {
+                target: token2,
+                allowFailure: false,
+                callData: encodeFunctionData({
+                  abi: MOCKERC20_abi,
+                  functionName: "mint",
+                  args: [validator, amount2],
+                }),
+              },
+            ],
+            [{ token: token1, recipient: wallet.address }],
+          ],
+        });
+        const catx = new ConstrainedAssetTransaction({
+          executor: intentExecutor,
+          chainId: anvil.id,
+        })
+          .addAllowances({ token: token1, amount: amount1 })
+          .addOutcomes({
+            token: token2,
+            amount: amount2,
+            destination: recipient,
+          })
+          .setValidationCommitment({
+            validationProgramHash: hashValidationProgram([]),
+            paramsHash: hashValidationParams([]),
+          });
+        const account = catx
+          .asCatapultarAllowanceTransaction({ refund: recipient, validator })
+          .asAccount({
+            salt: random(32),
+            owner: { type: "ecdsa", address: recipient },
+          });
+        await send({
+          to: token1,
+          data: encodeFunctionData({
+            abi: MOCKERC20_abi,
+            functionName: "mint",
+            args: [account.address, amount1],
+          }),
+        });
+        await send(account.deployCall);
+        await send(account.actionCall);
+        return { catx, account, executionPayload, amount1, amount2 };
+      }
+
+      it.skipIf(!hasExecutorArtifact)(
+        "fills only through fill and delivers the outcome",
+        async () => {
+          const recipient = random(20);
+          const { catx, account, executionPayload, amount1, amount2 } =
+            await deployAccount(recipient);
+          const executeCall = catx.asExecuteCall({
+            address: account.address,
+            executionTarget: intentExecutor,
+            executionPayload,
+            spends: [amount1],
+            validator,
+          });
+          // The constraint names the IntentExecutor, so the solver's own entry
+          // call fails the signature check.
+          await expect(
+            publicClient.simulateContract({
+              account: wallet.address,
+              address: validator,
+              abi: CAT_VALIDATOR_V2_ABI,
+              functionName: "entry",
+              args: entryArgs(executeCall),
+            }),
+          ).rejects.toThrow(/BadSignature/);
+
+          const swept = await balanceOf(token1, wallet.address);
+          await send(catx.asFillCall(executeCall));
+          expect(await balanceOf(token2, recipient)).toBe(amount2);
+          expect(await balanceOf(token1, account.address)).toBe(0n);
+          expect(await balanceOf(token1, wallet.address)).toBe(swept + amount1);
+        },
+      );
+
+      it.skipIf(!hasExecutorArtifact)(
+        "refunds through fill, whose empty payload runs nothing",
+        async () => {
+          const recipient = random(20);
+          const { catx, account, amount1 } = await deployAccount(recipient);
+          await send(
+            catx.asFillCall(
+              catx.asRefundCall({
+                address: account.address,
+                refund: recipient,
+                validator,
+              }),
+            ),
+          );
+          expect(await balanceOf(token1, recipient)).toBe(amount1);
+          expect(await balanceOf(token1, account.address)).toBe(0n);
+        },
+      );
+    });
 
     it.skipIf(!hasArtifact)(
       "the refund leaves no balance on the validator",
