@@ -426,6 +426,18 @@ Solvers follow two rules that the executor does not enforce:
 
 After removing a compromised solver with `setSolver(solver, false)`, a remaining solver lists every non-zero allowance of the executor (the tokens' `Approval` events with the executor as owner) and clears each one with a fill whose `calls` contain `token.approve(spender, 0)`.
 
+#### Canonical deployments
+
+Each contract below has the same address on Ethereum (1), Optimism (10), BSC (56), Polygon (137), HyperEVM (999), Pharos (1672), Tempo (4217), Robinhood (4663), Arc (5042), Base (8453), Plasma (9745), Arbitrum (42161), and Avalanche (43114). Both IntentExecutors were built from `74df47c`.
+
+| Contract             | Address                                      | Constructor `owner` | Constructor `solvers` | Solvers (on-chain, Ethereum, 2026-11-18) |
+| -------------------- | -------------------------------------------- | ------------------- | --------------------- | ---------------------------------------- |
+| IntentExecutor, dev  | `0xD6552aF70ffa577166d98d120137D4Ad4d8d821d` | `0x7Fb7C22d4a4Ff9DCff0eaa8B534cDF98488b4aa3` | `[0x7Fb7C22d4a4Ff9DCff0eaa8B534cDF98488b4aa3]` | `0x7Fb7C22d4a4Ff9DCff0eaa8B534cDF98488b4aa3`, `0xA84b6BE6Af0750916074f1e43E0b94358681dCC6` |
+| IntentExecutor, prod | `0xd0D4d0c8a03029cb434868CaDc81c9500A7f0468` | `0x7Fb7C22d4a4Ff9DCff0eaa8B534cDF98488b4aa3` | `[0xc6b9743624Faa056eDB7C57B35F2937155C0e425]` | `0xc6b9743624Faa056eDB7C57B35F2937155C0e425` |
+| CATValidatorV2       | `0x96942258dEaDfD17820C8BEf19D7CbABC1A491A8` | —                   | —                     | —                                        |
+
+The address depends on the constructor arguments, not on the current owner or solver set. To put an IntentExecutor on a new chain at the same address, deploy it with the constructor `owner` and `solvers` above. Then repeat the later changes on that chain: the `setSolver` calls that produced the current solver set, and any ownership handover. The current solvers come from the executor's `SolverSet` events, confirmed with `isSolver`.
+
 ## License Notice
 
 This project is licensed under the **[GNU Lesser General Public License v3.0 only (LGPL-3.0-only)](/LICENSE)**.
