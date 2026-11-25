@@ -76,6 +76,7 @@ export { default as catapultarFactoryAbi } from "./abi/catapultarFactory";
 export { CAT_VALIDATOR_ABI as catValidatorAbi } from "./abi/CATValidator";
 export { CAT_VALIDATOR_V1_1_ABI as catValidatorV1_1Abi } from "./abi/CATValidatorV1_1";
 export { CAT_VALIDATOR_V2_ABI as catValidatorV2Abi } from "./abi/CATValidatorV2";
+export { INTENT_EXECUTOR_ABI as intentExecutorAbi } from "./abi/IntentExecutor";
 
 // --- Deployment addresses --- //
 
