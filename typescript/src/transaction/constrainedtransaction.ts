@@ -58,6 +58,13 @@ export type CatExecuteOptions = {
    * Must hash to the commitment's `paramsHash`. Default empty.
    */
   validationParams?: readonly `0x${string}`[];
+  /**
+   * Signature over the execute constraint by the account that is spent from.
+   * Default `"0x"`: a smart account approved the constraint digest in its own
+   * storage. An externally owned account approves nothing on chain, so its
+   * signature travels here.
+   */
+  signature?: `0x${string}`;
 };
 
 /** Options for {@link ConstrainedAssetTransaction.asRefundCall}. */
@@ -420,6 +427,7 @@ export class ConstrainedAssetTransaction {
       validationProgram: readonly ValidationCommand[];
       validationParams: readonly `0x${string}`[];
     };
+    signature: `0x${string}`;
   }): Call {
     const { validation } = opt;
     return {
@@ -439,7 +447,7 @@ export class ConstrainedAssetTransaction {
               validation.binding,
               validation.validationProgram,
               validation.validationParams,
-              "0x",
+              opt.signature,
             ],
           })
         : encodeFunctionData({
@@ -452,7 +460,7 @@ export class ConstrainedAssetTransaction {
               this.constraintNonce,
               opt.spends,
               opt.outcomes,
-              "0x",
+              opt.signature,
             ],
           }),
     };
@@ -512,6 +520,7 @@ export class ConstrainedAssetTransaction {
         validationProgram,
         validationParams,
       },
+      signature: opt.signature ?? "0x",
     });
   }
 
@@ -564,6 +573,8 @@ export class ConstrainedAssetTransaction {
           validationProgram: [],
           validationParams: [],
         },
+        // A refund always spends from the smart account.
+        signature: "0x",
       });
     }
 
@@ -579,6 +590,8 @@ export class ConstrainedAssetTransaction {
         spend: a.amount,
       })),
       outcomes: this.refundOutcomes(opt.refund),
+      // A refund always spends from the smart account.
+      signature: "0x",
     });
   }
 
