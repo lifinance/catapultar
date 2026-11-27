@@ -336,6 +336,28 @@ describe("ConstrainedAssetTransaction v2", () => {
       ]);
     });
 
+    it("passes the owner signature as the last v2 entry argument", () => {
+      const opts = {
+        ...execute,
+        validationProgram: PROGRAM,
+        validationParams: PARAMS,
+      };
+      const signature = `0x${"ab".repeat(64)}1b` as const;
+
+      const unsigned = decodeFunctionData({
+        abi: CAT_VALIDATOR_V2_ABI,
+        data: v2Tx().asExecuteCall(opts).data,
+      }).args;
+      const signed = decodeFunctionData({
+        abi: CAT_VALIDATOR_V2_ABI,
+        data: v2Tx().asExecuteCall({ ...opts, signature }).data,
+      }).args;
+
+      expect(unsigned.at(-1)).toBe("0x");
+      expect(signed.at(-1)).toBe(signature);
+      expect(signed.slice(0, -1)).toEqual(unsigned.slice(0, -1));
+    });
+
     it("approves a v2 digest that differs from the v1 builder's", () => {
       const v2Digests = approvedDigests(
         wethTx()

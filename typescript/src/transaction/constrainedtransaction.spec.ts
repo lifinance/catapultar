@@ -99,6 +99,36 @@ describe("ConstrainedAssetTransaction", () => {
       // The validator must actually flow into the digest/address derivation.
       expect(customBundle.address).not.toBe(defaultBundle.address);
     });
+
+    it("asExecuteCall passes the owner signature as the last entry argument", () => {
+      const amount = 10n ** 18n;
+      const catx = new ConstrainedAssetTransaction({
+        executor: zeroAddress,
+        chainId: 31337,
+      });
+      catx.addAllowances({ token: token1, amount });
+      catx.addOutcomes({ token: token2, amount, destination: zeroAddress });
+      const execute = {
+        address: random(20),
+        executionTarget: token2,
+        executionPayload: "0x" as const,
+        spends: [amount],
+      };
+      const signature = `0x${"ab".repeat(64)}1b` as const;
+
+      const unsigned = decodeFunctionData({
+        abi: CAT_VALIDATOR_ABI,
+        data: catx.asExecuteCall(execute).data,
+      }).args;
+      const signed = decodeFunctionData({
+        abi: CAT_VALIDATOR_ABI,
+        data: catx.asExecuteCall({ ...execute, signature }).data,
+      }).args;
+
+      expect(unsigned.at(-1)).toBe("0x");
+      expect(signed.at(-1)).toBe(signature);
+      expect(signed.slice(0, -1)).toEqual(unsigned.slice(0, -1));
+    });
   });
   describe("integration", () => {
     const publicClient = createPublicClient({
